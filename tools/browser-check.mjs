@@ -34,7 +34,9 @@ try {
     if(!port)await sleep(100);
   }
   const pages=await fetch(`http://127.0.0.1:${port}/json/list`).then(r=>r.json());
-  socket=new WebSocket(pages[0].webSocketDebuggerUrl);
+  const target=pages.find(page=>page.type==='page');
+  if(!target)throw new Error('Chrome did not create a browser page');
+  socket=new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});
   let id=0;const pending=new Map(),exceptions=[];
   socket.addEventListener('message',({data})=>{
@@ -51,7 +53,8 @@ try {
   await send('Page.enable');await send('Runtime.enable');
   const [width,height]=option('--viewport','1280x960').split('x').map(Number);
   await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<680});
-  await send('Page.navigate',{url:new URL(page,base+'/').href});
+  const navigation=await send('Page.navigate',{url:new URL(page,base+'/').href});
+  if(navigation.errorText)throw new Error(`Browser navigation failed: ${navigation.errorText}`);
   await sleep(250);
   const script=option('--script',null);
   if(script)console.log(JSON.stringify(await evaluate(await readFile(script,'utf8')),null,2));
@@ -62,7 +65,10 @@ try {
       if(!state?.result)await sleep(200);
     } while(!state?.result && Date.now()-start<timeout);
     console.log(JSON.stringify(state,null,2));
-    if(state?.result!=='pass')throw new Error(state?.result==='fail'?'Browser conformance failed':'Browser conformance timed out');
+    if(state?.result!=='pass') {
+      console.error(JSON.stringify(await evaluate('({url:location.href,ready:document.readyState,body:document.body?.innerText?.slice(0,3000)})'),null,2));
+      throw new Error(state?.result==='fail'?'Browser conformance failed':'Browser conformance timed out');
+    }
   }
   const screenshot=option('--screenshot',null);
   if(screenshot){const {data}=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});await writeFile(screenshot,Buffer.from(data,'base64'));console.log(`Screenshot: ${screenshot}`);}
@@ -70,5 +76,5 @@ try {
 } finally {
   socket?.close();chrome.kill();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
   if(chrome.exitCode==null)await new Promise(resolve=>{chrome.once('exit',resolve);setTimeout(resolve,3000);});
-  await rm(profile,{recursive:true,force:true});
+  await rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
 }
