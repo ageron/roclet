@@ -51,6 +51,10 @@ try {
     return result.result?.value;
   };
   await send('Page.enable');await send('Runtime.enable');
+  // Native focus events are required by editor and iframe UI contracts.
+  // Headless Chrome otherwise changes activeElement in a background document
+  // without dispatching those events.
+  await send('Page.bringToFront');
   const [width,height]=option('--viewport','1280x960').split('x').map(Number);
   await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width<680});
   const navigation=await send('Page.navigate',{url:new URL(page,base+'/').href});
