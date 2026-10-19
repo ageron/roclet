@@ -7,39 +7,26 @@ pub fn build(b: *std.Build) void {
         std.debug.panic("Roclet requires Zig {s}; found {s}", .{ zig_version, @import("builtin").zig_version_string });
     }
     const root = b.root.joinString(b.allocator, ".") catch @panic("OOM");
-    const source = b.option([]const u8, "roc-source", "Roc checkout containing the pinned compiler commit");
-    const jobs = b.option(u32, "compiler-jobs", "Maximum concurrent compiler build jobs") orelse 2;
-    const tool = b.addExecutable(.{ .name = "roclet-build", .root_module = b.createModule(.{
-        .root_source_file = b.path("tools/build-tool.zig"),
-        .target = b.graph.host,
-        .optimize = .small,
-    }) });
-    const prepare = b.addRunArtifact(tool);
-    prepare.addArgs(&.{ if (source != null) "prepare" else "check", root });
-    prepare.has_side_effects = true;
-    var ready: *std.Build.Step = &prepare.step;
-    if (source) |checkout| {
-        prepare.addArg(if (std.fs.path.isAbsolute(checkout)) checkout else b.root.joinString(b.allocator, checkout) catch @panic("OOM"));
-        const compiler = b.addSystemCommand(&.{ b.graph.zig_exe, "build", "roclet-adapter", b.fmt("-Doptimize={s}", .{lock.value.object.get("nativeOptimize").?.string}), b.fmt("-j{d}", .{jobs}) });
-        compiler.setCwd(b.path(".toolchain/compiler"));
-        compiler.step.dependOn(&prepare.step);
-        compiler.has_side_effects = true;
-        const publish = b.addRunArtifact(tool);
-        publish.addArgs(&.{ "publish", root });
-        publish.step.dependOn(&compiler.step);
-        publish.has_side_effects = true;
-        ready = &publish.step;
-    }
-    const adapter_step = b.step("adapter", "Build the pinned adapter with -Droc-source, or verify existing artifacts");
-    adapter_step.dependOn(ready);
-    const cli = b.addInstallBinFile(b.path("artifacts/roclet-native"), "roclet");
-    cli.step.dependOn(ready);
+    _ = b.option([]const u8, "roc-source", "Deprecated: use the roc path dependency in build.zig.zon");
+    _ = b.option(u32, "compiler-jobs", "Deprecated: use zig build -j");
+    const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode (default ReleaseFast)") orelse .fast;
+    const roc = b.dependency("roc", .{ .target = b.graph.host, .optimize = optimize });
+    const native = adapter(b, roc, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
+    const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
+    const wasm = adapter(b, roc, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
+    wasm.entry = .disabled;
+    wasm.rdynamic = true;
+    wasm.stack_size = 8 * 1024 * 1024;
+    const publish = b.addSystemCommand(&.{ b.graph.zig_exe, "run", "tools/build-tool.zig", "--", "publish", root });
+    publish.addFileArg(native.getEmittedBin());
+    publish.addFileArg(wasm.getEmittedBin());
+    publish.has_side_effects = true;
+    const ready = &publish.step;
+    b.step("adapter", "Build native and browser compiler workspace engines").dependOn(ready);
+    const cli = b.addInstallArtifact(native, .{ .dest_sub_path = "roclet" });
     b.getInstallStep().dependOn(&cli.step);
-    const run = std.Build.Step.Run.create(b, "run Roclet");
-    run.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
-    run.step.dependOn(&cli.step);
+    const run = b.addRunArtifact(native);
     run.addPassthruArgs();
-    run.has_side_effects = true;
     b.step("run", "Run the native CLI; arguments follow --").dependOn(&run.step);
 
     const server = b.addExecutable(.{ .name = "roclet-serve", .root_module = b.createModule(.{
@@ -71,7 +58,7 @@ pub fn build(b: *std.Build) void {
     b.step("package", "Package the verified offline Roclet and host-platform headless runner").dependOn(&package.step);
     serve.step.dependOn(&offline.step);
 
-    const unit_step = b.step("test-unit", "Test the snapshot protocol and compiler-overlay safeguards");
+    const unit_step = b.step("test-unit", "Test the snapshot protocol and host utilities");
     inline for (.{ "compiler-adapter/snapshot.zig", "tools/build-tool.zig", "tools/serve.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
@@ -113,4 +100,20 @@ pub fn build(b: *std.Build) void {
     m4_tests.has_side_effects = true;
     b.step("test-m4", "Check selective evaluation against full recomputation").dependOn(&m4_tests.step);
     test_step.dependOn(&m4_tests.step);
+}
+
+fn adapter(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, name: []const u8, root: []const u8) *std.Build.Step.Compile {
+    const exe = b.addExecutable(.{ .name = name, .root_module = b.createModule(.{
+        .root_source_file = b.path(root),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = target.result.os.tag != .freestanding,
+    }) });
+    inline for (.{ "compile", "lir", "eval", "check", "base", "ctx", "builtins", "roc_target", "build_options", "can", "collections", "reporting", "parse", "unbundle" }) |module| exe.root_module.addImport(module, roc.module(module));
+    exe.root_module.addImport("compiled_builtins", roc.module("eval").import_table.get("compiled_builtins").?);
+    exe.root_module.addCSourceFile(.{ .file = b.path("vendor/md4c/md4c.c"), .flags = &.{ "-std=c99", "-O2" } });
+    exe.root_module.addIncludePath(b.path("vendor/md4c"));
+    exe.root_module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("library/Display.roc") });
+    exe.root_module.addAnonymousImport("Document.roc", .{ .root_source_file = b.path("core/Document.roc") });
+    return exe;
 }

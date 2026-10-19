@@ -2,9 +2,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cwd = std.Io.Dir.cwd();
-const inputs = [_][]const u8{ "build.zig", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/snapshot.zig", "compiler-adapter/overlay.json", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "core/Document.roc", "library/Display.roc", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
+const inputs = [_][]const u8{ "build.zig", "build.zig.zon", "compiler-adapter/engine.zig", "compiler-adapter/workspace.zig", "compiler-adapter/platform.zig", "compiler-adapter/platform/main.roc", "compiler-adapter/platform/Echo.roc", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/snapshot.zig", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "compiler-adapter/document_frontend.zig", "core/Document.roc", "library/Display.roc", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
 const Lock = struct { protocol: u32, compilerRepository: []const u8, compilerCommit: []const u8, zigVersion: []const u8, nativeOptimize: []const u8, wasmOptimize: []const u8 };
-const Patch = struct { path: []const u8, before: []const u8, after: []const u8 };
 fn path(gpa: Allocator, root: []const u8, relative: []const u8) ![]const u8 {
     return std.fs.path.join(gpa, &.{ root, relative });
 }
@@ -23,82 +22,11 @@ fn writeJson(gpa: Allocator, io: std.Io, file: []const u8, value: anytype) !void
     try out.writer.writeByte('\n');
     try cwd.writeFile(io, .{ .sub_path = file, .data = out.written() });
 }
-fn command(io: std.Io, argv: []const []const u8) !void {
-    var child = try std.process.spawn(io, .{ .argv = argv });
-    const term = try child.wait(io);
-    if (term != .exited or term.exited != 0) return error.CommandFailed;
-}
-fn fingerprint(gpa: Allocator, io: std.Io, root: []const u8) ![64]u8 {
-    var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    for (inputs) |name| {
-        hash.update(name);
-        const bytes = try read(gpa, io, try path(gpa, root, name));
-        hash.update(&digest(bytes));
-    }
-    var result: [32]u8 = undefined;
-    hash.final(&result);
-    return std.fmt.bytesToHex(result, .lower);
-}
-fn replaceOnce(gpa: Allocator, source: []const u8, before: []const u8, after: []const u8) ![]u8 {
-    if (before.len == 0) return error.EmptyPatch;
-    const at = std.mem.find(u8, source, before) orelse return error.CompilerSourceDrift;
-    if (std.mem.find(u8, source[at + before.len ..], before) != null) return error.AmbiguousCompilerPatch;
-    return std.mem.concat(gpa, u8, &.{ source[0..at], after, source[at + before.len ..] });
-}
-fn prepare(gpa: Allocator, io: std.Io, root: []const u8, checkout: []const u8, lock: Lock) !void {
-    const source = try path(gpa, root, ".toolchain/compiler");
-    const stamp = try path(gpa, source, ".roclet-inputs");
-    const key = try fingerprint(gpa, io, root);
-    const old = read(gpa, io, stamp) catch "";
-    if (std.mem.eql(u8, old, &key)) {
-        try std.Io.File.stderr().writeStreamingAll(io, "Compiler overlay unchanged; reusing prepared source and build cache.\n");
-        return;
-    }
-    const staging = try path(gpa, root, ".toolchain/preparing");
-    try cwd.deleteTree(io, staging);
-    try cwd.createDirPath(io, staging);
-    defer cwd.deleteTree(io, staging) catch {};
-    const archive = try path(gpa, root, ".toolchain/compiler.tar");
-    defer cwd.deleteFile(io, archive) catch {};
-    try command(io, &.{ "git", "-C", checkout, "archive", "--format=tar", "-o", archive, lock.compilerCommit });
-    try command(io, &.{ "tar", "-xf", archive, "-C", staging });
-    const overlay = try read(gpa, io, try path(gpa, root, "compiler-adapter/overlay.json"));
-    const patches = try std.json.parseFromSliceLeaky([]const Patch, gpa, overlay, .{});
-    for (patches) |patch| {
-        const file = try path(gpa, staging, patch.path);
-        const original = try read(gpa, io, file);
-        const edited = replaceOnce(gpa, original, patch.before, patch.after) catch |err| {
-            std.debug.print("Compiler overlay failed in {s}: {s}\n", .{ patch.path, @errorName(err) });
-            return err;
-        };
-        try cwd.writeFile(io, .{ .sub_path = file, .data = edited });
-    }
-    const copies = .{
-        .{ "bridge.zig", "roclet.zig" }, .{ "native.zig", "roclet_native.zig" }, .{ "snapshot.zig", "roclet_snapshot.zig" }, .{ "syntax.zig", "roclet_syntax.zig" }, .{ "document.zig", "roclet_document.zig" },
-    };
-    inline for (copies) |copy| try cwd.copyFile(try path(gpa, root, "compiler-adapter/" ++ copy[0]), cwd, try path(gpa, staging, "src/echo_platform/" ++ copy[1]), io, .{});
-    try cwd.copyFile(try path(gpa, root, "core/Document.roc"), cwd, try path(gpa, staging, "src/echo_platform/Document.roc"), io, .{});
-    try cwd.copyFile(try path(gpa, root, "library/Display.roc"), cwd, try path(gpa, staging, "src/echo_platform/Display.roc"), io, .{});
-    inline for (.{ "md4c.c", "md4c.h", "roclet-md.h" }) |file| try cwd.copyFile(try path(gpa, root, "vendor/md4c/" ++ file), cwd, try path(gpa, staging, "src/echo_platform/" ++ file), io, .{});
-    // Preserve downloaded packages and compiler caches when updating the overlay.
-    for ([_][]const u8{ ".zig-cache", "zig-pkg" }) |cache| {
-        cwd.rename(try path(gpa, source, cache), cwd, try path(gpa, staging, cache), io) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => return err,
-        };
-    }
-    try cwd.writeFile(io, .{ .sub_path = try path(gpa, staging, ".roclet-inputs"), .data = &key });
-    try cwd.deleteTree(io, source);
-    try cwd.rename(staging, cwd, source, io);
-    try std.Io.File.stderr().writeStreamingAll(io, "Prepared pinned compiler with exact-match Roclet overlay.\n");
-}
-fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock) !void {
-    const prepared = try read(gpa, io, try path(gpa, root, ".toolchain/compiler/.roclet-inputs"));
-    if (!std.mem.eql(u8, prepared, &try fingerprint(gpa, io, root))) return error.InputsChangedDuringBuild;
+fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: []const []const u8) !void {
     try cwd.createDirPath(io, try path(gpa, root, "artifacts"));
-    const native_source = ".toolchain/compiler/zig-out/bin/echo_native" ++ comptime @import("builtin").target.exeFileExt();
-    try cwd.copyFile(try path(gpa, root, native_source), cwd, try path(gpa, root, "artifacts/roclet-native"), io, .{});
-    try cwd.copyFile(try path(gpa, root, ".toolchain/compiler/zig-out/lib/echo/echo.wasm"), cwd, try path(gpa, root, "artifacts/roclet.wasm"), io, .{});
+    if (binaries.len != 2) return error.InvalidArguments;
+    try cwd.copyFile(binaries[0], cwd, try path(gpa, root, "artifacts/roclet-native"), io, .{});
+    try cwd.copyFile(binaries[1], cwd, try path(gpa, root, "artifacts/roclet.wasm"), io, .{});
     var artifacts: std.json.ObjectMap = .empty;
     for ([_][]const u8{ "roclet-native", "roclet.wasm" }) |name| {
         const bytes = try read(gpa, io, try path(gpa, root, try std.fmt.allocPrint(gpa, "artifacts/{s}", .{name})));
@@ -146,15 +74,7 @@ pub fn main(init: std.process.Init) !void {
     if (args.len < 3) return error.InvalidArguments;
     const root = args[2];
     const lock = try std.json.parseFromSliceLeaky(Lock, gpa, try read(gpa, init.io, try path(gpa, root, "compiler.lock.json")), .{});
-    if (std.mem.eql(u8, args[1], "prepare") and args.len == 4) return prepare(gpa, init.io, root, args[3], lock);
-    if (std.mem.eql(u8, args[1], "publish")) return publish(gpa, init.io, root, lock);
+    if (std.mem.eql(u8, args[1], "publish")) return publish(gpa, init.io, root, lock, args[3..]);
     if (std.mem.eql(u8, args[1], "check")) return check(gpa, init.io, root);
     return error.InvalidArguments;
-}
-test "overlay rejects missing and ambiguous source anchors" {
-    try std.testing.expectError(error.CompilerSourceDrift, replaceOnce(std.testing.allocator, "abc", "d", "x"));
-    try std.testing.expectError(error.AmbiguousCompilerPatch, replaceOnce(std.testing.allocator, "abcabc", "abc", "x"));
-    const result = try replaceOnce(std.testing.allocator, "before target after", "target", "replacement");
-    defer std.testing.allocator.free(result);
-    try std.testing.expectEqualStrings("before replacement after", result);
 }

@@ -1,0 +1,8 @@
+.{
+    .name = .roclet,
+    .version = "0.1.0",
+    .fingerprint = 0xcbf6ad9bf702c248,
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{ .roc = .{ .path = "../roc-roclet-embedding" } },
+    .paths = .{ "" },
+}

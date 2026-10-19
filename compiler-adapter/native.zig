@@ -1,6 +1,6 @@
 //! Filesystem and process host. All document policy is shared with WASM.
 const std = @import("std");
-const bridge = @import("roclet.zig");
+const bridge = @import("bridge.zig");
 pub const std_options = bridge.std_options;
 const usage =
     \\Usage: roclet [run] FILE.roc|FILE.md|snapshot.json

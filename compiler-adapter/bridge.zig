@@ -1,14 +1,14 @@
 //! Roclet M0 whole-module bridge. Built unchanged for native and wasm32.
 const std = @import("std");
 const builtin = @import("builtin");
-const runner = @import("runner.zig");
-const platform = @import("echo_platform");
+const runner = @import("engine.zig");
+const platform = @import("platform.zig");
 const can = @import("can");
 const collections = @import("collections");
 const reporting = @import("reporting");
-const WasmFilesystem = @import("WasmFilesystem.zig");
+const Workspace = @import("workspace.zig");
 const compiled_builtins = @import("compiled_builtins");
-pub const roc_compressed_builtins = if (builtin.cpu.arch == .wasm32) @import("compressed_builtins") else void;
+
 const is_wasm = builtin.cpu.arch == .wasm32;
 const gpa = if (is_wasm) std.heap.wasm_allocator else std.heap.page_allocator;
 pub const std_options: std.Options = .{ .logFn = quietLog };
@@ -22,6 +22,8 @@ const Request = struct {
     rich_output: bool = false,
     args: []const []const u8 = &.{},
     modules: []const runner.ExtraFile = &.{},
+    app_header: []const u8 = "",
+    files: []const struct { path: []const u8, source: []const u8 } = &.{},
 };
 const Region = struct { start: u32, end: u32 };
 const Definition = struct {
@@ -136,13 +138,13 @@ fn analyze(env: *can.ModuleEnv, prefix: u32) void {
 }
 fn analyzeFallible(env: *can.ModuleEnv, prefix: u32) !void {
     const defs = env.store.sliceDefs(env.all_defs);
-    var patterns = collections.DenseMap(can.CIR.Pattern.Idx, can.CIR.Def.Idx).init(arena);
+    var patterns: std.AutoHashMapUnmanaged(can.CIR.Pattern.Idx, can.CIR.Def.Idx) = .{};
     var binders: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
     var binder_stack: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
     for (defs) |idx| {
         binders.clearRetainingCapacity();
         try can.DependencyGraph.appendPatternBinders(env, env.store.getDef(idx).pattern, &binders, &binder_stack, arena);
-        for (binders.items) |binder| try patterns.put(binder, idx);
+        for (binders.items) |binder| try patterns.put(arena, binder, idx);
         const d = env.store.getDef(idx);
         const r = env.store.getExprRegion(d.expr);
         if (r.start.offset >= prefix and r.end.offset <= prefix + user_bytes and env.store.getPattern(d.pattern) != .assign) response.dependency_scope = "module";
@@ -236,17 +238,20 @@ fn serialize() ![]u8 {
         .diagnostics = response.diagnostics.items,
         .events = response.events.items,
         .failure = response.failure,
+        .packagesRequired = Workspace.global.required.items,
+        .workspaceCache = runner.last_cache_stats,
     }, .{}, &writer.writer);
     return writer.toOwnedSlice();
 }
 pub fn process(bytes: []const u8) ![]u8 {
+    Workspace.global.clearRequired();
     const probe = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch return processSource(bytes);
     defer probe.deinit();
     if (probe.value == .object and probe.value.object.contains("operation")) {
-        return @import("roclet_document.zig").process(gpa, bytes, processSource, processCore);
+        return processDocument(bytes, probe.value);
     }
     if (probe.value == .object and probe.value.object.contains("cells")) {
-        return @import("roclet_snapshot.zig").evaluate(gpa, bytes, processSource);
+        return @import("snapshot.zig").evaluate(gpa, bytes, processSource);
     }
     return processSource(bytes);
 }
@@ -278,6 +283,10 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         response.failure = "Unsupported protocol or invalid source length (limit 1 MiB)";
         return serialize();
     }
+    for (req.files) |file| {
+        const path = if (std.mem.startsWith(u8, file.path, "/")) file.path else try std.mem.concat(arena, u8, &.{ "/workspace/", file.path });
+        try Workspace.global.put(path, file.source, false);
+    }
     user_bytes = req.user_bytes;
     rich_output = req.rich_output;
     value_index = 0;
@@ -293,7 +302,7 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
     // Only the checked, unaliased import of our bundled nominal type opts in.
     // A local type called Display or a different supplied module stays ordinary.
     if (trusted_display and cache == null) {
-        const facts = try @import("roclet_syntax.zig").roc(arena, req.source[0..req.user_bytes]);
+        const facts = try @import("syntax.zig").roc(arena, req.source[0..req.user_bytes]);
         for (facts.statements) |statement| if (std.mem.eql(u8, statement.kind, "import")) {
             var count: usize = 0;
             var name: []const u8 = "";
@@ -309,14 +318,15 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
     const runtime_buffer = try gpa.alignedAlloc(u8, .@"16", (if (cold_core) @as(usize, if (is_wasm) 1024 else 2048) else 256) * 1024 * 1024);
     defer gpa.free(runtime_buffer);
     var fba = std.heap.FixedBufferAllocator.init(runtime_buffer);
-    var fs: WasmFilesystem.WasmContext = .{};
+
     platform.observer = observe;
     defer platform.observer = null;
     const exit_code = runner.runEcho(.{
         .runtime_fba = &fba,
-        .fallback_io = WasmFilesystem.wasm(&fs, fba.allocator(), std.Io.failing),
+        .fallback_io = Workspace.global.io(fba.allocator()),
         .std_io = std.Io.failing,
         .source = req.source,
+        .app_header = req.app_header,
         .extras = extras.items,
         .diagnostics = .{ .ctx = null, .vtable = &diag_vtable },
         .analyze = if (cache == null) analyze else null,
@@ -360,4 +370,75 @@ export fn roclet_free_response(ptr: u32) void {
     const bytes: [*]u8 = @ptrFromInt(ptr);
     const len = std.mem.readInt(u32, bytes[0..4], .little);
     gpa.free(bytes[0 .. @as(usize, len) + 4]);
+}
+
+fn storedResponse(bytes: []const u8) u32 {
+    const stored = gpa.alloc(u8, bytes.len + 4) catch return 0;
+    std.mem.writeInt(u32, stored[0..4], @intCast(bytes.len), .little);
+    @memcpy(stored[4..], bytes);
+    return @intCast(@intFromPtr(stored.ptr));
+}
+fn input(ptr: u32, len: u32) []const u8 {
+    const p: [*]const u8 = @ptrFromInt(ptr);
+    return p[0..len];
+}
+export fn roclet_file_put(path_ptr: u32, path_len: u32, ptr: u32, len: u32) u32 {
+    Workspace.global.put(input(path_ptr, path_len), input(ptr, len), false) catch return 0;
+    return 1;
+}
+export fn roclet_file_drop(ptr: u32, len: u32) u32 {
+    Workspace.global.drop(input(ptr, len));
+    return 1;
+}
+export fn roclet_cache_import(ptr: u32, len: u32) u32 {
+    Workspace.global.importCache(input(ptr, len)) catch return 0;
+    return 1;
+}
+export fn roclet_cache_take_updates() u32 {
+    const bytes = Workspace.global.takeUpdates() catch return 0;
+    defer gpa.free(bytes);
+    return storedResponse(bytes);
+}
+export fn roclet_cache_stats() u32 {
+    const bytes = @import("snapshot.zig").json(gpa, runner.last_cache_stats) catch return 0;
+    defer gpa.free(bytes);
+    return storedResponse(bytes);
+}
+export fn roclet_cache_identity() u32 {
+    return storedResponse(Workspace.identity);
+}
+export fn roclet_package_install(url_ptr: u32, url_len: u32, ptr: u32, len: u32) u32 {
+    Workspace.global.installPackage(input(url_ptr, url_len), input(ptr, len)) catch return 0;
+    return 1;
+}
+
+var previous_graph: ?[]u8 = null;
+fn processDocument(bytes: []const u8, value: std.json.Value) ![]u8 {
+    _ = value;
+    var storage = std.heap.ArenaAllocator.init(gpa);
+    defer storage.deinit();
+    const a = storage.allocator();
+    var request = try std.json.parseFromSliceLeaky(std.json.Value, a, bytes, .{});
+    if (request.object.get("files")) |files| if (files == .array) for (files.array.items) |file| {
+        const path = file.object.get("path").?.string;
+        const full = if (std.mem.startsWith(u8, path, "/")) path else try std.mem.concat(a, u8, &.{ "/workspace/", path });
+        try Workspace.global.put(full, file.object.get("source").?.string, false);
+    };
+    try request.object.put(a, "workspaceFingerprint", .{ .string = try Workspace.global.contentIdentity(a) });
+    if (request.object.getPtr("reactivity")) |reactivity| if (reactivity.* == .object and reactivity.object.get("previous") == null) {
+        if (previous_graph) |graph| try reactivity.object.put(a, "previous", try std.json.parseFromSliceLeaky(std.json.Value, a, graph, .{}));
+    };
+    const input_bytes = try @import("snapshot.zig").json(a, request);
+    const result = try @import("document.zig").process(gpa, input_bytes, processSource, processCore);
+    defer gpa.free(result);
+    var parsed = try std.json.parseFromSliceLeaky(std.json.Value, a, result, .{});
+    if (parsed == .object) {
+        if (parsed.object.get("graph")) |graph| {
+            const owned = try @import("snapshot.zig").json(gpa, graph);
+            if (previous_graph) |old| gpa.free(old);
+            previous_graph = owned;
+        }
+        try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, Workspace.global.required.items), .{}));
+    }
+    return @import("snapshot.zig").json(gpa, parsed);
 }

@@ -12,6 +12,7 @@ pub const Snapshot = struct {
     cells: []const Cell,
     roots: []const []const u8,
     modules: []const Module = &.{},
+    app_header: []const u8 = "",
     isolate_errors: bool = false,
 };
 pub const Region = struct { start: usize, end: usize };
@@ -106,7 +107,7 @@ fn invoke(gpa: Allocator, arena: Allocator, s: Snapshot, source: []const u8, roo
     const entry = if (root) |name| if (rich) try std.fmt.allocPrint(arena, "roclet_value_{s} = {s}\n    echo!(Str.inspect(roclet_value_{s}))\n    echo!(Display.to_wire(roclet_value_{s}))\n    Ok({{}})", .{ name, name, name, name }) else try std.fmt.allocPrint(arena, "echo!(Str.inspect({s}))\n    Ok({{}})", .{name}) else "Ok({})";
     const full_source = try std.fmt.allocPrint(arena, "{s}\n\nmain! = |_args| {{\n    {s}\n}}\n", .{ source, entry });
     if (full_source.len > limit) return error.SourceTooLarge;
-    const request = try json(arena, .{ .protocol = @as(u32, 1), .source = full_source, .user_bytes = source.len, .check_only = root == null, .rich_output = rich, .modules = s.modules });
+    const request = try json(arena, .{ .protocol = @as(u32, 1), .source = full_source, .user_bytes = source.len, .check_only = root == null, .rich_output = rich, .modules = s.modules, .app_header = s.app_header });
     const bytes = try compile(request);
     defer gpa.free(bytes);
     const response = try std.json.parseFromSliceLeaky(RawResponse, arena, bytes, .{ .allocate = .alloc_always });
