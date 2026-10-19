@@ -1,49 +1,55 @@
-// Actual Studio demo plus a separate fresh worker with package networking disabled.
+// Follow the actual calendar analysis, edit its assumptions, then reuse packages offline.
 (async()=>{
-  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  const assert=(value,message)=>{if(!value)throw Error(message);};
-  const until=async predicate=>{for(let i=0;i<1800;i++){if(predicate())return;await pause(100);}throw Error('Timed out: '+document.querySelector('#status')?.textContent);};
+  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms)),assert=(value,message)=>{if(!value)throw Error(message);};
   const $=id=>document.getElementById(id);
-  const rows=()=>[...document.querySelectorAll('.value[data-stale="false"] table tbody tr')].map(row=>row.textContent);
-  const values=()=>[...document.querySelectorAll('.value[data-stale="false"] > pre')].map(node=>node.textContent);
-  const expected=['2026-06-15T09:00:00Z/2026-06-15T10:00:00Z','2026-06-15T12:00:00Z/2026-06-15T15:00:00Z','2026-06-15T16:00:00Z/2026-06-15T17:00:00Z'];
+  const until=async predicate=>{for(let i=0;i<1200;i++){if(predicate())return;await pause(100);}throw Error('Timed out: '+$('status').textContent);};
   await until(()=>document.documentElement.dataset.ready==='true');
-  await until(()=>rows().length===3 || /failed|attention|Stopped after/i.test($('status').textContent));
-  assert(JSON.stringify(rows())===JSON.stringify(expected),$('status').textContent+' '+$('document-diagnostics').textContent);
-  assert(values().includes('Ok(3)'),'Wrong free-window count');
-  const initial={rows:rows(),values:values()};
-  $('auto').checked=false;$('auto').dispatchEvent(new Event('change'));
   const {editorFor}=await import('/web/cell-editor.mjs');
-  const editor=[...document.querySelectorAll('#notebook .cm-content')].map(editorFor).find(editor=>editor?.source.includes('bookings = ['));
-  assert(editor,'Editable bookings cell is missing');
-  const original=editor.view.state.doc.toString(),edited=original.replace('2026-06-15T12:00:00+02:00','2026-06-15T11:00:00+02:00');
-  editor.view.dispatch({changes:{from:0,to:editor.view.state.doc.length,insert:edited},userEvent:'input'});
-  const run=async()=>{$('run').click();await until(()=>/Current|failed|attention|Stopped after/i.test($('status').textContent));assert($('status').textContent.startsWith('Current'),$('status').textContent+' '+$('document-diagnostics').textContent);};
-  await run();assert(JSON.stringify(rows())===JSON.stringify(expected.slice(1)),'Booking edit did not remove the first free slot');assert(values().includes('Ok(2)'),'Edited count is stale');
-  const changed={rows:rows(),values:values()};
-  $('stop').click();await run();assert(values().includes('Ok(2)'),'Fresh Studio worker failed');
-  const openingEditor=[...document.querySelectorAll('#notebook .cm-content')].map(editorFor).find(editor=>editor?.source.startsWith('opening = '));
-  assert(openingEditor,'Opening interval cell is missing');
-  const openingSource=openingEditor.source;
-  openingEditor.view.dispatch({changes:{from:0,to:openingEditor.view.state.doc.length,insert:openingSource.replace('09:00:00Z/2026-06-15T17:00:00Z','17:00:00Z/2026-06-15T09:00:00Z')},userEvent:'input'});
-  await run();assert(rows().length===0,'Invalid interval left a current table');
-  assert(values().includes('Err(Input(ReversedBounds))'),'Reversed interval did not return the package error');
-  assert([...document.querySelectorAll('.value[data-stale="false"] .rich-output > pre')].some(node=>node.textContent==='Check your dates: Input(ReversedBounds)'),'Date error is not visible');
-  const invalid={values:values(),message:'Check your dates: Input(ReversedBounds)'};
-  const manifest=await fetch('/artifacts/manifest.json').then(response=>response.json());
-  const source=await fetch('/demos/04-meeting-windows.roc').then(response=>response.text());
-  const bytes=await fetch('/artifacts/roclet.wasm').then(response=>response.arrayBuffer());
+  const editors=()=>[...document.querySelectorAll('#notebook .cm-content')].map(editorFor);
+  const cell=root=>editors().find(editor=>editor.source.includes(root+' ='))?.dom.closest('.cell');
+  const rows=root=>[...cell(root)?.querySelectorAll('.value[data-stale="false"] table tbody tr')??[]].map(row=>[...row.querySelectorAll('td')].map(node=>node.textContent));
+  const text=root=>cell(root)?.querySelector('.value[data-stale="false"] .rich-output')?.textContent??'';
+  const clean=()=>assert(!document.querySelector('#notebook').textContent.includes('Unused Branch'),'Analysis emitted an empirical branch warning');
+  const expected=[['2026-06-15T09:00:00Z','2026-06-15T10:00:00Z','60'],['2026-06-15T12:30:00Z','2026-06-15T14:00:00Z','90'],['2026-06-15T16:00:00Z','2026-06-15T17:00:00Z','60']];
+  await until(()=>rows('out_candidates').length===3 || /failed|attention|Stopped after/i.test($('status').textContent));
+  assert(JSON.stringify(rows('out_candidates'))===JSON.stringify(expected),$('status').textContent+' '+$('document-diagnostics').textContent);
+  assert(rows('out_calendar').length===4 && rows('out_normalized').length===4,'Input and normalized calendars differ');
+  assert(rows('out_normalized')[0][1]==='2026-06-15T10:00:00Z','Offset normalization is incorrect');
+  assert(JSON.stringify(rows('out_busy').map(row=>row[2]))===JSON.stringify(['150','30','60']),'Overlapping bookings were not merged');
+  assert(rows('out_free').length===4 && rows('out_free')[2][2]==='30','The short free gap is missing');
+  assert(text('out_recommendation').includes('2026-06-15T09:45:00Z') && text('out_recommendation').includes('Qualifying gaps: 3'),'Wrong recommendation');clean();
+  const initial={busy:rows('out_busy'),free:rows('out_free'),candidates:rows('out_candidates'),recommendation:text('out_recommendation')};
+  $('auto').checked=false;$('auto').dispatchEvent(new Event('change'));
+  const bookingEditor=editors().find(editor=>editor.source.includes('bookings = [')),settingsEditor=editors().find(editor=>editor.source.includes('meeting_minutes = 45'));
+  const bookingSource=bookingEditor.source,settingsSource=settingsEditor.source;
+  const replace=(editor,source)=>editor.view.dispatch({changes:{from:0,to:editor.view.state.doc.length,insert:source},userEvent:'input'});
+  const run=async()=>{$('run').click();await until(()=>/Current|failed|attention|Stopped after/i.test($('status').textContent));assert($('status').textContent.startsWith('Current'),$('status').textContent+' '+$('document-diagnostics').textContent);clean();};
+  replace(bookingEditor,bookingSource.replace('2026-06-15T12:00:00+02:00','2026-06-15T11:00:00+02:00'));await run();
+  assert(JSON.stringify(rows('out_candidates'))===JSON.stringify(expected.slice(1)),'Earlier booking did not remove the first candidate');
+  assert(text('out_recommendation').includes('2026-06-15T13:15:00Z'),'Recommendation did not move to 12:30–13:15');
+  const changed={candidates:rows('out_candidates'),recommendation:text('out_recommendation')};
+  $('stop').click();await run();assert(rows('out_candidates').length===2,'Studio worker restart failed');
+  replace(bookingEditor,bookingSource);replace(settingsEditor,settingsSource.replace('meeting_minutes = 45','meeting_minutes = 90'));await run();
+  assert(JSON.stringify(rows('out_candidates'))===JSON.stringify([expected[1]]),'90-minute review should leave one candidate');
+  const ninetyMinutes={candidates:rows('out_candidates'),recommendation:text('out_recommendation')};
+  replace(settingsEditor,settingsSource.replace('meeting_minutes = 45','meeting_minutes = 120'));await run();
+  assert(rows('out_candidates').length===0 && text('out_recommendation').includes('No suitable opening'),'No-opening case is incorrect');
+  replace(settingsEditor,settingsSource);
+  replace(bookingEditor,bookingSource.replace('2026-06-15T11:00:00-04:00','2026-06-15T14:00:00-04:00').replace('2026-06-15T12:00:00-04:00','2026-06-15T15:00:00-04:00'));await run();
+  assert(JSON.stringify(rows('out_candidates').at(-1))===JSON.stringify(['2026-06-15T14:30:00Z','2026-06-15T17:00:00Z','150']),'Off-hours booking changed the planning-window boundary');
+  const offHours={candidates:rows('out_candidates')};replace(bookingEditor,bookingSource);
+  replace(settingsEditor,settingsSource.replace('09:00:00Z/2026-06-15T17:00:00Z','17:00:00Z/2026-06-15T09:00:00Z'));await run();
+  assert(rows('out_candidates').length===0 && text('out_recommendation').includes('Planning window: ReversedBounds'),'Invalid input retained a recommendation');
+  const invalid=text('out_recommendation');
+  const manifest=await fetch('/artifacts/manifest.json').then(response=>response.json()),source=await fetch('/demos/04-meeting-windows.roc').then(response=>response.text()),bytes=await fetch('/artifacts/roclet.wasm').then(response=>response.arrayBuffer());
   const module=path=>JSON.stringify(new URL(path,location.href).href);
   const code=`import{createWasmTransport}from ${module('/compiler-adapter/wasm.mjs')};import{BuildCache,compilerNamespace}from ${module('/web/build-cache.mjs')};import{BrowserPackages}from ${module('/web/packages.mjs')};onmessage=async({data})=>{try{const raw=await createWasmTransport(data.bytes),ns=await compilerNamespace(data.bytes,raw.cacheIdentity());if(!raw.importCache(await new BuildCache(ns).load()))throw Error('Invalid compiler cache');const packages=new BrowserPackages(new BuildCache(ns+':packages'),{fetch:async()=>{throw Error('Package networking disabled');}});postMessage({result:await packages.evaluate(raw,data.request)});}catch(error){postMessage({error:error.stack});}};`;
   const blob=URL.createObjectURL(new Blob([code],{type:'text/javascript'})),worker=new Worker(blob,{type:'module'});let offline;
-  try{offline=await new Promise((resolve,reject)=>{worker.onmessage=({data})=>data.error?reject(Error(data.error)):resolve(data.result);worker.onerror=reject;worker.postMessage({bytes,request:{operation:'document',action:'evaluate',format:'roc',source,compact:true}});});}
-  finally{worker.terminate();URL.revokeObjectURL(blob);}
+  try{offline=await new Promise((resolve,reject)=>{worker.onmessage=({data})=>data.error?reject(Error(data.error)):resolve(data.result);worker.onerror=reject;worker.postMessage({bytes,request:{operation:'document',action:'evaluate',format:'roc',source,compact:true}});});}finally{worker.terminate();URL.revokeObjectURL(blob);}
   assert(offline.status==='ok','Offline compile failed: '+JSON.stringify(offline));
-  assert(offline.evaluation.values.find(value=>value.root==='out_count')?.text==='Ok(3)','Offline values differ');
+  assert(JSON.stringify(offline.evaluation.values.find(value=>value.root==='out_candidates')?.display.rows)===JSON.stringify(expected),'Offline candidates differ');
+  assert(offline.evaluation.values.find(value=>value.root==='out_recommendation')?.text.includes('2026-06-15T09:45:00Z'),'Offline recommendation differs');
   assert(offline.workspaceCache.hits>0,'Offline run did not consume compiler artifacts');
-  // Leave the original, readable demonstration visible for the screenshot.
-  openingEditor.view.dispatch({changes:{from:0,to:openingEditor.view.state.doc.length,insert:openingSource},userEvent:'input'});
-  editor.view.dispatch({changes:{from:0,to:editor.view.state.doc.length,insert:original},userEvent:'input'});await run();
-  assert(JSON.stringify(rows())===JSON.stringify(expected),'Restored demo differs');
-  return {result:'pass',buildMode:manifest.wasmOptimize,compilerSha256:manifest.artifacts['roclet.wasm'].sha256,initial,changed,invalid,studioWorkerRestart:'pass',offline:{values:offline.evaluation.values,workspaceCache:offline.workspaceCache},horizontalOverflow:document.documentElement.scrollWidth>innerWidth};
+  replace(settingsEditor,settingsSource);await run();assert(JSON.stringify(rows('out_candidates'))===JSON.stringify(expected),'Restored analysis differs');
+  return {result:'pass',buildMode:manifest.wasmOptimize,compilerSha256:manifest.artifacts['roclet.wasm'].sha256,initial,changed,ninetyMinutes,offHours,noOpening:'pass',invalid,studioWorkerRestart:'pass',offline:{values:offline.evaluation.values,workspaceCache:offline.workspaceCache},horizontalOverflow:document.documentElement.scrollWidth>innerWidth};
 })()

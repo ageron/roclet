@@ -39,6 +39,12 @@ dialog select { max-width:100%; } #find-results { grid-template-columns:minmax(0
 
 .rich-output { min-width:0; font-size:.9rem; } .rich-output details { margin-top:.6rem; } .rich-output summary,.display-note { color:#738078; font-size:.75rem; } .rich-output pre { max-width:100%; }
 .display-table-scroll { overflow:auto; max-width:100%; max-height:440px; } .display-table-scroll table { border-collapse:collapse; width:100%; font-variant-numeric:tabular-nums; } .display-table-scroll caption { text-align:left; padding:.4rem 0; color:#738078; } .display-table-scroll td,.display-table-scroll th { text-align:left; padding:.45rem .65rem; border-bottom:1px solid #e4eae4; white-space:pre-wrap; min-width:5rem; max-width:30rem; overflow-wrap:anywhere; } .display-table-scroll th { position:sticky; top:0; background:#f4f7f3; } .display-pagination { display:flex; gap:1rem; align-items:center; margin-top:.5rem; font-size:.8rem; } .display-image { max-width:100%; max-height:480px; object-fit:contain; } .result-block[data-stale="true"] .rich-output { opacity:.55; }
+
+.app-header { margin:0 0 1.2rem 42px; border:1px solid var(--line); border-radius:7px; background:#f7f9f7; min-width:0; }
+.app-header > summary { display:flex; align-items:center; flex-wrap:wrap; gap:.6rem; padding:.75rem 1rem; font-size:.84rem; }
+.app-header > summary::before { content:'▸'; color:var(--muted); } .app-header[open] > summary::before { content:'▾'; }
+.app-header > summary span { color:var(--muted); font-size:.75rem; } .app-header-editor { border-top:1px solid var(--line); min-width:0; }
+@media(max-width:680px) { .app-header { margin-left:30px; } .app-header > summary { padding:.65rem .8rem; } }
 </style>
 </head>
 <body>
@@ -66,6 +72,7 @@ dialog select { max-width:100%; } #find-results { grid-template-columns:minmax(0
 <main class="shell">
   <div class="document-status"><span id="status" role="status">Loading the local compiler…</span><span id="save-status" role="status">Opening browser storage…</span></div>
   <div id="notice" role="alert" hidden></div><div id="document-diagnostics" aria-live="polite"></div>
+  <details id="app-header" class="app-header"><summary><strong>App header</strong><span>Packages & imports</span></summary><div id="app-header-source" class="app-header-editor"></div></details>
   <section id="notebook" aria-label="Notebook cells" tabindex="-1" aria-describedby="navigation-help"><div id="cells"></div></section>
   <section id="source-pane" hidden><div class="source-heading"><p id="raw-help">Complete editable source</p><button id="back-notebook">← Notebook</button></div><div id="source" class="raw"></div></section>
   <footer><span id="selection-status" role="status"></span><button id="help" class="quiet">Keyboard shortcuts <kbd>?</kbd></button></footer>

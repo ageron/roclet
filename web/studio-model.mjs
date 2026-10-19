@@ -103,6 +103,10 @@ export class Studio {
     this.diagnosticsDeferred = true;
     this.change(s => { s.cells[index].source = source; s.cells[index].outputs = []; if (positions) s.cells[index].editorSelection = positions; }, { group: this.state.cells[index].key, composing, reason: 'edit' });
   }
+  editPreamble(preamble, composing = false, positions = null) {
+    this.diagnosticsDeferred = true;
+    this.change(s => { s.preamble = preamble; if (positions) s.headerSelection = positions; }, { group: 'app-header', composing, reason: 'edit' });
+  }
   editSource(source, composing = false, positions = null) {
     this.diagnosticsDeferred = true;
     this.change(s => { s.source = source; if (positions) s.editorSelection = positions; }, { group: 'raw', source: true, composing, reason: 'edit' });

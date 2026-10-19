@@ -137,8 +137,8 @@ node tools/browser-check.mjs --page web/workspace-benchmark.html --timeout 18000
 
 ## Workspace baseline validation
 
-`zig build -j1`, `zig build test -j1`, `zig build package -j1`, and the artifact
-manifest check passed. The native ReleaseFast engine passed 36 compiler cases,
+The compiler build, native tests, package generation, and artifact manifest
+check passed. The native ReleaseFast engine passed 36 compiler cases,
 121 document contracts (196 browser parity requests), and 30 complete M4
 responses. Unit tests also cover compact responses, source limits, publication
 hashing, cache envelopes, cache eviction, and verified package extraction; the

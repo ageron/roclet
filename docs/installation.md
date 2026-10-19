@@ -49,7 +49,7 @@ Roc compiler checkout:
 ```sh
 git clone https://github.com/roc-lang/roc.git ../roc-compiler
 sh tools/prepare-compiler.sh ../roc-compiler
-zig build -j1
+zig build
 zig build serve
 ```
 
@@ -94,6 +94,9 @@ Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
 - **File → Project files** adds ordinary Roc modules and text file imports beside
   the notebook. These sources are autosaved, undoable, and included in Roclet
   bundles; downloading a single `.roc` or `.md` file keeps those files separate.
+- Expand **App header** above the notebook cells to edit package declarations
+  and imports as ordinary Roc source. Header edits auto-run, autosave, and undo
+  like cell edits. The card starts collapsed and remembers whether you left it expanded.
 - Declare packages in the notebook's app header using normal Roc dependency
   syntax. The bundled server proxies GitHub release archives to handle browser
   CORS restrictions. Roc verifies their original content hashes, and verified

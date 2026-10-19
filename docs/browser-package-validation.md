@@ -29,7 +29,7 @@ or manually installed archives. The actual Studio verifies number parsing,
 invalid input, editing, and worker restart.
 
 ```sh
-zig build -j1
+zig build
 ./zig-out/bin/roclet-serve . 4179
 ```
 
@@ -49,10 +49,22 @@ to the command's exit status.
 
 [`demos/04-meeting-windows.roc`](../demos/04-meeting-windows.roc) imports the real
 [roc-time 0.2.0 release](https://github.com/lukewilliamboswell/roc-time/releases/tag/0.2.0).
-It normalizes offset-bearing bookings and subtracts their occupied coverage from
-a working-day interval. The expected available UTC intervals are 09:00–10:00,
-12:00–15:00, and 16:00–17:00. Editing the first booking's start removes the first
-free slot and changes the count from `Ok(3)` to `Ok(2)`.
+The notebook investigates the earliest 45-minute opening for a design review.
+It shows the supplied calendar, normalizes offset-bearing bookings, merges
+occupied coverage, subtracts it from the planning window, filters by meeting
+length, and recommends a concrete slot. Each step displays its intermediate
+result beside the algorithm.
+
+Four bookings become three busy blocks. The free gaps are 09:00–10:00,
+12:30–14:00, 14:30–15:00, and 16:00–17:00 UTC. The 30-minute gap is too short;
+the first recommendation is **09:00–09:45 UTC**. Increasing the requested length
+to 90 minutes leaves only the 12:30–14:00 gap. At 120 minutes there is no opening.
+Moving a booking outside the working day verifies clipping at the planning bounds.
+
+The **App header** card starts collapsed. Expand it to edit the actual Roc app
+declaration and imports in place, with normal highlighting, auto-run, undo,
+autosave, and Ctrl/Cmd+Enter to run. The notebook retains the original released
+package URL; there is no separate package declaration format.
 
 ```sh
 node tools/browser-check.mjs --base-url http://127.0.0.1:4179 \
@@ -85,18 +97,30 @@ proxy service. No external HTTPS deployment is claimed by this local check.
 The final ReleaseFast browser compiler is 25,063,956 bytes, SHA-256
 `3791ec6d865abce743e3d8a5c868418aeae740b3ff3bb73b88296ad0e7296b0f`.
 The local-endpoint test at 1280×960 and separate-origin proxy test at 390×960
-both pass the complete roc-time probe: initial table/count, booking edits,
-reversed-date error, worker restart, and fresh-worker restoration with package
+both pass the complete roc-time probe: all six intermediate/final outputs,
+booking edits, 90-minute and 120-minute requests, an off-hours booking,
+reversed-date errors, worker restart, and fresh-worker restoration with package
 networking disabled. Both layouts have no page-level horizontal overflow, and
 screenshots were inspected. Neither run records a failed network request.
 
-The fresh worker reports 18 checked artifact hits and one miss (the notebook
-revision), plus 19 canonicalized artifact hits with zero misses. The initial
-three-window table is recomputed from the restored package and compiler inputs.
+The fresh worker restores the verified package archive and compiler artifacts
+from IndexedDB and recomputes all six outputs. Cache counts depend on the bounded
+cache and the preceding edits; the compact run reports 17 checked hits/two
+misses, three canonicalized hits/16 misses, and six root executions. Missing
+compiler artifacts are rebuilt without downloading the package again.
+
+The header probe checks that a new notebook starts with the card collapsed,
+then exercises expansion, source editing, a missing-module diagnostic, undo,
+Ctrl+Enter, autosave, and source-view round trips while preserving every cell.
+Run it with the same browser command and `--script tools/browser-header-probe.mjs`.
+Both desktop and compact layouts pass. The existing Studio UI contracts also
+pass at both widths, alongside the lifecycle and rich-output contracts.
+
 Packaging verifies all 75 offline assets, including the demo and download
-configuration. The compiler currently emits an empirical `Unused Branch` warning
-for the unused error alternative on valid input; that diagnostic is preserved.
-The probe explicitly exercises the error alternative with reversed dates.
+configuration. Result rendering uses reusable functions, avoiding Roc’s empirical
+compile-time branch-coverage warning for a top-level match on the current value.
+No diagnostics are suppressed. The probe verifies the warning is absent for both
+valid and reversed dates, while still displaying the actual reversed-date error.
 
 ## Compiler memory limit
 

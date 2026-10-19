@@ -10,7 +10,7 @@ import { renderDisplay } from './display-view.mjs';
 import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './studio-cells.mjs';
 const $ = id => document.getElementById(id);
 let store, compilerManifest;
-let studio, highlighter, sourceEditor, libraryToken = 0, composing = false;
+let studio, highlighter, sourceEditor, headerEditor, headerDocumentId, libraryToken = 0, composing = false;
 const cards = new Map();
 const notice = message => { $('notice').textContent = message; $('notice').hidden = !message; };
 const perform = async work => {
@@ -416,6 +416,11 @@ function reflect(reason) {
   $('undo').disabled = !studio.history.length; $('redo').disabled = !studio.future.length;
   $('notebook-view').setAttribute('aria-pressed', s.mode === 'notebook'); $('source-view').setAttribute('aria-pressed', s.mode === 'source');
   $('notebook').hidden = s.mode !== 'notebook'; $('source-pane').hidden = s.mode !== 'source';
+  $('app-header').hidden = s.mode !== 'notebook';
+  const preamble=s.preamble ?? '';headerEditor.sync(preamble,'code',s.headerSelection);
+  if(s.mode==='notebook' && headerDocumentId!==s.id) {
+    headerDocumentId=s.id;$('app-header').open=s.headerExpanded ?? false;
+  }
   if (s.mode === 'source') sourceEditor.sync(s.source,s.format==='roc'?'code':'markdown',s.editorSelection);
   // Raw edits can change cell boundaries; do not attach retained observations to
   // newly parsed cells merely because they occupy the same source positions.
@@ -447,6 +452,11 @@ function bind() {
   $('format').onchange = () => perform(async () => { await studio.format($('format').value); reflect('document'); });
   $('run').onclick = () => perform(() => studio.run()); $('stop').onclick = () => studio.stop();
   $('auto').onchange = () => studio.setAuto($('auto').checked);
+  $('app-header').ontoggle=()=>{
+    if(!studio?.state || studio.state.mode!=='notebook')return;
+    studio.state.headerExpanded=$('app-header').open;void studio.persist();
+    if($('app-header').open)headerEditor.view.requestMeasure();
+  };
   const undo = redo => { studio.undo(redo); if (studio.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); };
   $('undo').onclick = () => undo(false); $('redo').onclick = () => undo(true);
   $('recovery-copy').onclick=()=>perform(()=>studio.recoveryCopy());
@@ -526,6 +536,7 @@ function bind() {
       event.preventDefault(); event.stopPropagation(); const wasCells = selection.mode === 'cells'; studio.undo(event.shiftKey, { editing: editor });
       if (wasCells && inNotebook) focusCell(selection.focus); return;
     }
+    if(editorFor(target)===headerEditor && mod && event.key==='Enter') {event.preventDefault();event.stopPropagation();void perform(()=>studio.run());return;}
     if (!inNotebook || menu || target.closest?.('button,summary,select')) return;
     if(mod && event.shiftKey && (key==='-' || key==='_') && card) {event.preventDefault();event.stopPropagation();void perform(()=>splitCell(card.dataset.key));return;}
     if (event.key === 'Enter' && (mod || event.shiftKey || event.altKey) && card) {
@@ -578,16 +589,22 @@ try {
     onSelection:positions=>{if(studio?.state) {studio.state.editorSelection=positions;studio.group=null;}},
     onComposition:value=>{composing=value;if(value) clearTimeout(studio.timer);else studio.schedule();},
   });
+  headerEditor=new CellEditor($('app-header-source'),{highlighter,label:'Roc app header',
+    onChange:(value,isComposing,positions)=>studio.editPreamble(value,isComposing || composing,positions),
+    onFocus:()=>{studio.finishEditing();selectionActive=false;renderSelection();},
+    onSelection:positions=>{if(studio?.state){studio.state.headerSelection=positions;studio.group=null;}},
+    onComposition:value=>{composing=value;if(value)clearTimeout(studio.timer);else studio.schedule();},
+  });
   studio = new Studio(binary, store, {onChange:reflect});
   const dispose=studio.dispose.bind(studio);
-  studio.dispose=()=>{highlighter.dispose();sourceEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
+  studio.dispose=()=>{highlighter.dispose();sourceEditor.destroy();headerEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
   bind(); await studio.initialize();
   const example=new URL(location.href).searchParams.get('example');
   const examples = new Map([
     ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
     ['weather', ['../demos/02-a-little-data.roc', 'Three days of weather.roc']],
     ['circle', ['../demos/03-circle.roc', 'A bigger circle.roc']],
-    ['meeting-windows', ['../demos/04-meeting-windows.roc', 'Find a free meeting slot.roc']],
+    ['meeting-windows', ['../demos/04-meeting-windows.roc', 'Finding room for a design review.roc']],
     ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich outputs.roc']],
   ]);
   if (example) {

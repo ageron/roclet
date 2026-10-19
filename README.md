@@ -55,7 +55,7 @@ Node.js or npm requirement.
 
 ```sh
 sh tools/prepare-compiler.sh /path/to/roc
-zig build -j1
+zig build
 zig build serve
 ```
 
