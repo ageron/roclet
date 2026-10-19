@@ -63,8 +63,8 @@ try {
   await new BuildCache(`${await compilerNamespace(bytes,raw.cacheIdentity())}:packages`).clear();
   const packageRequest={operation:'document',action:'evaluate',format:'roc',source:`app [] { geom: "${packageUrl}" }\n# %% id=package\nimport geom.Geometry\nGeometry.answer`};
   const packageSession=new DocumentSession(bytes),packaged=await packageSession.request(packageRequest);packageSession.stop();
-  assert.equal(packaged.status,'ok');assert.equal(packaged.evaluation.values[0].text,'42');
-  const packageRestored=await offlinePackageWorker(bytes,packageRequest);assert.equal(packageRestored.status,'ok');assert.equal(packageRestored.evaluation.values[0].text,'42');
+  assert.equal(packaged.status,'ok');assert.equal(packaged.evaluation.values[0].text,'42.0');
+  const packageRestored=await offlinePackageWorker(bytes,packageRequest);assert.equal(packageRestored.status,'ok');assert.equal(packageRestored.evaluation.values[0].text,'42.0');
   report('PASS compiler-resolved package fetch, hash verification, and cold-worker package restore without network');
   document.querySelector('#status').textContent='PASS workspace conformance';
   document.documentElement.dataset.result='pass';
