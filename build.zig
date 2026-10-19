@@ -68,7 +68,8 @@ pub fn build(b: *std.Build) void {
 
     const workspace_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("compiler-adapter/workspace.zig"), .target = b.graph.host, .optimize = .safe }) });
     inline for (.{ "ctx", "unbundle", "build_options" }) |module| workspace_tests.root_module.addImport(module, roc.module(module));
-    b.step("test-workspace", "Verify compiler artifact persistence and package extraction").dependOn(&b.addRunArtifact(workspace_tests).step);
+    const workspace_run = b.addRunArtifact(workspace_tests);
+    b.step("test-workspace", "Verify compiler artifact persistence and package extraction").dependOn(&workspace_run.step);
     const fixture_tool = b.addExecutable(.{ .name = "roclet-package-fixture", .root_module = b.createModule(.{ .root_source_file = b.path("tools/package-fixture.zig"), .target = b.graph.host, .optimize = .small }) });
     const fixture_run = b.addRunArtifact(fixture_tool);
     fixture_run.setCwd(b.path("."));
@@ -91,6 +92,8 @@ pub fn build(b: *std.Build) void {
     native_tests.step.dependOn(&cli.step);
     const test_step = b.step("test", "Run native conformance and unit tests; generate browser parity cases");
     test_step.dependOn(unit_step);
+    test_step.dependOn(&workspace_run.step);
+    test_step.dependOn(&fixture_run.step);
     test_step.dependOn(&native_tests.step);
     const document_tests = b.addExecutable(.{ .name = "roclet-document-tests", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/documents.zig"),

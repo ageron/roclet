@@ -22,7 +22,7 @@ test('project modules preserve raw source editing and undo as one notebook chang
 });
 
 test('project paths cannot replace the notebook or escape a portable project', () => {
-  for(const path of ['Main.roc','../secret.roc','/absolute.roc','nested/../secret.roc','nested//File.roc','C:File.roc','bad\\File.roc']) {
+  for(const path of ['Main.roc','main.roc','../secret.roc','/absolute.roc','nested/../secret.roc','nested//File.roc','C:File.roc','bad\\File.roc']) {
     assert.throws(()=>projectFiles([{path,source:'module []'}]));
   }
   assert.throws(()=>projectFiles([{path:'File.roc',source:''},{path:'File.roc',source:''}]));
