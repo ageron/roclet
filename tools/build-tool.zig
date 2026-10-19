@@ -2,7 +2,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cwd = std.Io.Dir.cwd();
-const inputs = [_][]const u8{ "build.zig", "build.zig.zon", "tools/prepare-compiler.sh", "compiler-adapter/embedding.patch", "compiler-adapter/engine.zig", "compiler-adapter/workspace.zig", "compiler-adapter/platform.zig", "compiler-adapter/platform/main.roc", "compiler-adapter/platform/Echo.roc", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/snapshot.zig", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "compiler-adapter/document_frontend.zig", "core/Document.roc", "library/Display.roc", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
+const inputs = [_][]const u8{ "build.zig", "build.zig.zon", "tools/prepare-compiler.sh", "tools/compress-builtins.zig", "compiler-adapter/embedding.patch", "compiler-adapter/engine.zig", "compiler-adapter/workspace.zig", "compiler-adapter/platform.zig", "compiler-adapter/platform/main.roc", "compiler-adapter/platform/Echo.roc", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/snapshot.zig", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "compiler-adapter/document_frontend.zig", "core/Document.roc", "library/Display.roc", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
 const Lock = struct { protocol: u32, compilerRepository: []const u8, compilerCommit: []const u8, zigVersion: []const u8, nativeOptimize: []const u8, wasmOptimize: []const u8 };
 fn path(gpa: Allocator, root: []const u8, relative: []const u8) ![]const u8 {
     return std.fs.path.join(gpa, &.{ root, relative });

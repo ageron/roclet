@@ -66,7 +66,7 @@ pub fn build(b: *std.Build) void {
     b.step("package", "Package the verified offline Roclet and host-platform headless runner").dependOn(&package.step);
     serve.step.dependOn(&offline.step);
 
-    const workspace_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("compiler-adapter/workspace.zig"), .target = b.graph.host, .optimize = .safe }) });
+    const workspace_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("compiler-adapter/workspace.zig"), .target = b.graph.host, .optimize = .safe, .link_libc = true }) });
     inline for (.{ "ctx", "unbundle", "build_options" }) |module| workspace_tests.root_module.addImport(module, roc.module(module));
     const workspace_run = b.addRunArtifact(workspace_tests);
     b.step("test-workspace", "Verify compiler artifact persistence and package extraction").dependOn(&workspace_run.step);
@@ -129,10 +129,39 @@ fn adapter(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.Resolved
         .link_libc = target.result.os.tag != .freestanding,
     }) });
     inline for (.{ "compile", "lir", "eval", "check", "base", "ctx", "builtins", "roc_target", "build_options", "can", "collections", "reporting", "parse", "unbundle" }) |module| exe.root_module.addImport(module, roc.module(module));
-    exe.root_module.addImport("compiled_builtins", roc.module("eval").import_table.get("compiled_builtins").?);
+    const compiled_builtins = roc.module("eval").import_table.get("compiled_builtins").?;
+    exe.root_module.addImport("compiled_builtins", compiled_builtins);
+    if (target.result.cpu.arch == .wasm32) exe.root_module.addImport("compressed_builtins", compressedBuiltins(b, roc, compiled_builtins));
     exe.root_module.addCSourceFile(.{ .file = b.path("vendor/md4c/md4c.c"), .flags = &.{ "-std=c99", "-O2" } });
     exe.root_module.addIncludePath(b.path("vendor/md4c"));
     exe.root_module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("library/Display.roc") });
     exe.root_module.addAnonymousImport("Document.roc", .{ .root_source_file = b.path("core/Document.roc") });
     return exe;
+}
+
+fn compressedBuiltins(b: *std.Build, roc: *std.Build.Dependency, builtins: *std.Build.Module) *std.Build.Module {
+    const compressor = b.addExecutable(.{ .name = "roclet-compress-builtins", .root_module = b.createModule(.{
+        .root_source_file = b.path("tools/compress-builtins.zig"),
+        .target = b.graph.host,
+        .optimize = .fast,
+        .link_libc = true,
+    }) });
+    const zstd = roc.builder.dependency("zstd", .{ .target = b.graph.host, .optimize = .fast });
+    compressor.root_module.linkLibrary(zstd.artifact("zstd"));
+    const files = b.addWriteFiles();
+    b.step("compress-builtins", "Prepare compressed builtin images for the browser compiler").dependOn(&files.step);
+    const dir = builtins.root_source_file.?.dirname();
+    for ([_][]const u8{ "Builtin.bin", "Builtin.roc", "Builtin.artifact.bin" }) |name| {
+        const run = b.addRunArtifact(compressor);
+        run.addFileArg(dir.path(b, name));
+        const compressed_name = b.fmt("{s}.zst", .{name});
+        const frame = run.addOutputFileArg(compressed_name);
+        _ = files.addCopyFile(frame, compressed_name);
+    }
+    return b.createModule(.{ .root_source_file = files.add("compressed_builtins.zig",
+        \\pub const builtin_bin = @embedFile("Builtin.bin.zst");
+        \\pub const builtin_source = @embedFile("Builtin.roc.zst");
+        \\pub const builtin_artifact_bin = @embedFile("Builtin.artifact.bin.zst");
+        \\
+    ) });
 }
