@@ -8,6 +8,7 @@ const collections = @import("collections");
 const reporting = @import("reporting");
 const Workspace = @import("workspace.zig");
 const compiled_builtins = @import("compiled_builtins");
+pub const roc_compressed_builtins = @import("compressed_builtins");
 
 const is_wasm = builtin.cpu.arch == .wasm32;
 const gpa = if (is_wasm) std.heap.wasm_allocator else std.heap.page_allocator;
@@ -24,6 +25,7 @@ const Request = struct {
     modules: []const runner.ExtraFile = &.{},
     app_header: []const u8 = "",
     root: ?[]const u8 = null,
+    notebook: ?@import("notebook.zig").Metadata = null,
     files: []const struct { path: []const u8, source: []const u8 } = &.{},
 };
 const Region = struct { start: u32, end: u32 };
@@ -43,7 +45,23 @@ const Diagnostic = struct {
     filename: ?[]const u8 = null,
     location: ?struct { start_line: u32, start_column: u32, end_line: u32, end_column: u32 } = null,
 };
-const Event = struct { kind: []const u8, message: []const u8 };
+const Event = struct {
+    kind: []const u8,
+    message: []const u8,
+    root: ?[]const u8 = null,
+    pub fn jsonStringify(self: @This(), w: anytype) !void {
+        try w.beginObject();
+        try w.objectField("kind");
+        try w.write(self.kind);
+        try w.objectField("message");
+        try w.write(self.message);
+        if (self.root) |root| {
+            try w.objectField("root");
+            try w.write(root);
+        }
+        try w.endObject();
+    }
+};
 const Response = struct {
     protocol: u32 = 1,
     display_module: bool = false,
@@ -89,7 +107,7 @@ fn observe(kind: []const u8, message: []const u8) void {
         if (end == 0 and message.len > 0 and !designated) return;
     }
     event_bytes += end;
-    response.events.append(arena, .{ .kind = kind, .message = dupe(message[0..end]) }) catch {
+    response.events.append(arena, .{ .kind = kind, .message = dupe(message[0..end]), .root = if (platform.observation_root) |root| dupe(root) else null }) catch {
         callback_failed = true;
     };
 }
@@ -210,7 +228,7 @@ fn analyzeFallible(env: *can.ModuleEnv, prefix: u32) !void {
                 if (e == .e_lookup_local and e.e_lookup_local.pattern_idx == def.pattern) rename_safe = false;
             }
         }
-        var tw = try env.initTypeWriter();
+        var tw = try runner.scratchTypeWriter(env, arena);
         defer tw.deinit();
         try tw.write(can.ModuleEnv.varFrom(idx), .one_line);
         try response.definitions.append(arena, .{
@@ -240,13 +258,17 @@ fn serialize() ![]u8 {
         .events = response.events.items,
         .failure = response.failure,
         .packagesRequired = Workspace.global.required.items,
-        .workspaceCache = runner.request_cache_stats,
+        .workspaceCache = runner.stats(),
     }, .{}, &writer.writer);
     return writer.toOwnedSlice();
 }
 pub fn process(bytes: []const u8) ![]u8 {
     Workspace.global.clearRequired();
     runner.request_cache_stats = .{};
+    runner.request_frontend_builds = 0;
+    runner.request_lowerings = 0;
+    runner.request_executions = 0;
+    runner.request_prepared_hits = 0;
     const probe = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch return processSource(bytes);
     defer probe.deinit();
     if (probe.value == .object) try mountFiles(probe.value, gpa);
@@ -287,7 +309,7 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         return serialize();
     }
     for (req.files) |file| {
-        const path = if (std.mem.startsWith(u8, file.path, "/")) file.path else try std.mem.concat(arena, u8, &.{ "/workspace/", file.path });
+        const path = if (std.mem.startsWith(u8, file.path, "/")) file.path else try std.mem.concat(arena, u8, &.{ execution_paths.extras_prefix, file.path });
         try Workspace.global.put(path, file.source, false);
     }
     user_bytes = req.user_bytes;
@@ -301,7 +323,15 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         supplied_display = true;
         trusted_display = std.mem.eql(u8, module.content, @embedFile("Display.roc"));
     };
-    if (!supplied_display) try extras.append(arena, .{ .name = "Display", .content = @embedFile("Display.roc") });
+    if (!supplied_display) {
+        const display_path = try std.mem.concat(arena, u8, &.{ execution_paths.extras_prefix, "Display.roc" });
+        const io = Workspace.global.io(arena);
+        const display_source = io.readFile(display_path, arena) catch null;
+        if (display_source) |content| {
+            trusted_display = std.mem.eql(u8, content, @embedFile("Display.roc"));
+            try extras.append(arena, .{ .name = "Display", .content = content });
+        } else try extras.append(arena, .{ .name = "Display", .content = @embedFile("Display.roc") });
+    }
     // Only the checked, unaliased import of our bundled nominal type opts in.
     // A local type called Display or a different supplied module stays ordinary.
     if (trusted_display and cache == null) {
@@ -317,6 +347,31 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         };
     }
     if (is_wasm) try compiled_builtins.decompress();
+    if (req.notebook) |notebook| {
+        platform.observer = observe;
+        defer platform.observer = null;
+        const exit_code = @import("notebook.zig").run(.{
+            .source = req.source,
+            .app_header = req.app_header,
+            .extras = extras.items,
+            .paths = execution_paths,
+            .metadata = notebook,
+            .root = req.root,
+            .rich_support = response.display_module,
+            .target_usize = if (is_wasm) .u32 else .native,
+            .roc_target = if (is_wasm) .wasm32 else @import("roc_target").RocTarget.detectNative(),
+            .diagnostics = .{ .ctx = null, .vtable = &diag_vtable },
+            .analyze = analyze,
+        }) catch |err| {
+            response.status = if (err == error.CompilationFailed) "diagnostic" else "runtime_error";
+            if (response.failure == null) response.failure = dupe(@errorName(err));
+            if (callback_failed) return error.OutOfMemory;
+            return serialize();
+        };
+        if (exit_code != 0) response.status = "runtime_error";
+        if (callback_failed) return error.OutOfMemory;
+        return serialize();
+    }
     const cold_core = cache != null and cache.?.bytes == null;
     const runtime_buffer = try gpa.alignedAlloc(u8, .@"16", (if (cold_core) @as(usize, if (is_wasm) 1024 else 2048) else 256) * 1024 * 1024);
     defer gpa.free(runtime_buffer);
@@ -326,6 +381,7 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
     defer platform.observer = null;
     const exit_code = runner.runEcho(.{
         .runtime_fba = &fba,
+        .paths = execution_paths,
         .fallback_io = Workspace.global.io(fba.allocator()),
         .std_io = Workspace.global.std_io,
         .source = req.source,
@@ -404,7 +460,7 @@ export fn roclet_cache_take_updates() u32 {
     return storedResponse(bytes);
 }
 export fn roclet_cache_stats() u32 {
-    const bytes = @import("snapshot.zig").json(gpa, runner.request_cache_stats) catch return 0;
+    const bytes = @import("snapshot.zig").json(gpa, runner.stats()) catch return 0;
     defer gpa.free(bytes);
     return storedResponse(bytes);
 }
@@ -437,7 +493,7 @@ fn processDocument(bytes: []const u8, value: std.json.Value) ![]u8 {
             if (previous_graph) |old| gpa.free(old);
             previous_graph = owned;
         }
-        try parsed.object.put(a, "workspaceCache", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, runner.request_cache_stats), .{}));
+        try parsed.object.put(a, "workspaceCache", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, runner.stats()), .{}));
         try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, Workspace.global.required.items), .{}));
     }
     return @import("snapshot.zig").json(gpa, parsed);
@@ -446,7 +502,7 @@ fn processDocument(bytes: []const u8, value: std.json.Value) ![]u8 {
 fn mountFiles(request: std.json.Value, a: std.mem.Allocator) !void {
     if (request.object.get("files")) |files| if (files == .array) for (files.array.items) |file| {
         const path = file.object.get("path").?.string;
-        const full = if (std.mem.startsWith(u8, path, "/")) path else try std.mem.concat(a, u8, &.{ "/workspace/", path });
+        const full = if (std.mem.startsWith(u8, path, "/")) path else try std.mem.concat(a, u8, &.{ execution_paths.extras_prefix, path });
         defer if (full.ptr != path.ptr) a.free(full);
         try Workspace.global.put(full, file.object.get("source").?.string, false);
     };
@@ -459,11 +515,23 @@ fn withRequiredPackages(result: []u8) ![]u8 {
     const a = temporary.allocator();
     var parsed = try std.json.parseFromSliceLeaky(std.json.Value, a, result, .{});
     const json = @import("snapshot.zig").json;
-    try parsed.object.put(a, "workspaceCache", try std.json.parseFromSliceLeaky(std.json.Value, a, try json(a, runner.request_cache_stats), .{}));
+    try parsed.object.put(a, "workspaceCache", try std.json.parseFromSliceLeaky(std.json.Value, a, try json(a, runner.stats()), .{}));
     try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try json(a, Workspace.global.required.items), .{}));
     return json(gpa, parsed);
 }
 
 pub fn setNativeIo(io: std.Io) void {
     Workspace.global.std_io = io;
+}
+
+var execution_paths: runner.Paths = .{};
+pub fn setNativeSourceDirectory(directory: []const u8) !void {
+    Workspace.global.native_files = @import("ctx").CoreCtx.default(gpa, gpa, Workspace.global.std_io);
+    execution_paths = .{
+        .app_abs = try std.fs.path.join(gpa, &.{ directory, "Main.roc" }),
+        .platform_main = try std.fs.path.join(gpa, &.{ directory, ".roc_echo_platform/main.roc" }),
+        .echo_module = try std.fs.path.join(gpa, &.{ directory, ".roc_echo_platform/Echo.roc" }),
+        .cwd = try gpa.dupe(u8, directory),
+        .extras_prefix = try std.mem.concat(gpa, u8, &.{ directory, "/" }),
+    };
 }

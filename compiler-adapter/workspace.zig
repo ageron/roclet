@@ -8,12 +8,17 @@ const gpa = if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator 
 pub const identity = "roclet-cache-v1/" ++ @import("build_options").compiler_compatibility_id;
 pub var global: Workspace = .{};
 pub const RequiredPackage = struct { url: []const u8, destination: []const u8 };
-const File = struct { bytes: []u8, dirty: bool = false };
+const File = struct { bytes: []u8, dirty: bool = false, used: u64 = 0 };
 pub const Workspace = struct {
     files: std.StringHashMapUnmanaged(File) = .{},
     std_io: std.Io = .failing,
+    native_files: ?CoreCtx = null,
     required: std.ArrayList(RequiredPackage) = .empty,
     fingerprint: ?[64]u8 = null,
+    cache_bytes: usize = 0,
+    cache_entries: usize = 0,
+    cache_limit: usize = 24 * 1024 * 1024,
+    clock: u64 = 0,
     pub fn contentIdentity(self: *Workspace, a: A) ![]const u8 {
         if (self.fingerprint) |hash| return a.dupe(u8, &hash);
         const names = try a.alloc([]const u8, self.files.count());
@@ -31,10 +36,8 @@ pub const Workspace = struct {
         }.less);
         var hash = std.crypto.hash.sha2.Sha256.init(.{});
         for (names[0..count]) |name| {
-            hash.update(name);
-            hash.update(&.{0});
-            hash.update(self.files.get(name).?.bytes);
-            hash.update(&.{0});
+            hashField(&hash, name);
+            hashField(&hash, self.files.get(name).?.bytes);
         }
         var digest: [32]u8 = undefined;
         hash.final(&digest);
@@ -52,16 +55,46 @@ pub const Workspace = struct {
         errdefer gpa.free(owned_path);
         const slot = try self.files.getOrPut(gpa, owned_path);
         if (slot.found_existing) {
+            if (isStoredArtifact(normalized)) {
+                self.cache_bytes -= slot.value_ptr.bytes.len;
+                self.cache_entries -= 1;
+            }
             gpa.free(owned_path);
             gpa.free(slot.value_ptr.bytes);
         } else slot.key_ptr.* = owned_path;
-        slot.value_ptr.* = .{ .bytes = data, .dirty = dirty };
+        self.clock +%= 1;
+        slot.value_ptr.* = .{ .bytes = data, .dirty = dirty, .used = self.clock };
+        if (isStoredArtifact(normalized)) {
+            self.cache_bytes += data.len;
+            self.cache_entries += 1;
+        }
         if (!std.mem.startsWith(u8, normalized, "/cache/")) self.fingerprint = null;
+        self.evict();
+    }
+    fn evict(self: *Workspace) void {
+        while (self.cache_bytes > self.cache_limit or self.cache_entries > 512) {
+            var oldest: ?[]const u8 = null;
+            var age: u64 = std.math.maxInt(u64);
+            var it = self.files.iterator();
+            while (it.next()) |e| if (isStoredArtifact(e.key_ptr.*) and e.value_ptr.used <= age) {
+                oldest = e.key_ptr.*;
+                age = e.value_ptr.used;
+            };
+            const removed = self.files.fetchRemove(oldest orelse break).?;
+            self.cache_bytes -= removed.value.bytes.len;
+            self.cache_entries -= 1;
+            gpa.free(removed.key);
+            gpa.free(removed.value.bytes);
+        }
     }
     pub fn drop(self: *Workspace, path: []const u8) void {
         const normalized = std.fs.path.resolve(gpa, &.{path}) catch return;
         defer gpa.free(normalized);
         if (self.files.fetchRemove(normalized)) |removed| {
+            if (isStoredArtifact(normalized)) {
+                self.cache_bytes -= removed.value.bytes.len;
+                self.cache_entries -= 1;
+            }
             if (!std.mem.startsWith(u8, normalized, "/cache/")) self.fingerprint = null;
             gpa.free(removed.key);
             gpa.free(removed.value.bytes);
@@ -171,14 +204,30 @@ fn decodeEntry(bytes: []const u8, at: *usize) !CacheEntry {
 fn isArtifact(path: []const u8) bool {
     return std.mem.startsWith(u8, path, "/cache/compat-");
 }
+fn isStoredArtifact(path: []const u8) bool {
+    return isArtifact(path) and !std.mem.endsWith(u8, path, ".tmp");
+}
 fn ctx(p: ?*anyopaque) *Workspace {
     return @ptrCast(@alignCast(p.?));
 }
 fn read(p: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.ReadError![]u8 {
-    return a.dupe(u8, (ctx(p).files.get(path) orelse return error.FileNotFound).bytes);
+    if (ctx(p).files.getPtr(path)) |file| {
+        ctx(p).clock +%= 1;
+        file.used = ctx(p).clock;
+        return a.dupe(u8, file.bytes);
+    }
+    if (ctx(p).native_files) |native| return native.readFile(path, a);
+    return error.FileNotFound;
 }
 fn readInto(p: ?*anyopaque, _: std.Io, path: []const u8, buf: []u8) CoreCtx.ReadError!usize {
-    const data = (ctx(p).files.get(path) orelse return error.FileNotFound).bytes;
+    const data = if (ctx(p).files.getPtr(path)) |file| blk: {
+        ctx(p).clock +%= 1;
+        file.used = ctx(p).clock;
+        break :blk file.bytes;
+    } else {
+        if (ctx(p).native_files) |native| return native.readFileInto(path, buf);
+        return error.FileNotFound;
+    };
     if (data.len > buf.len) return error.StreamTooLong;
     @memcpy(buf[0..data.len], data);
     return data.len;
@@ -196,6 +245,7 @@ fn exists(p: ?*anyopaque, _: std.Io, path: []const u8) bool {
     if (ctx(p).files.contains(path)) return true;
     var it = ctx(p).files.keyIterator();
     while (it.next()) |key| if (child(path, key.*)) return true;
+    if (ctx(p).native_files) |native| return native.fileExists(path);
     return false;
 }
 fn child(dir: []const u8, path: []const u8) bool {
@@ -203,7 +253,10 @@ fn child(dir: []const u8, path: []const u8) bool {
 }
 fn stat(p: ?*anyopaque, io_: std.Io, path: []const u8) CoreCtx.StatError!CoreCtx.FileInfo {
     if (ctx(p).files.get(path)) |f| return .{ .kind = .file, .size = f.bytes.len, .mtime_ns = null };
-    if (exists(p, io_, path)) return .{ .kind = .directory, .size = 0, .mtime_ns = null };
+    _ = io_;
+    var it = ctx(p).files.keyIterator();
+    while (it.next()) |key| if (child(path, key.*)) return .{ .kind = .directory, .size = 0, .mtime_ns = null };
+    if (ctx(p).native_files) |native| return native.stat(path);
     return error.FileNotFound;
 }
 fn list(p: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.ListError![]CoreCtx.FileEntry {
@@ -212,6 +265,7 @@ fn list(p: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.ListError![]C
     while (it.next()) |key| if (child(path, key.*)) {
         try out.append(a, .{ .path = try a.dupe(u8, key.*), .kind = .file });
     };
+    if (out.items.len == 0 and !std.mem.startsWith(u8, path, "/bundles/") and !std.mem.startsWith(u8, path, "/packages/") and !std.mem.startsWith(u8, path, "/cache/")) if (ctx(p).native_files) |native| return native.listDir(path, a);
     return out.toOwnedSlice(a);
 }
 fn listTop(p: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.ListError![]CoreCtx.FileEntry {
@@ -230,7 +284,10 @@ fn listTop(p: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.ListError!
     };
     return out.toOwnedSlice(a);
 }
-fn canonicalize(_: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.CanonicalizeError![]const u8 {
+fn canonicalize(p: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.CanonicalizeError![]const u8 {
+    if (ctx(p).native_files) |native| if (!ctx(p).files.contains(path) and !std.mem.startsWith(u8, path, "/packages/") and !std.mem.startsWith(u8, path, "/cache/") and !std.mem.startsWith(u8, path, "/bundles/") and !std.mem.startsWith(u8, path, "/internal/")) {
+        if (native.fileExists(path)) return native.canonicalize(path, a);
+    };
     return std.fs.path.resolve(a, &.{ "/workspace", path });
 }
 fn makePath(_: ?*anyopaque, _: std.Io, _: []const u8) CoreCtx.MakePathError!void {}
@@ -274,7 +331,8 @@ fn removeTree(p: ?*anyopaque, io_: std.Io, path: []const u8) CoreCtx.DeleteError
     }
 }
 fn copy(p: ?*anyopaque, _: std.Io, source: []const u8, destination: []const u8) CoreCtx.CopyError!void {
-    const data = (ctx(p).files.get(source) orelse return error.FileNotFound).bytes;
+    const data = read(p, .failing, source, gpa) catch return error.FileNotFound;
+    defer gpa.free(data);
     ctx(p).put(destination, data, false) catch return error.IoError;
 }
 fn now(_: ?*anyopaque, _: std.Io) i128 {
@@ -285,10 +343,17 @@ fn fetch(p: ?*anyopaque, _: std.Io, a: A, url: []const u8, dest: []const u8, max
     const parsed = unbundle.download.validateUrl(url) catch return error.DownloadFailed;
     const base = std.fmt.allocPrint(a, "/bundles/{s}", .{parsed.hash}) catch return error.OutOfMemory;
     defer a.free(base);
-    const files = list(p, .failing, base, a) catch return error.DownloadFailed;
+    var files = list(p, .failing, base, a) catch return error.DownloadFailed;
     defer {
         for (files) |f| a.free(f.path);
         a.free(files);
+    }
+    if (files.len == 0 and self.native_files != null) {
+        if (comptime @import("builtin").cpu.arch != .wasm32) {
+            try downloadNativePackage(self, url, parsed.hash, max);
+            a.free(files);
+            files = list(p, .failing, base, a) catch return error.DownloadFailed;
+        }
     }
     if (files.len == 0) {
         self.required.append(gpa, .{ .url = gpa.dupe(u8, url) catch return error.OutOfMemory, .destination = gpa.dupe(u8, dest) catch return error.OutOfMemory }) catch return error.OutOfMemory;
@@ -356,4 +421,74 @@ test "package extraction verifies content hashes before publishing" {
     try std.testing.expectEqualStrings("module [answer]\nanswer = 42\n", fs.files.get(file).?.bytes);
     bytes[bytes.len - 1] ^= 1;
     try std.testing.expectError(error.HashMismatch, fs.installPackage(url, bytes));
+}
+
+test "compiler cache evicts least recently read artifacts and retains workspace inputs" {
+    var fs: Workspace = .{ .cache_limit = 100 };
+    defer fs.deinit();
+    const value: [40]u8 = @splat('x');
+    try fs.put("/workspace/Keep.roc", &value, false);
+    try fs.put("/bundles/hash/main.roc", &value, false);
+    try fs.put("/cache/compat-test/mod/00/a.bin", &value, true);
+    try fs.put("/cache/compat-test/mod/00/b.bin", &value, true);
+    const cached = try fs.io(gpa).readFile("/cache/compat-test/mod/00/a.bin", gpa);
+    defer gpa.free(cached);
+    try fs.put("/cache/compat-test/mod/00/c.bin", &value, true);
+    try std.testing.expect(fs.files.contains("/cache/compat-test/mod/00/a.bin"));
+    try std.testing.expect(!fs.files.contains("/cache/compat-test/mod/00/b.bin"));
+    try std.testing.expect(fs.files.contains("/cache/compat-test/mod/00/c.bin"));
+    try std.testing.expect(fs.files.contains("/workspace/Keep.roc"));
+    try std.testing.expect(fs.files.contains("/bundles/hash/main.roc"));
+    try std.testing.expectEqual(@as(usize, 80), fs.cache_bytes);
+}
+
+fn downloadNativePackage(self: *Workspace, url: []const u8, hash: []const u8, max: ?u64) CoreCtx.FetchUrlError!void {
+    const native = self.native_files.?;
+    const cache_root = native.getEnvVar("XDG_CACHE_HOME", gpa) catch blk: {
+        const home = native.getEnvVar("HOME", gpa) catch return error.DownloadFailed;
+        defer gpa.free(home);
+        break :blk std.fs.path.join(gpa, &.{ home, ".cache" }) catch return error.OutOfMemory;
+    };
+    defer gpa.free(cache_root);
+    const package = std.fs.path.join(gpa, &.{ cache_root, "roclet", "packages", hash }) catch return error.OutOfMemory;
+    defer gpa.free(package);
+    const main = std.fs.path.join(gpa, &.{ package, "main.roc" }) catch return error.OutOfMemory;
+    defer gpa.free(main);
+    if (!native.fileExists(main)) {
+        var nonce: [8]u8 = undefined;
+        self.std_io.random(&nonce);
+        const staging = std.fmt.allocPrint(gpa, "{s}.{s}.tmp", .{ package, std.fmt.bytesToHex(nonce, .lower) }) catch return error.OutOfMemory;
+        defer gpa.free(staging);
+        native.makePath(staging) catch return error.DownloadFailed;
+        defer native.deleteTree(staging) catch {};
+        var allocator = gpa;
+        _ = unbundle.downloadAndExtract(&allocator, self.std_io, url, staging, .{ .max_expanded_bytes = max }) catch |err| return switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+            error.ExpandedSizeLimitExceeded => error.ExpandedSizeLimitExceeded,
+            else => error.DownloadFailed,
+        };
+        native.rename(staging, package) catch {
+            if (!native.fileExists(main)) return error.DownloadFailed;
+        };
+    }
+    const entries = native.listDir(package, gpa) catch return error.DownloadFailed;
+    defer {
+        for (entries) |item| gpa.free(item.path);
+        gpa.free(entries);
+    }
+    for (entries) |item| {
+        if (item.kind != .file) continue;
+        const bytes = native.readFile(item.path, gpa) catch return error.DownloadFailed;
+        defer gpa.free(bytes);
+        const path = std.fmt.allocPrint(gpa, "/bundles/{s}{s}", .{ hash, item.path[package.len..] }) catch return error.OutOfMemory;
+        defer gpa.free(path);
+        self.put(path, bytes, false) catch return error.OutOfMemory;
+    }
+}
+
+pub fn hashField(hash: *std.crypto.hash.sha2.Sha256, bytes: []const u8) void {
+    var size: [8]u8 = undefined;
+    std.mem.writeInt(u64, &size, bytes.len, .little);
+    hash.update(&size);
+    hash.update(bytes);
 }

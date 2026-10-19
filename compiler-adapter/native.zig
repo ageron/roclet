@@ -61,6 +61,10 @@ pub fn main(init: std.process.Init) !void {
     if (std.mem.eql(u8, target, "md")) target = "markdown";
     const bytes = try std.Io.Dir.cwd().readFileAlloc(init.io, file, a, .limited(4 * 1024 * 1024));
     const is_document = !raw and !std.mem.eql(u8, format, "json");
+    if (is_document) {
+        const actual = try std.Io.Dir.cwd().realPathFileAlloc(init.io, file, a);
+        try bridge.setNativeSourceDirectory(std.fs.path.dirname(actual) orelse ".");
+    }
     if (convert and !is_document) return error.ExpectedDocumentExtension;
     const request = if (is_document) try stringify(a, .{ .operation = "document", .action = if (normalize) "normalize" else if (std.mem.eql(u8, action, "run")) "evaluate" else action, .format = format, .target = target, .source = bytes }) else bytes;
     const result = try bridge.process(request);

@@ -213,6 +213,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         }
         return err;
     };
+    request_frontend_builds += 1;
     build_env.compileDiscovered() catch |err| {
         if (!try emitDiagnostics(&build_env, diag, allocator)) {
             diag.step("compileDiscovered", err);
@@ -264,6 +265,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     };
     defer allocator.free(lir_roots);
 
+    request_lowerings += 1;
     var lowered = build_env.runtimeProgramSession().?.takeRuntime(
         allocator,
         .{ .requests = lir_roots },
@@ -313,6 +315,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     };
     defer view.deinit();
 
+    request_executions += 1;
     return runEchoView(allocator, &view, diag, opts.std_io, opts.args) catch |err| {
         diag.step("runEchoView", err);
         return err;
@@ -498,7 +501,9 @@ fn echoJoinPath(ctx_ptr: ?*anyopaque, _: std.Io, parts: []const []const u8, gpa:
     return echoGetCtx(ctx_ptr).fallback.joinPath(parts, gpa);
 }
 fn echoCanonicalize(ctx_ptr: ?*anyopaque, _: std.Io, path: []const u8, gpa: Allocator) Io.CanonicalizeError![]const u8 {
-    return echoGetCtx(ctx_ptr).fallback.canonicalize(path, gpa);
+    const self = echoGetCtx(ctx_ptr);
+    if (self.isSyntheticPath(path)) return gpa.dupe(u8, path);
+    return self.fallback.canonicalize(path, gpa);
 }
 fn echoMakePath(ctx_ptr: ?*anyopaque, _: std.Io, path: []const u8) Io.MakePathError!void {
     return echoGetCtx(ctx_ptr).fallback.makePath(path);
@@ -577,7 +582,7 @@ const echo_vtable = Io.VTable{
 };
 
 var builtin_modules: ?eval.BuiltinModules = null;
-fn persistentBuiltins() !*eval.BuiltinModules {
+pub fn persistentBuiltins() !*eval.BuiltinModules {
     if (builtin_modules == null) builtin_modules = try eval.BuiltinModules.init(if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator);
     return &builtin_modules.?;
 }
@@ -595,11 +600,11 @@ pub var request_cache_stats: compile.CacheStats = .{};
 // Finalization evaluates constants for the whole checked graph. Keep their
 // observations, then replay only the constants reachable from this output.
 // Provenance comes from checked artifacts, never from matching debug messages.
-const DebugCapture = struct {
+pub const DebugCapture = struct {
     allocator: Allocator,
     events: std.ArrayList(eval.CompileTimeFinalization.ModuleRootEvent) = .empty,
     failed: bool = false,
-    fn observe(context: *anyopaque, incoming: eval.CompileTimeFinalization.ModuleRootEvent) void {
+    pub fn observe(context: *anyopaque, incoming: eval.CompileTimeFinalization.ModuleRootEvent) void {
         const self: *@This() = @ptrCast(@alignCast(context));
         var event = incoming;
         event.message = self.allocator.dupe(u8, incoming.message) catch {
@@ -611,10 +616,12 @@ const DebugCapture = struct {
         };
     }
     const Item = struct { env: *can.ModuleEnv, def: can.CIR.Def.Idx };
-    fn replay(self: *@This(), build_env: *BuildEnv, root_name: []const u8) !void {
+    pub fn replay(self: *@This(), build_env: *BuildEnv, root_name: []const u8) !void {
         if (self.failed) return error.OutOfMemory;
         if (self.events.items.len == 0) return;
-        const a = self.allocator;
+        var temporary = std.heap.ArenaAllocator.init(if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator);
+        defer temporary.deinit();
+        const a = temporary.allocator();
         const app = build_env.getAppSemanticData() orelse return;
         const modules = try build_env.getCompiledModules(a);
         var pending: std.ArrayList(Item) = .empty;
@@ -699,3 +706,37 @@ const DebugCapture = struct {
         }
     }
 };
+
+pub var request_frontend_builds: u64 = 0;
+pub var request_lowerings: u64 = 0;
+pub var request_executions: u64 = 0;
+pub var request_prepared_hits: u64 = 0;
+pub const RequestStats = struct {
+    cache: compile.CacheStats,
+    frontend_builds: u64,
+    lowerings: u64,
+    executions: u64,
+    prepared_hits: u64,
+    pub fn jsonStringify(self: @This(), w: anytype) !void {
+        try w.beginObject();
+        inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |name| {
+            try w.objectField(name);
+            try w.write(@field(self.cache, name));
+        }
+        inline for (.{ "frontend_builds", "lowerings", "executions", "prepared_hits" }) |name| {
+            try w.objectField(name);
+            try w.write(@field(self, name));
+        }
+        try w.endObject();
+    }
+};
+pub fn stats() RequestStats {
+    return .{ .cache = request_cache_stats, .frontend_builds = request_frontend_builds, .lowerings = request_lowerings, .executions = request_executions, .prepared_hits = request_prepared_hits };
+}
+
+pub const ScratchTypeWriter = @typeInfo(@typeInfo(@TypeOf(can.ModuleEnv.initTypeWriter)).@"fn".return_type.?).error_union.payload;
+pub fn scratchTypeWriter(env: *can.ModuleEnv, allocator: Allocator) !ScratchTypeWriter {
+    var writer = try ScratchTypeWriter.initFromParts(allocator, &env.types, env.getIdentStore(), null);
+    writer.setDefaultSourceResolver(env, can.ModuleEnv.typeWriterDefaultSource);
+    return writer;
+}

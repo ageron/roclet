@@ -141,10 +141,19 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
                 roots = if (output.len == 0) try value(a, &[_]V{}) else try value(a, .{output});
             }
         }
+        var failure_roots = roots;
+        if (request.object.get("selectedCell")) |selected| {
+            const cell = fieldArray(result.object.get("model").?, "cells")[@intCast(selected.integer)];
+            const output = string(cell, "output", "");
+            failure_roots = if (output.len == 0) try value(a, &[_]V{}) else try value(a, .{output});
+        }
         const modules = request.object.get("modules") orelse try value(a, &[_]V{});
         const checked_bytes = try snapshot.evaluate(gpa, try json(a, .{
             .cells = .{.{ .key = "document", .source = program }},
             .roots = &[_]V{},
+            .possible_roots = result.object.get("roots").?,
+            .failure_roots = if (std.mem.eql(u8, action, "evaluate")) failure_roots else try value(a, &[_]V{}),
+            .isolate_errors = if (request.object.get("isolateErrors")) |v| v == .bool and v.bool else false,
             .modules = modules,
             .app_header = app_header,
         }), evaluate);
@@ -171,6 +180,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
                 const evaluated = try snapshot.evaluate(gpa, try json(a, .{
                     .cells = .{.{ .key = "document", .source = program }},
                     .roots = selected_roots,
+                    .possible_roots = result.object.get("roots").?,
                     .modules = modules,
                     .app_header = app_header,
                     .isolate_errors = if (request.object.get("isolateErrors")) |v| v == .bool and v.bool else false,

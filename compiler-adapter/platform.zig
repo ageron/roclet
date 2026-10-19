@@ -6,6 +6,7 @@ const builtins = @import("builtins");
 pub const host_abi = builtins.host_abi;
 pub const RocStr = builtins.str.RocStr;
 pub const RocList = builtins.list.RocList;
+pub var observation_root: ?[]const u8 = null;
 pub var observer: ?*const fn ([]const u8, []const u8) void = null;
 pub const platform_main_source = @embedFile("platform/main.roc");
 pub const echo_module_source = @embedFile("platform/Echo.roc");

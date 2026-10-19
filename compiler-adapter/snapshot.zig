@@ -11,6 +11,8 @@ pub const Snapshot = struct {
     workerGeneration: u64 = 1,
     cells: []const Cell,
     roots: []const []const u8,
+    possible_roots: []const []const u8 = &.{},
+    failure_roots: []const []const u8 = &.{},
     modules: []const Module = &.{},
     app_header: []const u8 = "",
     isolate_errors: bool = false,
@@ -27,7 +29,7 @@ pub const Definition = struct {
     rename_safe: bool = false,
 };
 pub const Event = struct { kind: []const u8, message: []const u8, root: []const u8, region: ?Region = null };
-const RawEvent = struct { kind: []const u8, message: []const u8 };
+const RawEvent = struct { kind: []const u8, message: []const u8, root: ?[]const u8 = null };
 const RawResponse = struct {
     display_module: bool = false,
     protocol: u32,
@@ -98,16 +100,19 @@ fn validate(s: Snapshot) !void {
         if (!identifier(root, false)) return error.InvalidRoot;
         for (s.roots[0..i]) |previous| if (std.mem.eql(u8, previous, root)) return error.DuplicateRoot;
     }
+    for (s.possible_roots, 0..) |root, i| {
+        if (!identifier(root, false)) return error.InvalidRoot;
+        for (s.possible_roots[0..i]) |previous| if (std.mem.eql(u8, previous, root)) return error.DuplicateRoot;
+    }
     for (s.modules, 0..) |module, i| {
         if (!identifier(module.name, true)) return error.InvalidModule;
         for (s.modules[0..i]) |previous| if (std.mem.eql(u8, previous.name, module.name)) return error.DuplicateModule;
     }
 }
 fn invoke(gpa: Allocator, arena: Allocator, s: Snapshot, source: []const u8, root: ?[]const u8, rich: bool, comptime compile: anytype) !RawResponse {
-    const entry = if (root) |name| if (rich) try std.fmt.allocPrint(arena, "roclet_value_{s} = {s}\n    echo!(Str.inspect(roclet_value_{s}))\n    echo!(Display.to_wire(roclet_value_{s}))\n    Ok({{}})", .{ name, name, name, name }) else try std.fmt.allocPrint(arena, "echo!(Str.inspect({s}))\n    Ok({{}})", .{name}) else "Ok({})";
-    const full_source = try std.fmt.allocPrint(arena, "{s}\n\nmain! = |_args| {{\n    {s}\n}}\n", .{ source, entry });
-    if (full_source.len > limit) return error.SourceTooLarge;
-    const request = try json(arena, .{ .protocol = @as(u32, 1), .source = full_source, .user_bytes = source.len, .check_only = root == null, .rich_output = rich, .modules = s.modules, .app_header = s.app_header, .root = root });
+    if (source.len >= limit) return error.SourceTooLarge;
+    const possible = if (s.possible_roots.len == 0) s.roots else s.possible_roots;
+    const request = try json(arena, .{ .protocol = @as(u32, 1), .source = source, .user_bytes = source.len, .check_only = root == null, .rich_output = rich, .modules = s.modules, .app_header = s.app_header, .root = root, .notebook = .{ .roots = possible, .runtime_roots = if (s.roots.len == 0) s.failure_roots else s.roots, .isolate_errors = s.isolate_errors } });
     const bytes = try compile(request);
     defer gpa.free(bytes);
     const response = try std.json.parseFromSliceLeaky(RawResponse, arena, bytes, .{ .allocate = .alloc_always, .ignore_unknown_fields = true });
@@ -146,6 +151,9 @@ pub fn evaluate(gpa: Allocator, bytes: []const u8, comptime compile: anytype) ![
     if (!std.mem.eql(u8, checked.status, "ok")) {
         result.status = checked.status;
         result.failure = checked.failure;
+        var captured: std.ArrayList(Event) = .empty;
+        for (checked.events) |event| try captured.append(arena, .{ .kind = event.kind, .message = event.message, .root = event.root orelse if (s.roots.len > 0) s.roots[0] else "" });
+        result.events = captured.items;
         return json(gpa, result);
     }
     var names: std.StringHashMapUnmanaged(void) = .empty;
