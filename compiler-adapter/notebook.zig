@@ -124,7 +124,12 @@ const State = struct {
             return;
         };
         engine.request_frontend_builds += 1;
-        try build.compileDiscovered();
+        build.compileDiscovered() catch |err| {
+            self.reports = try build.drainReports();
+            self.failed = true;
+            if (self.reports.len == 0) return err;
+            return;
+        };
         if (build.coordinator.?.hasUserErrors()) {
             try build.finishCheckedProgram();
             self.reports = try build.drainReports();
