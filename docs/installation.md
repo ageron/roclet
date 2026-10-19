@@ -102,24 +102,20 @@ itself; Roclet bundles include it automatically.
 
 ## Hosting on GitHub Pages
 
-The public app is **https://ageron.github.io/roclet/**. GitHub Pages serves the
-built static files from the `gh-pages` branch, with no execution server.
-The source code remains on `main`.
+The public app is **https://ageron.github.io/roclet/**. Every push to `main`
+automatically builds, tests, and deploys the static site through GitHub Actions.
+No execution server is needed. Follow progress under **Actions → Deploy Roclet**;
+a failed build or test leaves the previous deployment online.
 
-To prepare an update, run `zig build package`. The resulting
-`zig-out/roclet-pages.zip` contains the complete static site, including the WASM
-compiler, offline assets, demos, a root redirect, and `.nojekyll`. It excludes
-native executables. Extract it into a clean checkout of the `gh-pages` branch,
-replace the previous site's files, commit, and push that branch. Do not publish
-the source checkout: compiled artifacts are intentionally ignored on `main`.
+The workflow installs the Zig version in `compiler.lock.json` and builds the
+pinned Roc compiler. Compiler artifacts are cached between runs; changes to the
+compiler inputs trigger a fresh build. The first deployment takes longer.
+You can also rerun deployment using **Actions → Deploy Roclet → Run workflow**.
+In **Settings → Pages**, the publishing source must be **GitHub Actions**.
 
-In **Settings → Pages**, use **Deploy from a branch → gh-pages → / (root)**.
-Keep HTTPS enabled and preserve all relative paths in the archive.
-Only publish a build you've tested; pushing source changes to `main` does not
-update the hosted site automatically.
+For manual hosting elsewhere, `zig build package` creates
+`zig-out/roclet-pages.zip`. Extract the archive and serve its contents over HTTPS,
+preserving relative paths. It contains the compiler, demos, and offline assets.
 
-After deployment, open the public app in Chrome, try the [demos](../demos/README.md),
-then check offline preparation. Existing offline users must close all Roclet tabs
-and reopen after the update is prepared.
-
-See GitHub's [Pages documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site).
+Existing offline users can prepare the updated version through
+**File → Offline & storage**, then close all Roclet tabs and reopen.
