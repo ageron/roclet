@@ -14,6 +14,9 @@ test('workspace sends only changed modules and removes deleted modules',()=>{
   assert.deepEqual(fileChanges(next.next,[]).patch.drop,['/workspace/Geometry.roc','/workspace/Other.roc']);
   for(const path of ['/workspace/../escape.roc','/packages/X.roc','Geometry.roc','/workspace/Main.roc','/workspace/main.roc','/workspace//Fresh.roc']) assert.throws(()=>fileChanges(new Map(),[{path,source:''}]));
   assert.throws(()=>mountChanges({workspace:false},first.patch),/Rebuild/);
+  const text=fileChanges(new Map(),[{path:'/workspace/data/input.txt',source:'plain UTF-8 text'}]),mounted=[];
+  mountChanges({workspace:true,putFile:(path,source)=>mounted.push({path,source})},text.patch);
+  assert.deepEqual(mounted,[{path:'/workspace/data/input.txt',source:'plain UTF-8 text'}]);
 });
 
 test('session mounts unchanged files once and remounts after worker restart',async()=>{
