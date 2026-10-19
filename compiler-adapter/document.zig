@@ -1,12 +1,10 @@
-//! Native/WASM host for the pure Roc document core.
+//! Native/WASM notebook frontend and evaluator. Source assembly is native UTF-8.
 const std = @import("std");
-const syntax = @import("roclet_syntax.zig");
-const snapshot = @import("roclet_snapshot.zig");
+const syntax = @import("syntax.zig");
+const snapshot = @import("snapshot.zig");
+const frontend = @import("document_frontend.zig");
 const A = std.mem.Allocator;
 const V = std.json.Value;
-const DraftOutput = struct { kind: []const u8, source: []const u8 };
-const DraftCell = struct { kind: []const u8, source: []const u8, attributes: []const u8 = "", outputs: []const DraftOutput = &.{} };
-const Draft = struct { preamble: []const u8 = "", metadata: []const u8 = "", cells: []const DraftCell };
 fn json(a: A, data: anytype) ![]u8 {
     var w: std.Io.Writer.Allocating = .init(a);
     try std.json.Stringify.value(data, .{}, &w.writer);
@@ -19,30 +17,7 @@ fn string(o: V, key: []const u8, fallback: []const u8) []const u8 {
     const v = if (o == .object) o.object.get(key) else null;
     return if (v != null and v.? == .string) v.?.string else fallback;
 }
-fn core(a: A, input: V, evaluate: anytype) !V {
-    // The application is immutable. Input is runtime data, never generated code.
-    const source =
-        \\import Document
-        \\main! = |args| {
-        \\    input : Try(Document.Input, _)
-        \\    input = Json.parse(List.first(args).ok_or(""))
-        \\    match input {
-        \\        Ok(data) => echo!(Json.to_str(Document.run(data)))
-        \\        Err(_) => echo!("{\"status\":\"protocol_error\",\"failure\":\"Invalid core input\"}")
-        \\    }
-        \\    Ok({})
-        \\}
-    ;
-    const request = try json(a, .{ .protocol = 1, .source = source, .user_bytes = 0, .args = .{try json(a, input)}, .modules = .{.{ .name = "Document", .content = @embedFile("Document.roc") }} });
-    const bytes = try evaluate(request);
-    defer (if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator).free(bytes);
-    const result = try std.json.parseFromSliceLeaky(V, a, bytes, .{ .allocate = .alloc_always });
-    if (!std.mem.eql(u8, string(result, "status", ""), "ok")) return result;
-    const events = result.object.get("events").?.array.items;
-    for (events) |event| if (std.mem.eql(u8, string(event, "kind", ""), "value")) return std.json.parseFromSliceLeaky(V, a, string(event, "message", ""), .{ .allocate = .alloc_always });
-    return error.MissingCoreResult;
-}
-pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, evaluate_core: anytype) ![]u8 {
+pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
@@ -58,9 +33,10 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, evaluate_core: anyt
     const target = string(request, "target", format);
     if ((!std.mem.eql(u8, format, "roc") and !std.mem.eql(u8, format, "markdown")) or (!std.mem.eql(u8, target, "roc") and !std.mem.eql(u8, target, "markdown"))) return json(gpa, .{ .status = "protocol_error", .failure = "Expected roc or markdown format" });
     const draft_value = request.object.get("draft");
-    var draft: Draft = .{ .cells = &.{} };
+    var draft: frontend.Draft = .{};
     if (draft_value) |raw| {
-        draft = std.json.parseFromSliceLeaky(Draft, a, try json(a, raw), .{ .ignore_unknown_fields = true }) catch return json(gpa, .{ .status = "protocol_error", .failure = "Malformed notebook draft" });
+        if (raw != .object or raw.object.get("cells") == null) return json(gpa, .{ .status = "protocol_error", .failure = "Malformed notebook draft" });
+        draft = std.json.parseFromValueLeaky(frontend.Draft, a, raw, .{ .ignore_unknown_fields = true }) catch return json(gpa, .{ .status = "protocol_error", .failure = "Malformed notebook draft" });
         var size = draft.preamble.len + draft.metadata.len;
         if (draft.cells.len > 500) return json(gpa, .{ .status = "protocol_error", .failure = "Notebook limit is 500 cells" });
         for (draft.cells) |cell| {
@@ -70,59 +46,50 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, evaluate_core: anyt
         }
         if (size > 256 * 1024) return json(gpa, .{ .status = "protocol_error", .failure = "Document limit is 256 KiB" });
     }
-    const empty_graph = try value(a, .{ .context = "", .scope = "module", .definitions = &[_]V{} });
-    const empty_reactivity = try value(a, .{ .known = false, .previous = empty_graph, .current = empty_graph, .available = &[_]V{}, .roots = &[_]V{}, .force = &[_]V{} });
-    var input = try value(a, .{
-        .reactivity = empty_reactivity,
-        .metadata_fields = &[_]V{},
+    draft.supplied = draft_value != null;
+    var input: frontend.Input = .{
         .phase = "segment",
         .format = format,
         .target = target,
         .source = source,
-        .facts = if (std.mem.eql(u8, format, "roc")) try syntax.roc(a, source) else syntax.Facts{},
-        .blocks = if (std.mem.eql(u8, format, "markdown")) try syntax.markdown(a, source) else &[_]syntax.Block{},
-        .model = .{ .format = format, .original = source, .preamble = "", .metadata = "", .cells = &[_]V{}, .diagnostics = &[_]V{} },
-        .draft = .{ .supplied = draft_value != null, .preamble = draft.preamble, .metadata = draft.metadata, .cells = draft.cells },
-    });
-    const first = try core(a, input, evaluate_core);
-    var model = first.object.get("model") orelse return json(gpa, first);
-    for (model.object.getPtr("cells").?.array.items) |*cell| {
-        if (std.mem.eql(u8, string(cell.*, "kind", ""), "code")) try cell.object.put(a, "facts", try value(a, try syntax.roc(a, string(cell.*, "source", ""))));
-        if (std.mem.eql(u8, string(cell.*, "kind", ""), "markdown")) {
-            const prose = string(cell.*, "source", "");
+        .facts = if (std.mem.eql(u8, format, "roc") and !draft.supplied) try syntax.roc(a, source) else .{},
+        .blocks = if (std.mem.eql(u8, format, "markdown") and !draft.supplied) try syntax.markdown(a, source) else &.{},
+        .draft = draft,
+    };
+    var model = (try frontend.run(a, input)).model;
+    for (model.cells) |*cell| {
+        if (std.mem.eql(u8, cell.kind, "code")) cell.facts = try syntax.roc(a, cell.source);
+        if (std.mem.eql(u8, cell.kind, "markdown")) {
             var marker_lines: std.ArrayList(u64) = .empty;
-            const blocks = try syntax.markdown(a, prose);
-            try cell.object.put(a, "blocks", try value(a, blocks));
-            if (blocks.len > 0) try cell.object.put(a, "first_block", try value(a, blocks[0]));
-            for (blocks) |block| if (std.mem.eql(u8, block.kind, "html")) {
-                try marker_lines.append(a, std.mem.count(u8, prose[0..@intCast(block.start)], "\n"));
+            cell.blocks = try syntax.markdown(a, cell.source);
+            if (cell.blocks.len > 0) cell.first_block = cell.blocks[0];
+            for (cell.blocks) |block| if (std.mem.eql(u8, block.kind, "html")) {
+                try marker_lines.append(a, std.mem.count(u8, cell.source[0..@intCast(block.start)], "\n"));
             };
-            try cell.object.put(a, "marker_lines", try value(a, marker_lines.items));
+            cell.marker_lines = try marker_lines.toOwnedSlice(a);
         }
     }
     // Editing Markdown keeps document-level Roc configuration outside the text.
-    // Explicit metadata in an opened/pasted document always takes precedence.
-    if (draft_value == null and std.mem.eql(u8, format, "markdown") and string(model, "metadata", "").len == 0) {
+    if (!draft.supplied and std.mem.eql(u8, format, "markdown") and model.metadata.len == 0) {
         if (request.object.get("context")) |context| {
-            try model.object.put(a, "preamble", .{ .string = string(context, "preamble", "") });
-            try model.object.put(a, "metadata", .{ .string = string(context, "metadata", "") });
+            model.preamble = string(context, "preamble", "");
+            model.metadata = string(context, "metadata", "");
         }
     }
-    const metadata = string(model, "metadata", "");
-    var fields: std.ArrayList(struct { key: []const u8, value: []const u8 }) = .empty;
-    if (metadata.len > 0) {
-        const parsed = std.json.parseFromSliceLeaky(V, a, metadata, .{}) catch V.null;
+    var fields: std.ArrayList(frontend.MetadataField) = .empty;
+    if (model.metadata.len > 0) {
+        const parsed = std.json.parseFromSliceLeaky(V, a, model.metadata, .{}) catch V.null;
         if (parsed == .object) {
             var it = parsed.object.iterator();
             while (it.next()) |entry| try fields.append(a, .{ .key = entry.key_ptr.*, .value = try json(a, entry.value_ptr.*) });
         }
     }
-    try input.object.put(a, "metadata_fields", try value(a, fields.items));
-    try input.object.put(a, "facts", try value(a, try syntax.roc(a, string(model, "preamble", ""))));
-    try input.object.put(a, "phase", .{ .string = action });
-    try input.object.put(a, "model", model);
-    var result = try core(a, input, evaluate_core);
-    if (result.object.get("model") == null) return json(gpa, result);
+    input.metadata_fields = fields.items;
+    input.facts = try syntax.roc(a, model.preamble);
+    input.phase = action;
+    input.model = model;
+    const app_header = model.preamble[0..@intCast(@min(input.facts.header_end, model.preamble.len))];
+    var result = try value(a, try frontend.run(a, input));
     try result.object.put(a, "protocol", .{ .integer = 1 });
     if ((std.mem.eql(u8, action, "evaluate") or std.mem.eql(u8, action, "analyze")) and std.mem.eql(u8, string(result, "status", ""), "ok")) {
         const program = string(result, "program", "");
@@ -141,27 +108,25 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, evaluate_core: anyt
             .cells = .{.{ .key = "document", .source = program }},
             .roots = &[_]V{},
             .modules = modules,
+            .app_header = app_header,
         }), evaluate);
         defer gpa.free(checked_bytes);
         var evaluation = try std.json.parseFromSliceLeaky(V, a, checked_bytes, .{ .allocate = .alloc_always });
         if (std.mem.eql(u8, string(evaluation, "status", ""), "ok")) {
-            const graph = try dependencyGraph(a, program, evaluation, modules);
+            const graph = try dependencyGraph(a, program, evaluation, modules, string(request, "workspaceFingerprint", ""));
             try result.object.put(a, "graph", graph);
-            var reactivity = reactive orelse empty_reactivity;
-            try reactivity.object.put(a, "current", graph);
-            try reactivity.object.put(a, "roots", roots);
+            var reactivity = if (reactive) |raw| try std.json.parseFromValueLeaky(frontend.Reactive, a, raw, .{ .ignore_unknown_fields = true }) else frontend.Reactive{};
+            reactivity.current = try std.json.parseFromValueLeaky(frontend.Graph, a, graph, .{});
+            reactivity.roots = try std.json.parseFromValueLeaky([]const []const u8, a, roots, .{});
             if (request.object.get("forceAll")) |force| {
-                if (force == .bool and force.bool) try reactivity.object.put(a, "force", roots);
+                if (force == .bool and force.bool) reactivity.force = reactivity.roots;
             }
             if (reactive != null) if (request.object.get("selectedCell")) |selected| {
                 const cell = fieldArray(result.object.get("model").?, "cells")[@intCast(selected.integer)];
                 const output = string(cell, "output", "");
-                try reactivity.object.put(a, "force", if (output.len == 0) try value(a, &[_]V{}) else try value(a, .{output}));
+                reactivity.force = if (output.len == 0) &.{} else try a.dupe([]const u8, &.{output});
             };
-            try input.object.put(a, "reactivity", reactivity);
-            try input.object.put(a, "phase", .{ .string = "plan" });
-            const planned = try core(a, input, evaluate_core);
-            const plan = planned.object.get("plan") orelse return json(gpa, planned);
+            const plan = try value(a, try frontend.plan(a, reactivity));
             try result.object.put(a, "plan", plan);
             const selected_roots = plan.object.get("evaluate").?;
             if (std.mem.eql(u8, action, "evaluate") and selected_roots.array.items.len > 0) {
@@ -169,6 +134,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, evaluate_core: anyt
                     .cells = .{.{ .key = "document", .source = program }},
                     .roots = selected_roots,
                     .modules = modules,
+                    .app_header = app_header,
                     .isolate_errors = if (request.object.get("isolateErrors")) |v| v == .bool and v.bool else false,
                 }), evaluate);
                 defer gpa.free(evaluated);
@@ -197,7 +163,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, evaluate_core: anyt
     }
     if ((std.mem.eql(u8, action, "check") or std.mem.eql(u8, action, "run")) and std.mem.eql(u8, string(result, "status", ""), "ok")) {
         const execution = string(result, "execution", "");
-        const checked = try evaluate(try json(a, .{ .protocol = 1, .source = execution, .user_bytes = execution.len, .check_only = std.mem.eql(u8, action, "check"), .modules = request.object.get("modules") orelse try value(a, &[_]V{}) }));
+        const checked = try evaluate(try json(a, .{ .protocol = 1, .source = execution, .user_bytes = execution.len, .check_only = std.mem.eql(u8, action, "check"), .app_header = app_header, .modules = request.object.get("modules") orelse try value(a, &[_]V{}) }));
         defer gpa.free(checked);
         const evaluation = try std.json.parseFromSliceLeaky(V, a, checked, .{ .allocate = .alloc_always });
         try mapDiagnostics(a, &result, evaluation, source, execution);
@@ -305,7 +271,7 @@ fn digest(a: A, bytes: []const u8) ![]const u8 {
     std.crypto.hash.sha2.Sha256.hash(bytes, &hash, .{});
     return a.dupe(u8, &std.fmt.bytesToHex(hash, .lower));
 }
-fn dependencyGraph(a: A, program: []const u8, evaluation: V, modules: V) !V {
+fn dependencyGraph(a: A, program: []const u8, evaluation: V, modules: V, workspace_fingerprint: []const u8) !V {
     var definitions: std.ArrayList(V) = .empty;
     const covered = try a.alloc(bool, program.len);
     @memset(covered, false);
@@ -323,5 +289,6 @@ fn dependencyGraph(a: A, program: []const u8, evaluation: V, modules: V) !V {
     var context: std.Io.Writer.Allocating = .init(a);
     for (program, covered) |byte, skip| if (!skip) try context.writer.writeByte(byte);
     try context.writer.writeAll(try json(a, modules));
+    try context.writer.writeAll(workspace_fingerprint);
     return value(a, .{ .definitions = definitions.items, .scope = string(evaluation, "dependency_scope", "module"), .context = try digest(a, context.written()) });
 }

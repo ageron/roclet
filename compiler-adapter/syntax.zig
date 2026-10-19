@@ -1,4 +1,4 @@
-//! Syntax facts only. Cell boundaries and notebook policy live in Document.roc.
+//! Syntax facts only. Cell boundaries and notebook policy live in document_frontend.zig.
 const std = @import("std");
 const parse = @import("parse");
 const base = @import("base");
