@@ -30,7 +30,7 @@ export class BrowserPackages {
     for(;;) {
       const result=await transport(request),required=result.packagesRequired;
       if(!required?.length) return result;
-      for(const {url} of required) {
+      for(const url of new Set(required.map(packageRequest=>packageRequest.url))) {
         if(typeof url!=='string' || installed.has(url)) throw new Error(`Compiler could not resolve installed package: ${url}`);
         await this.install(transport,url);installed.add(url);
       }

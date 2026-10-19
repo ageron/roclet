@@ -61,7 +61,7 @@ test('cache bounds evict old artifacts and reject malformed paths and truncated 
 test('packages use compiler resolver URLs and persist only compiler-verified archives',async()=>{
   const cache=new BuildCache('package-test',{indexedDB:null});await cache.clear();
   const url='https://packages.invalid/example.tar.zst',archive=new Uint8Array([9,8,7]);let downloads=0,mounted=false;
-  const transport=()=>mounted?{status:'ok'}:{status:'diagnostic',packagesRequired:[{url,destination:'/bundles/compiler-owned'}]};
+  const transport=()=>mounted?{status:'ok'}:{status:'diagnostic',packagesRequired:[{url,destination:'/bundles/compiler-owned'},{url,destination:'/bundles/compiler-owned'}]};
   transport.installPackage=(requested,bytes)=>{assert.equal(requested,url);mounted=bytes[0]===9;return mounted;};
   const fetch=async requested=>{assert.equal(requested,url);downloads++;return new Response(archive);};
   assert.equal((await new BrowserPackages(cache,{fetch}).evaluate(transport,{})).status,'ok');assert.equal(downloads,1);
