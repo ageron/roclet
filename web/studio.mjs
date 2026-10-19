@@ -309,7 +309,7 @@ function showDependencies(index) {
     const reason=document.createElement('p'); reason.textContent=item.reason;
     const deps=document.createElement('pre'); deps.textContent=item.dependencies.map(name=>`${name}: ${(result.graph.definitions.find(d=>d.name===name)?.dependencies ?? []).join(', ') || 'no notebook dependencies'}`).join('\n');
     const time=document.createElement('p');
-    time.textContent=`Last request: ${Math.round(result.workerMs ?? 0)} ms in the worker · ${result.evaluation.evaluated_roots?.length ?? 0} outputs evaluated · ${result.plan.reused.length} reused. The whole document is type-checked; evaluated roots each compile afresh.`;
+    time.textContent=`Last request: ${Math.round(result.workerMs ?? 0)} ms in the worker · ${result.evaluation.evaluated_roots?.length ?? 0} outputs evaluated · ${result.plan.reused.length} reused.`;
     content.append(reason,deps,time);
     if (result.graph?.scope==='module') {const note=document.createElement('p');note.textContent='This document uses types or dispatch requiring conservative module-wide invalidation.';content.append(note);}
   }
@@ -453,8 +453,31 @@ function bind() {
   $('new').onclick = () => perform(async () => { await studio.replace(newDraft()); editCell(selection.focus); });
   $('rich-example').onclick=()=>perform(async()=>{const response=await fetch('../fixtures/documents/rich-outputs.roc');if(!response.ok) throw new Error('Example unavailable; rebuild the offline distribution.');await studio.open(await response.text(),'Rich outputs.roc');closeMenus();});
   $('recent').onchange = () => perform(async () => { if($('recent').value===studio.state.id) return; const record = await store.get($('recent').value); if (validDraft(record)) await studio.replace(record); });
-  $('open').onchange = () => perform(async () => { const file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>8*1024*1024) throw new Error('Roclet bundles are limited to 8 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await studio.replace(record);notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await studio.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); if (studio.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); });
+  $('open').onchange = () => perform(async () => { const file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>20*1024*1024) throw new Error('Roclet bundles are limited to 20 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await studio.replace(record);notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await studio.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); if (studio.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); });
   $('preview').onclick = () => perform(async () => { const result = await studio.inspect('export', 'roc'); $('generated').textContent = result.source; closeMenus(); $('generated-dialog').showModal(); });
+  const showProjectFile = path => {
+    const files=studio.state.files ?? [], select=$('project-select'); select.replaceChildren();
+    const create=document.createElement('option'); create.value=''; create.textContent='New file'; select.append(create);
+    for (const file of files) {const option=document.createElement('option');option.value=file.path;option.textContent=file.path;select.append(option);}
+    const file=files.find(file=>file.path===path);select.value=file?.path ?? '';
+    $('project-path').value=file?.path ?? ''; $('project-source').value=file?.source ?? '';
+    $('project-remove').disabled=!file; $('project-status').textContent=`${files.length} project files saved with this notebook.`;
+  };
+  $('project-files').onclick=()=>{closeMenus();showProjectFile(studio.state.files?.[0]?.path);$('project-dialog').showModal();};
+  $('project-select').onchange=()=>showProjectFile($('project-select').value);
+  $('project-upload').onchange=()=>perform(async()=>{
+    const additions=[];
+    for(const file of $('project-upload').files) {if(file.size>16*1024*1024) throw new Error('Project sources exceed the 16 MiB limit.'); additions.push({path:file.webkitRelativePath || file.name,source:await file.text()});}
+    const paths=new Set(additions.map(file=>file.path));
+    studio.setProjectFiles([...(studio.state.files ?? []).filter(file=>!paths.has(file.path)),...additions]);
+    $('project-upload').value='';showProjectFile(additions[0]?.path);
+  });
+  $('project-save').onclick=()=>perform(()=>{
+    const old=$('project-select').value,path=$('project-path').value,source=$('project-source').value;
+    const files=(studio.state.files ?? []).filter(file=>file.path!==old && file.path!==path);
+    studio.setProjectFiles([...files,{path,source}]);showProjectFile(path);$('project-status').textContent='File saved. Imports update with the next run.';
+  });
+  $('project-remove').onclick=()=>{studio.removeProjectFile($('project-select').value);showProjectFile();};
   $('download').onclick = () => perform(async () => {
     const result = await studio.inspect('export');
     const url = URL.createObjectURL(new Blob([result.source], {type:'text/plain;charset=utf-8'}));

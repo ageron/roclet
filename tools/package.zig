@@ -77,6 +77,8 @@ pub fn main(init: std.process.Init) !void {
         "web/studio.html",             "web/studio.mjs",              "web/studio-model.mjs",     "web/compiler-tools.mjs",   "web/studio-store.mjs",                "web/studio-cells.mjs",
         "web/cell-editor.mjs",         "web/editor-navigation.mjs",   "web/roc-highlighting.mjs", "web/document-session.mjs", "web/format-worker.mjs",               "web/markdown-view.mjs",
         "web/archive.mjs",             "web/sharing.mjs",             "web/offline.mjs",          "web/offline-cache.mjs",    "web/offline-runtime.mjs",             "web/formats.html",
+        "web/project-files.mjs",
+        "web/workspace.mjs", "web/build-cache.mjs", "web/packages.mjs",
         "web/formats.mjs",             "compiler-adapter/wasm.mjs",   "artifacts/roclet.wasm",    "artifacts/manifest.json",  "compiler-adapter/ROC-LICENSE",        "web/vendor/md4c.LICENSE.md",
         "web/math-view.mjs", "web/vendor/katex/katex.mjs", "web/vendor/katex/katex.css", "web/vendor/katex/LICENSE", "web/vendor/katex/README.md", "web/vendor/katex/lock.json",
         "web/vendor/editor/lock.json", "web/vendor/editor/README.md", "web/display-view.mjs",     "library/Display.roc",      "fixtures/documents/rich-outputs.roc",

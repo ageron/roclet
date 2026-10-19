@@ -49,6 +49,7 @@ dialog select { max-width:100%; } #find-results { grid-template-columns:minmax(0
     <button id="recovery-copy" hidden>Save a recovery copy</button><button id="new">New notebook</button><button id="rich-example">Rich outputs example</button>
     <label class="file-label">Open…<input id="open" type="file" accept=".roc,.md,.roclet.zip,.zip,text/plain,text/markdown,application/zip" aria-label="Open Roclet notebook"></label>
     <button id="download">Download a copy <kbd>⌘ / Ctrl S</kbd></button>
+    <button id="project-files">Project files…</button>
     <button id="share">Export & share…</button><button id="offline">Offline & storage…</button>
     <label>Recent documents<select id="recent" aria-label="Recent documents"></select></label>
     <p>Drafts are saved in this browser. Downloads are separate copies.</p>
@@ -87,6 +88,14 @@ dialog select { max-width:100%; } #find-results { grid-template-columns:minmax(0
 <p>This installs a verified copy of Roclet and its compiler. Bookmark this Roclet address, then reopen it to edit and run without a network connection. Updates take effect after all Roclet tabs are closed.</p>
 <p id="storage-state" role="status"></p><button id="persist-storage">Keep browser storage</button><p>Browser drafts belong to this origin and profile. Keep downloaded copies of important notebooks.</p></dialog>
 <dialog id="find-dialog" aria-labelledby="find-title"><div class="dialog-title"><h2 id="find-title">Find in notebook</h2><button data-close aria-label="Close search">×</button></div><p><input id="find-query" type="search" aria-label="Search notebook" placeholder="Find text…" style="width:100%"></p><div id="find-results" style="display:grid;gap:.3rem"></div></dialog>
+<dialog id="project-dialog" aria-labelledby="project-title"><div class="dialog-title"><h2 id="project-title">Project files</h2><button data-close aria-label="Close project files">×</button></div>
+<p>Add Roc modules and text files beside your notebook. Import a module with <code>import Geometry</code>. Download a Roclet bundle to include these files.</p>
+<p><label class="file-label">Add files…<input id="project-upload" type="file" multiple accept=".roc,.json,.csv,.txt,text/plain" aria-label="Add project files"></label></p>
+<p><label>File <select id="project-select" aria-label="Project file"></select></label><button id="project-remove">Remove file</button></p>
+<p><label>Path <input id="project-path" aria-label="Project file path" placeholder="Geometry.roc"></label></p>
+<textarea id="project-source" aria-label="Project file source" rows="12" spellcheck="false"></textarea>
+<button id="project-save">Save file</button><p id="project-status" role="status"></p>
+</dialog>
 <dialog id="dependencies-dialog" aria-labelledby="dependencies-title"><div class="dialog-title"><h2 id="dependencies-title">Dependencies & timing</h2><button data-close aria-label="Close dependencies">×</button></div><div id="dependencies-content"></div></dialog>
 <dialog id="rename-dialog" aria-labelledby="rename-title"><div class="dialog-title"><h2 id="rename-title">Rename binding</h2><button data-close aria-label="Close rename">×</button></div><p>Update this definition and its resolved references across the notebook.</p><input id="rename-name" aria-label="New binding name" autocomplete="off"><button id="rename-apply">Rename</button><p id="rename-error" role="status"></p></dialog>
 <dialog id="generated-dialog" aria-labelledby="generated-title"><div class="dialog-title"><h2 id="generated-title">Runnable Roc</h2><button data-close aria-label="Close runnable Roc">×</button></div><pre id="generated"></pre></dialog>

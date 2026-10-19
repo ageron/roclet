@@ -1,6 +1,53 @@
 import { test, assert } from './harness.mjs';
 import { assemble, byteOffsetToUtf16, CompilerAdapter, RevisionGate } from '../compiler-adapter/adapter.mjs';
 import { snapshot } from './fixtures.mjs';
+import { projectFiles } from '../web/project-files.mjs';
+
+test('project modules preserve raw source editing and undo as one notebook change', async () => {
+  const { Studio, newDraft, requestFor, validDraft } = await import('../web/studio-model.mjs');
+  const session = { invalidate() {}, stop() {} };
+  const studio = new Studio(null, {save:async()=>{}}, {session,debounce:60000});
+  studio.state = newDraft(); studio.state.autoRun=false; studio.state.sourceCurrent=true; studio.state.source='out_1 = Geometry.area';
+  studio.result = {status:'ok'};
+  studio.setProjectFile('Geometry.roc','module [area]\narea = 15');
+  assert.equal(studio.result,null);
+  assert.equal(studio.state.sourceCurrent,true);
+  assert.equal(requestFor(studio.state,'evaluate').source,'out_1 = Geometry.area');
+  assert.deepEqual(requestFor(studio.state,'evaluate').files,[{path:'Geometry.roc',source:'module [area]\narea = 15'}]);
+  studio.setProjectFile('Geometry.roc','module [area]\narea = 24');
+  studio.undo();assert.equal(studio.state.files[0].source,'module [area]\narea = 15');
+  studio.removeProjectFile('Geometry.roc');assert.deepEqual(studio.state.files,[]);
+  assert.equal(validDraft({...studio.state,files:[{path:'../outside.roc',source:''}]}),false);
+  studio.dispose();
+});
+
+test('project paths cannot replace the notebook or escape a portable project', () => {
+  for(const path of ['Main.roc','../secret.roc','/absolute.roc','nested/../secret.roc','nested//File.roc','C:File.roc','bad\\File.roc']) {
+    assert.throws(()=>projectFiles([{path,source:'module []'}]));
+  }
+  assert.throws(()=>projectFiles([{path:'File.roc',source:''},{path:'File.roc',source:''}]));
+  assert.deepEqual(projectFiles([{path:'shapes/Wall.roc',source:'module [area]\narea = 15'}]),[{path:'shapes/Wall.roc',source:'module [area]\narea = 15'}]);
+});
+
+test('portable bundles retain project sources once and reject modified members', async () => {
+  const { bundleFiles, importBundle } = await import('../web/sharing.mjs');
+  const { zip, utf8, text } = await import('../web/archive.mjs');
+  const { sha256 } = await import('../web/offline-cache.mjs');
+  const display=utf8('module []'),displayHash=await sha256(display),originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(display);
+  try {
+    const compiler={compilerCommit:'test-compiler',artifacts:{'roclet.wasm':{sha256:'test-wasm'}},inputs:{'library/Display.roc':displayHash}};
+    const capture={document:{schema:1,title:'Project',format:'roc',preamble:'app [main!] {}',metadata:'',source:'',sourceCurrent:false,mode:'notebook',cells:[{kind:'code',source:'Geometry.area',attributes:'',outputs:[]}],files:[{path:'Geometry.roc',source:'module [area]\narea = 15'}]},source:'Geometry.area',snapshots:[],events:[],compiler:{commit:'test-compiler',wasmSha256:'test-wasm',displaySha256:displayHash},createdAt:'test'};
+    const files=await bundleFiles(capture);
+    assert.equal(text(files.get('project/Geometry.roc')),'module [area]\narea = 15');
+    assert.deepEqual(JSON.parse(text(files.get('document.json'))).files,[{path:'Geometry.roc'}]);
+    const imported=await importBundle(await zip(files).arrayBuffer(),compiler);
+    assert.deepEqual(imported.record.files,capture.document.files);
+    assert.equal(imported.record.autoRun,false);
+    files.set('project/Geometry.roc',utf8('module [area]\narea = 24'));
+    await assert.rejects(importBundle(await zip(files).arrayBuffer(),compiler),/integrity/i);
+  } finally {globalThis.fetch=originalFetch;}
+});
 test('stale results after edit, input change, restart, failure, and stop are hidden', () => {
   const gate = new RevisionGate();
   const original = snapshot({ cells: [], roots: [] });

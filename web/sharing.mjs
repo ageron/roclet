@@ -5,6 +5,7 @@ import {newDraft,makeCell,validDraft} from './studio-model.mjs';
 import {embedMathStyles} from './math-view.mjs';
 import {renderMarkdown} from './markdown-view.mjs';
 import {renderDisplay,normalizeDisplay} from './display-view.mjs';
+import {projectFiles,projectPath} from './project-files.mjs';
 export const downloadName = title => (title||'notebook').replace(/[^a-z0-9._ -]/gi,'_').slice(0,120);
 export function download(blob,name) {
   const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),5000);
@@ -13,6 +14,7 @@ export async function captureExport(studio,compiler,{results=false,debug=false}=
   const state=structuredClone(studio.state),current=structuredClone(studio.result);
   const parsed=await studio.inspect('export');
   const document={schema:1,title:state.title,format:state.format,preamble:state.preamble??'',metadata:state.metadata??'',source:state.sourceCurrent?state.source:'',sourceCurrent:!!state.sourceCurrent,mode:state.mode,
+    files:projectFiles(state.files),
     cells:(state.sourceCurrent?(parsed.draft?.cells??parsed.model.cells):state.cells).map(({kind,source,attributes,outputs})=>({kind,source,attributes:attributes??'',outputs:outputs??[]}))};
   const snapshots=results && ['ok','partial'].includes(current?.status) ? (current.evaluation?.values??[]).map(v=>({cell:current.model.cells.findIndex(c=>c.output===v.root),root:v.root,text:v.text,...(v.display?{display:normalizeDisplay(v.display)}:{})})) : [];
   const events=debug ? (current?.evaluation?.events??[]).map(({cell,root,kind,message})=>({cell,root,kind,message})) : [];
@@ -20,7 +22,10 @@ export async function captureExport(studio,compiler,{results=false,debug=false}=
 }
 export async function bundleFiles(capture) {
   const sourcePath=capture.document.format==='roc'?'notebook.roc':'notebook.md';
-  const files=new Map([[sourcePath,utf8(capture.source)],['document.json',utf8(JSON.stringify(capture.document))]]);
+  const sources=projectFiles(capture.document.files);
+  const document={...capture.document,files:sources.map(({path})=>({path}))};
+  const files=new Map([[sourcePath,utf8(capture.source)],['document.json',utf8(JSON.stringify(document))]]);
+  for(const file of sources) files.set(`project/${file.path}`,utf8(file.source));
   if(capture.snapshots.length || capture.events.length) files.set('results.json',utf8(JSON.stringify({snapshots:capture.snapshots,events:capture.events,createdAt:capture.createdAt})));
   const module=await fetch(new URL('../library/Display.roc',import.meta.url));if(!module.ok) throw new Error('Display module is unavailable; rebuild the offline distribution.');const moduleBytes=new Uint8Array(await module.arrayBuffer());if(await sha256(moduleBytes)!==capture.compiler.displaySha256) throw new Error('The Display module changed. Reload Roclet before exporting.');files.set('Display.roc',moduleBytes);
   const entries=[];for(const [path,bytes] of files) entries.push({path,bytes:bytes.length,sha256:await sha256(bytes)});
@@ -29,13 +34,15 @@ export async function bundleFiles(capture) {
 }
 export async function exportBundle(capture) {return zip(await bundleFiles(capture));}
 export async function importBundle(bytes,compiler) {
-  const files=await unzip(bytes),raw=files.get('roclet.json');if(!raw) throw new Error('This ZIP is not a Roclet bundle.');
+  const files=await unzip(bytes,{maxBytes:20*1024*1024,maxEntries:272}),raw=files.get('roclet.json');if(!raw) throw new Error('This ZIP is not a Roclet bundle.');
   const manifest=JSON.parse(text(raw));
   if(manifest.schema!==1 || manifest.type!=='roclet-notebook' || !Array.isArray(manifest.files) || !['notebook.roc','notebook.md'].includes(manifest.source)) throw new Error('Unsupported Roclet bundle version.');
   if(manifest.compiler?.wasmSha256!==compiler.artifacts['roclet.wasm'].sha256 || manifest.compiler?.commit!==compiler.compilerCommit) throw new Error('This bundle requires another compiler version. Open it with the matching Roclet distribution.');
   const paths=new Set();
   for(const entry of manifest.files) {
-    if(!['notebook.roc','notebook.md','document.json','results.json','Display.roc'].includes(entry.path) || paths.has(entry.path)) throw new Error('Unsupported or duplicate bundle entry.');
+    const project=typeof entry.path==='string' && entry.path.startsWith('project/');
+    if(project) projectPath(entry.path.slice(8));
+    if((!project && !['notebook.roc','notebook.md','document.json','results.json','Display.roc'].includes(entry.path)) || paths.has(entry.path)) throw new Error('Unsupported or duplicate bundle entry.');
     if(entry.path==='Display.roc' && entry.sha256!==compiler.inputs?.['library/Display.roc']) throw new Error('Bundled Display module does not match this compiler distribution.');
     paths.add(entry.path);const file=files.get(entry.path);
     if(!file || file.length!==entry.bytes || await sha256(file)!==entry.sha256) throw new Error(`Bundle integrity check failed: ${entry.path}`);
@@ -45,6 +52,13 @@ export async function importBundle(bytes,compiler) {
   if(doc.schema!==1 || !['roc','markdown'].includes(doc.format) || typeof doc.title!=='string' || doc.title.length>120 || typeof doc.source!=='string' || typeof doc.preamble!=='string' || typeof doc.metadata!=='string' || typeof doc.sourceCurrent!=='boolean' || !['source','notebook'].includes(doc.mode) || !Array.isArray(doc.cells) || doc.cells.length>500) throw new Error('Malformed notebook in bundle.');
   const record=newDraft(doc.title);
   record.format=doc.format;record.source=doc.source;record.sourceCurrent=doc.sourceCurrent;record.preamble=doc.preamble;record.metadata=doc.metadata;record.mode=doc.mode;record.autoRun=false;
+  if(doc.files!=null && !Array.isArray(doc.files)) throw new Error('Malformed project file list.');
+  record.files=projectFiles((doc.files??[]).map(file=>{
+    const path=projectPath(file?.path),member=`project/${path}`;
+    if(!paths.has(member)) throw new Error(`Project file is missing: ${path}`);
+    return {path,source:text(files.get(member))};
+  }));
+  if([...paths].filter(path=>path.startsWith('project/')).length!==record.files.length) throw new Error('Unexpected project files in bundle.');
   record.cells=doc.cells.map(c=>{
     if(!['code','markdown','generated'].includes(c.kind) || typeof c.source!=='string' || typeof c.attributes!=='string' || !Array.isArray(c.outputs) || c.outputs.some(o=>!o || typeof o.source!=='string' || typeof o.kind!=='string')) throw new Error('Malformed cell in bundle.');
     return {...makeCell(c.kind,c.source),attributes:c.attributes,outputs:c.outputs};
