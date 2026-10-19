@@ -44,8 +44,8 @@ Roclet is an experimental alpha. **Only Chrome has been tested.** Other browsers
 may work, but haven't been verified yet. Native builds have been tested on macOS
 with Apple Silicon.
 
-Roclet uses a pinned development version of Roc. Widgets, plots, and general
-package loading are still ahead of us. If something breaks, please open an issue
+Roclet uses a pinned development version of Roc. Widgets and plots are still
+ahead of us. If something breaks, please open an issue
 with a small notebook that reproduces it, your browser version, and what you expected.
 
 ## Build it yourself
@@ -54,7 +54,8 @@ You'll need Zig 0.17.0, Git, tar, and a checkout of the Roc compiler. There is n
 Node.js or npm requirement.
 
 ```sh
-zig build -Droc-source=/path/to/roc -Dcompiler-jobs=1
+sh tools/prepare-compiler.sh /path/to/roc
+zig build -j1
 zig build serve
 ```
 
@@ -62,6 +63,11 @@ Open <http://127.0.0.1:4173/web/studio.html>.
 The [installation guide](docs/installation.md) covers the compiler checkout,
 offline use, downloads, and sharing. The [design](design.md) describes where
 Roclet is heading.
+
+Add supporting modules through **File → Project files**. Roc package declarations
+use the notebook's normal app header. Browser builds cache compiler artifacts and
+verified packages locally; warm edits reuse them without downloading dependencies
+again. Portable Roclet bundles include your attached project sources.
 
 ## License
 

@@ -1,0 +1,181 @@
+diff --git a/design.md b/design.md
+index c665a706da..1339b083d2 100644
+--- a/design.md
++++ b/design.md
+@@ -2128,6 +2128,12 @@ capacity, while `release_excess_capacity` rebuilds for the live item count.
+ 
+ ## Source Parsing Boundary
+ 
++Embedding frontends may explicitly request notebook-fragment parsing. This uses
++the same tokenizer, declaration inventory, and file node as ordinary parsing,
++but accepts expression statements alongside module imports. It produces syntax
++facts only: the frontend must lower expressions into ordinary declarations before
++compilation. Normal file parsing and checked module grammar remain unchanged.
++
+ Parsing is a token-first stage. Tokenization produces the only cursor input for
+ the parser, and the parser walks that token buffer directly. The parser does not
+ use recursive grammar functions, and it does not keep source substrings as an
+diff --git a/src/compile/compile_build.zig b/src/compile/compile_build.zig
+index 7fa331bf9e..3f23c21103 100644
+--- a/src/compile/compile_build.zig
++++ b/src/compile/compile_build.zig
+@@ -191,6 +191,8 @@ pub const PostCheckPublicationMode = enum {
+ // This module is designed to be integrated at the compile layer to avoid base<->compile circular dependencies.
+ /// Main workspace-level build orchestrator that coordinates multiple packages
+ pub const BuildEnv = struct {
++    /// Borrowed observer installed before compilation starts.
++    compile_time_event_callback: ?eval.CompileTimeFinalization.EventCallback = null,
+     gpa: Allocator,
+     mode: Mode,
+     max_threads: usize,
+@@ -823,6 +825,7 @@ pub const BuildEnv = struct {
+         coord.runtime_lowering = self.runtime_lowering;
+         coord.setDetailedLoweringTiming(self.detailed_lowering_timing);
+         coord.compile_time_object_cache = self.compile_time_object_cache;
++        coord.compile_time_event_callback = self.compile_time_event_callback;
+         if (self.detailed_monotype_diagnostics) coord.ctfe_timing.lowering.enableDetailedMonotypeBody();
+         self.coordinator = coord;
+     }
+diff --git a/src/compile/coordinator.zig b/src/compile/coordinator.zig
+index 132a15c7c9..fadf859e45 100644
+--- a/src/compile/coordinator.zig
++++ b/src/compile/coordinator.zig
+@@ -1234,6 +1234,8 @@ pub const ModuleRef = struct {
+ 
+ /// Coordinator manages all compilation state and coordinates workers
+ pub const Coordinator = struct {
++    /// Structured observations replayed from new and cached checked modules.
++    compile_time_event_callback: ?eval.CompileTimeFinalization.EventCallback = null,
+     gpa: Allocator,
+     mode: Mode,
+     max_threads: usize,
+@@ -2992,6 +2994,7 @@ pub const Coordinator = struct {
+         options.post_check_executor = self.postCheckExecutor();
+         options.object_cache = self.compile_time_object_cache;
+         options.cached_debug_modules = cached_debug_modules.items;
++        options.module_event_callback = self.compile_time_event_callback;
+         options.defer_debug_replay = !replay_cached_debug;
+         var runtime_target: ?lir.CheckedPipeline.TargetConfig = if (self.runtime_lowering) |config| config.target else null;
+         if (runtime_target) |*target| target.post_check_executor = self.postCheckExecutor();
+diff --git a/src/eval/compile_time_finalization.zig b/src/eval/compile_time_finalization.zig
+index 8534120c72..52a5fa9056 100644
+--- a/src/eval/compile_time_finalization.zig
++++ b/src/eval/compile_time_finalization.zig
+@@ -79,6 +79,9 @@ pub const Options = struct {
+     post_check_executor: ?base.post_check_task_executor.Executor = null,
+     stderr: ?StderrWriter = null,
+     event_callback: ?EventCallback = null,
++    /// Observe every replayed module debug event, including observations
++    /// restored from checked artifacts. The message is borrowed for the call.
++    module_event_callback: ?EventCallback = null,
+     debug_events: ?*DebugEvents = null,
+     /// Artifact copies store results independently; shared slots publish once.
+     publish_shared_slots: bool = true,
+@@ -4181,6 +4184,7 @@ fn reportDebugMessage(allocator: Allocator, options: Options, module: checked.Mo
+ }
+ 
+ fn emitDebugMessage(allocator: Allocator, options: Options, is_repl: bool, message: []const u8) Allocator.Error!void {
++    if (options.module_event_callback) |callback| callback.notify(callback.context, .{ .dbg = message });
+     if (is_repl) {
+         if (options.event_callback) |callback| callback.notify(callback.context, .{ .dbg = message });
+     }
+@@ -4191,6 +4195,33 @@ fn emitDebugMessage(allocator: Allocator, options: Options, is_repl: bool, messa
+     }
+ }
+ 
++test "module debug observer receives non-REPL and REPL replay exactly once" {
++    const Observer = struct {
++        count: usize = 0,
++        fn notify(context: *anyopaque, event: EventView) void {
++            const self: *@This() = @ptrCast(@alignCast(context));
++            switch (event) {
++                .dbg => |message| {
++                    std.debug.assert(std.mem.eql(u8, message, "observation"));
++                    self.count += 1;
++                },
++            }
++        }
++    };
++    var modules: Observer = .{};
++    var repl: Observer = .{};
++    const options: Options = .{
++        .module_event_callback = .{ .context = &modules, .notify = Observer.notify },
++        .event_callback = .{ .context = &repl, .notify = Observer.notify },
++    };
++    try emitDebugMessage(std.testing.allocator, options, false, "observation");
++    try std.testing.expectEqual(@as(usize, 1), modules.count);
++    try std.testing.expectEqual(@as(usize, 0), repl.count);
++    try emitDebugMessage(std.testing.allocator, options, true, "observation");
++    try std.testing.expectEqual(@as(usize, 2), modules.count);
++    try std.testing.expectEqual(@as(usize, 1), repl.count);
++}
++
+ /// Whether a root failed at code checking rejected and already reported.
+ pub fn failedAtCheckedError(lir_result: *const lir.Program.Result, failed_stmt: ?lir.LIR.CFStmtId) bool {
+     const stmt = failed_stmt orelse return false;
+diff --git a/src/parse/Parser.zig b/src/parse/Parser.zig
+index ae53d90dcb..40fdf5e423 100644
+--- a/src/parse/Parser.zig
++++ b/src/parse/Parser.zig
+@@ -27,6 +27,8 @@ pub const Parser = @This();
+ 
+ gpa: std.mem.Allocator,
+ pos: TokenIdx,
++/// Syntax-only embedding mode; normal files retain the module grammar.
++allow_top_level_expressions: bool = false,
+ tok_buf: TokenizedBuffer,
+ store: NodeStore,
+ decl_index: DeclIndex,
+@@ -975,7 +977,10 @@ pub fn runFile(self: *Parser) std.mem.Allocator.Error!void {
+     const scratch_top = self.store.scratchStatementTop();
+ 
+     while (self.peek() != .EndOfFile) {
+-        const statement = try self.runTopLevelStatement();
++        const statement = if (self.allow_top_level_expressions and self.peek() != .KwImport)
++            try self.runStatement()
++        else
++            try self.runTopLevelStatement();
+         try self.store.addScratchStatement(statement);
+     }
+ 
+diff --git a/src/parse/mod.zig b/src/parse/mod.zig
+index 744816c7fa..6425cbf03e 100644
+--- a/src/parse/mod.zig
++++ b/src/parse/mod.zig
+@@ -96,6 +96,36 @@ fn fileRootNode(parser: *Parser) Allocator.Error!u32 {
+     return 0;
+ }
+ 
++/// Parse a notebook fragment using the normal tokenizer and file structure,
++/// accepting expression statements for the embedding frontend to lower into
++/// declarations. Ordinary compilation continues to use `file`.
++pub fn notebook(gpa: Allocator, env: *CommonEnv) Allocator.Error!*AST {
++    return try runTokenDispatch(gpa, env, notebookRootNode);
++}
++
++fn notebookRootNode(parser: *Parser) Allocator.Error!u32 {
++    parser.allow_top_level_expressions = true;
++    try parser.runFile();
++    return 0;
++}
++
++test "notebook expressions and imports preserve ordinary file grammar" {
++    const a = std.testing.allocator;
++    var env = try CommonEnv.init(a, "import Geometry\nwidth = 5\nwidth * 3\n");
++    defer env.deinit(a);
++    const fragment = try notebook(a, &env);
++    defer fragment.deinit();
++    try std.testing.expectEqual(@as(usize, 0), fragment.parse_diagnostics.items.len);
++    const statements = fragment.store.statementSlice(fragment.store.getFile().statements);
++    try std.testing.expectEqual(@as(usize, 3), statements.len);
++    try std.testing.expect(fragment.store.getStatement(statements[0]) == .import);
++    try std.testing.expect(fragment.store.getStatement(statements[1]) == .decl);
++    try std.testing.expect(fragment.store.getStatement(statements[2]) == .expr);
++    const ordinary = try file(a, &env);
++    defer ordinary.deinit();
++    try std.testing.expect(ordinary.parse_diagnostics.items.len > 0);
++}
++
+ fn exprRootNode(parser: *Parser) Allocator.Error!u32 {
+     const id = try parser.runExpr();
+     return @backingInt(id);

@@ -48,12 +48,15 @@ Roc compiler checkout:
 
 ```sh
 git clone https://github.com/roc-lang/roc.git ../roc-compiler
-zig build -Droc-source=../roc-compiler -Dcompiler-jobs=1
+sh tools/prepare-compiler.sh ../roc-compiler
+zig build -j1
 zig build serve
 ```
 
-Run these commands from the Roclet directory. Its build reads the exact Roc
-commit from `compiler.lock.json` and prepares its own copy; it doesn't modify your
+Run these commands from the Roclet directory. The preparation command reads the exact Roc
+commit from `compiler.lock.json` and prepares its own copy with the versioned
+embedding API additions. The Zig build imports its exported compiler modules as
+a path dependency; it doesn't modify your
 compiler checkout. If the required commit is missing, run `git -C ../roc-compiler fetch origin`.
 The first build needs network access for compiler dependencies, several GiB of
 RAM, and time to compile. No separately installed Roc, Node.js, npm, or Python is required.
@@ -64,8 +67,10 @@ Open <http://127.0.0.1:4173/web/studio.html>. To choose another port:
 zig build serve -- 4174
 ```
 
-After the first build, `zig build` reuses verified compiler artifacts. Repeat the
-command with `-Droc-source` when compiler-adapter inputs change.
+After the first build, `zig build` reuses Zig's build cache. Repeat the preparation
+command when the compiler pin or embedding API patch changes. The default compiler
+build mode is ReleaseFast. Browser compiler artifacts are cached separately in
+IndexedDB and reused after worker restarts.
 
 To test and package a release:
 
@@ -86,6 +91,12 @@ Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
 - **File → Export & share** creates a portable bundle, a static HTML report, or an interactive site.
   Reports open directly and include math fonts. Interactive sites need a static server.
 - Bundles can include results, but imported results remain unverified until you run them.
+- **File → Project files** adds ordinary Roc modules and text file imports beside
+  the notebook. These sources are autosaved, undoable, and included in Roclet
+  bundles; downloading a single `.roc` or `.md` file keeps those files separate.
+- Declare packages in the notebook's app header using normal Roc dependency
+  syntax. Browser downloads require the package server to allow CORS. Verified
+  packages are cached locally for reuse without a network connection.
 
 The [demos](../demos/README.md) have **Open demo** links for the hosted app.
 For local use, download the source file and open it in Roclet.

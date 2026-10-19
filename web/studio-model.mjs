@@ -139,6 +139,7 @@ export class Studio {
   }
   reactiveRequest(action, selectedCell, forceAll = false) {
     const request = requestFor(this.state, action);
+    request.compact = true;
     const previous = this.baseline?.id === this.state.id ? this.baseline.result : null;
     const roots = previous?.roots ?? [];
     // A forced cell is resolved against the *new* model in the adapter below.

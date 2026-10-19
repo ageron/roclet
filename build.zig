@@ -20,6 +20,12 @@ pub fn build(b: *std.Build) void {
     const publish = b.addSystemCommand(&.{ b.graph.zig_exe, "run", "tools/build-tool.zig", "--", "publish", root });
     publish.addFileArg(native.getEmittedBin());
     publish.addFileArg(wasm.getEmittedBin());
+    publish.addArg(switch (optimize) {
+        .debug => "Debug",
+        .safe => "ReleaseSafe",
+        .fast => "ReleaseFast",
+        .small => "ReleaseSmall",
+    });
     publish.has_side_effects = true;
     const ready = &publish.step;
     b.step("adapter", "Build native and browser compiler workspace engines").dependOn(ready);
@@ -59,7 +65,7 @@ pub fn build(b: *std.Build) void {
     serve.step.dependOn(&offline.step);
 
     const unit_step = b.step("test-unit", "Test the snapshot protocol and host utilities");
-    inline for (.{ "compiler-adapter/snapshot.zig", "tools/build-tool.zig", "tools/serve.zig" }) |file| {
+    inline for (.{ "compiler-adapter/snapshot.zig", "compiler-adapter/document.zig", "tools/build-tool.zig", "tools/serve.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
     }

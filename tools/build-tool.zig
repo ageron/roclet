@@ -2,7 +2,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cwd = std.Io.Dir.cwd();
-const inputs = [_][]const u8{ "build.zig", "build.zig.zon", "compiler-adapter/engine.zig", "compiler-adapter/workspace.zig", "compiler-adapter/platform.zig", "compiler-adapter/platform/main.roc", "compiler-adapter/platform/Echo.roc", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/snapshot.zig", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "compiler-adapter/document_frontend.zig", "core/Document.roc", "library/Display.roc", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
+const inputs = [_][]const u8{ "build.zig", "build.zig.zon", "tools/prepare-compiler.sh", "compiler-adapter/embedding.patch", "compiler-adapter/engine.zig", "compiler-adapter/workspace.zig", "compiler-adapter/platform.zig", "compiler-adapter/platform/main.roc", "compiler-adapter/platform/Echo.roc", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/snapshot.zig", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "compiler-adapter/document_frontend.zig", "core/Document.roc", "library/Display.roc", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
 const Lock = struct { protocol: u32, compilerRepository: []const u8, compilerCommit: []const u8, zigVersion: []const u8, nativeOptimize: []const u8, wasmOptimize: []const u8 };
 fn path(gpa: Allocator, root: []const u8, relative: []const u8) ![]const u8 {
     return std.fs.path.join(gpa, &.{ root, relative });
@@ -24,7 +24,8 @@ fn writeJson(gpa: Allocator, io: std.Io, file: []const u8, value: anytype) !void
 }
 fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: []const []const u8) !void {
     try cwd.createDirPath(io, try path(gpa, root, "artifacts"));
-    if (binaries.len != 2) return error.InvalidArguments;
+    if (binaries.len != 2 and binaries.len != 3) return error.InvalidArguments;
+    const mode = if (binaries.len == 3) binaries[2] else lock.nativeOptimize;
     try cwd.copyFile(binaries[0], cwd, try path(gpa, root, "artifacts/roclet-native"), io, .{});
     try cwd.copyFile(binaries[1], cwd, try path(gpa, root, "artifacts/roclet.wasm"), io, .{});
     var artifacts: std.json.ObjectMap = .empty;
@@ -42,8 +43,8 @@ fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: [
         .compilerRepository = lock.compilerRepository,
         .compilerCommit = lock.compilerCommit,
         .zigVersion = lock.zigVersion,
-        .nativeOptimize = lock.nativeOptimize,
-        .wasmOptimize = lock.wasmOptimize,
+        .nativeOptimize = mode,
+        .wasmOptimize = mode,
         .host = @tagName(@import("builtin").os.tag) ++ "-" ++ @tagName(@import("builtin").cpu.arch),
         .inputs = std.json.Value{ .object = input_hashes },
         .artifacts = std.json.Value{ .object = artifacts },
