@@ -24,6 +24,9 @@ export interface Snapshot extends Token {
   cells: Cell[];
   roots: string[];
   modules?: { name: string; content: string }[];
+  /** Browser session desired module set; changed UTF-8 files are mounted once.
+   * Main.roc is generated; ordinary modules live under /workspace/. */
+  files?: {path: string; source: string}[];
   /** Opt in to independent runtime failures; compile errors remain module-wide. */
   isolate_errors?: boolean;
 }
@@ -75,6 +78,8 @@ export interface DocumentRequest {
   target?: 'roc' | 'markdown';
   source: string;
   modules?: { name: string; content: string }[];
+  /** Desired ordinary module files, sent as raw byte changes by DocumentSession. */
+  files?: {path: string; source: string}[];
   /** M2 notebook editing retains explicit cell kinds without parsing an incomplete aggregate. */
   draft?: DocumentDraft;
   /** evaluate only: output belonging to this model-cell index; the whole module is still checked. */

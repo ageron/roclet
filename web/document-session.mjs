@@ -1,3 +1,4 @@
+import {fileChanges} from './workspace.mjs';
 // Owns editing views and the worker, never caches user evaluation results.
 export class DocumentDraft {
   constructor(source, format = 'roc') { this.open(source, format); }
@@ -38,6 +39,9 @@ export class DocumentSession {
   stop() {
     this.worker?.terminate();
     this.worker = null;
+    this.files = new Map();
+    this.graph = null;
+    this.engineBaseline = false;
     this.pending?.reject(new DOMException('Stopped', 'AbortError'));
     this.pending = null;
   }
@@ -46,6 +50,16 @@ export class DocumentSession {
     this.invalidate();
     const fresh = !this.worker;
     const worker = this.worker ??= new this.WorkerType('./format-worker.mjs', { type: 'module' });
+    let workspace;
+    if(request.files || this.files?.size) {
+      const changes=fileChanges(fresh?new Map():this.files??new Map(),request.files??[]);
+      this.files=changes.next;workspace=changes.patch;
+      request={...request};delete request.files;
+    }
+    if(!fresh && this.engineBaseline && this.graph && request.reactivity) {
+      const {previous,current,...reactivity}=request.reactivity;
+      if(previous && JSON.stringify(previous)===this.graph && (!current || JSON.stringify(current)===this.graph)) request={...request,reactivity};
+    }
     return new Promise((resolve, reject) => {
       this.pending = { resolve, reject };
       worker.onmessage = ({ data }) => {
@@ -54,7 +68,11 @@ export class DocumentSession {
         if (data.error) {
           this.stop();
           reject(new Error(data.error));
-        } else resolve({...data.result,workerMs:data.workerMs});
+        } else {
+          this.engineBaseline=!!data.result.workspaceCache;
+          if(data.result.graph && ['ok','partial'].includes(data.result.status)) this.graph=JSON.stringify(data.result.graph);
+          resolve({...data.result,workerMs:data.workerMs,...(data.transportMetrics?{transportMetrics:data.transportMetrics}:{})});
+        }
       };
       worker.onerror = error => {
         if (this.worker !== worker) return;
@@ -62,7 +80,7 @@ export class DocumentSession {
         this.stop();
         reject(new Error(error.message));
       };
-      worker.postMessage({ bytes: fresh ? this.bytes : undefined, request });
+      worker.postMessage({ bytes: fresh ? this.bytes : undefined, request, ...(workspace?{workspace}:{}) });
     });
   }
 }
