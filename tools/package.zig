@@ -73,6 +73,7 @@ pub fn main(init: std.process.Init) !void {
     try write(a, io, root, "web/vendor/md4c.LICENSE.md", try read(a, io, root, "vendor/md4c/LICENSE.md"));
     var paths: std.ArrayList([]const u8) = .empty;
     for ([_][]const u8{
+        "LICENSE", "THIRD_PARTY_NOTICES.md", "demos/01-reactivity.roc", "demos/02-a-little-data.roc", "demos/03-circle.roc",
         "web/studio.html",             "web/studio.mjs",              "web/studio-model.mjs",     "web/compiler-tools.mjs",   "web/studio-store.mjs",                "web/studio-cells.mjs",
         "web/cell-editor.mjs",         "web/editor-navigation.mjs",   "web/roc-highlighting.mjs", "web/document-session.mjs", "web/format-worker.mjs",               "web/markdown-view.mjs",
         "web/archive.mjs",             "web/sharing.mjs",             "web/offline.mjs",          "web/offline-cache.mjs",    "web/offline-runtime.mjs",             "web/formats.html",
@@ -98,15 +99,16 @@ pub fn main(init: std.process.Init) !void {
     try files.append(a, .{ .path = "web/offline-release.json", .data = release });
     try files.append(a, .{ .path = "web/offline-worker.mjs", .data = worker });
     if (args.len == 3 and std.mem.eql(u8, args[2], "package")) {
-        const instructions = "Roclet offline distribution\n\nServe this directory over HTTPS or localhost. With the included host-platform server:\n  ./roclet-serve . 4173\nThen open http://127.0.0.1:4173/web/studio.html\nChoose File > Offline & storage > Prepare for offline use before disconnecting.\nNo Node, npm, Python, external CDN or account is required.\n\nHeadless runner (host platform): ./roclet run notebook.roc (or notebook.md).\nJSON stdout uses the same core and evaluation contract as the browser. Exit 1 means diagnostics/failure; 0 means success. Bound execution time in your job supervisor for untrusted/nonterminating programs. Imports remain limited to the pinned adapter capabilities.\nThe native binary is specific to the platform in artifacts/manifest.json.\n\nRoclet project licensing must be decided before public redistribution. Third-party notices are included.\n";
+        const instructions = "Roclet offline distribution\n\nServe this directory over HTTPS or localhost. With the included host-platform server:\n  ./roclet-serve . 4173\nThen open http://127.0.0.1:4173/web/studio.html\nChoose File > Offline & storage > Prepare for offline use before disconnecting.\nNo Node, npm, Python, external CDN or account is required.\n\nHeadless runner (host platform): ./roclet run notebook.roc (or notebook.md).\nJSON stdout uses the same core and evaluation contract as the browser. Exit 1 means diagnostics/failure; 0 means success. Bound execution time in your job supervisor for untrusted/nonterminating programs. Imports remain limited to the pinned adapter capabilities.\nThe native binary is specific to the platform in artifacts/manifest.json.\n\nRoclet is licensed under UPL-1.0. See LICENSE and THIRD_PARTY_NOTICES.md. See docs/installation.md for setup and demos/README.md for examples. Only Chrome has been tested.\n";
         try files.append(a, .{ .path = "README.txt", .data = instructions });
         try files.append(a, .{ .path = "roclet-serve", .data = try read(a, io, root, "zig-out/bin/roclet-serve") });
+        for ([_][]const u8{ "docs/installation.md", "demos/README.md" }) |path| try files.append(a, .{ .path = path, .data = try read(a, io, root, path) });
         const distribution = try archive(a, files.items);
         try write(a, io, root, "zig-out/roclet.zip", distribution);
         var runner: std.ArrayList(File) = .empty;
         try runner.append(a, .{ .path = "roclet", .data = try read(a, io, root, "artifacts/roclet-native") });
-        try runner.append(a, .{ .path = "README.txt", .data = instructions });
-        for ([_][]const u8{ "artifacts/manifest.json", "compiler-adapter/ROC-LICENSE", "vendor/md4c/LICENSE.md" }) |path| try runner.append(a, .{ .path = path, .data = try read(a, io, root, path) });
+        try runner.append(a, .{ .path = "README.txt", .data = "Roclet native runner\n\nRun: ./roclet run notebook.roc (or notebook.md).\nThis executable must match your operating system and architecture; see artifacts/manifest.json. The current native build is tested on macOS Apple Silicon.\nJSON stdout reports named values and diagnostics. Exit 0 is success; 1 is a notebook failure.\nLicensed under UPL-1.0; see LICENSE and THIRD_PARTY_NOTICES.md.\n" });
+        for ([_][]const u8{ "LICENSE", "THIRD_PARTY_NOTICES.md", "artifacts/manifest.json", "compiler-adapter/ROC-LICENSE", "vendor/md4c/LICENSE.md" }) |path| try runner.append(a, .{ .path = path, .data = try read(a, io, root, path) });
         try write(a, io, root, "zig-out/roclet-headless.zip", try archive(a, runner.items));
         std.debug.print("Packaged zig-out/roclet.zip and zig-out/roclet-headless.zip\n", .{});
     }

@@ -21,7 +21,8 @@ fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
     const relative = decoded.items[1..];
     var segments = std.mem.splitScalar(u8, relative, '/');
     while (segments.next()) |segment| if (segment.len == 0 or segment[0] == '.') return error.InvalidPath;
-    for ([_][]const u8{ "web/", "compiler-adapter/", "core/", "library/", "fixtures/", "tests/", "artifacts/" }) |prefix| {
+    if (std.mem.eql(u8, relative, "LICENSE") or std.mem.eql(u8, relative, "THIRD_PARTY_NOTICES.md")) return gpa.dupe(u8, relative);
+    for ([_][]const u8{ "demos/", "web/", "compiler-adapter/", "core/", "library/", "fixtures/", "tests/", "artifacts/" }) |prefix| {
         if (std.mem.startsWith(u8, relative, prefix)) return gpa.dupe(u8, relative);
     }
     return error.InvalidPath;

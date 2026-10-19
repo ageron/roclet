@@ -1,0 +1,16 @@
+<!doctype html><meta charset="utf-8"><title>Roclet demo checks</title><h1>Demo checks</h1><pre id="log">Running…</pre><script type="module">
+import {DocumentSession} from './document-session.mjs';
+import {assert} from '../tests/harness.mjs';
+const session=new DocumentSession(await fetch('../artifacts/roclet.wasm').then(r=>r.arrayBuffer()));let log='';
+try {
+for(const [file,expected] of [['01-reactivity.roc','12.0'],['02-a-little-data.roc','71.6'],['03-circle.roc','28.274333882308137']]) {
+ const source=await fetch('../demos/'+file).then(r=>{assert(r.ok);return r.text();});
+ const request={operation:'document',action:'evaluate',format:'roc',source,render:true};
+ const result=await session.request(request);assert.equal(result.status,'ok');assert(result.evaluation.values[0].text.includes(expected));
+ if(file==='01-reactivity.roc') {const changed=await session.request({...request,source:source.replace('guests = 4','guests = 6')});assert.equal(changed.evaluation.values[0].text,'18.0');}
+ log+='PASS '+file+'\n';
+}
+document.documentElement.dataset.result='pass';log+='PASS all three demos in WASM';
+} catch(e) {document.documentElement.dataset.result='fail';log+=e.stack;}
+finally {session.stop();document.querySelector('#log').textContent=log;}
+</script>
