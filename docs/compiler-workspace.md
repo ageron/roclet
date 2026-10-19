@@ -96,3 +96,70 @@ the adapter does not infer compiler state from diagnostic text.
 Compiler builtins are compressed in the browser artifact and decompressed once
 per worker. The normal WASM file retains function names; its companion
 `artifacts/roclet-profile.wasm` retains full debug information for profiling.
+
+## Browser measurements
+
+Measured on 2026-10-19 with Chrome 153.0.8010.52 on Linux x86_64, AMD Ryzen 7
+9700X. Both engines used ReleaseFast. The profiling WASM retains DWARF symbols.
+The browser benchmark uses three warmup edits followed by 15 measured edits,
+verifies both output values after every edit, and waits for durable cache writes
+before completing each request. Builds and our other browser suites were idle
+during measurement; unrelated user workloads were still running on the host.
+
+| Workload | Warm round trip, median | Worker request, median | Request / response bytes, median |
+| --- | ---: | ---: | ---: |
+| Wall Area source edit | 19.2 ms | 9.7 ms | 687 / 4,764 |
+| Imported Geometry implementation edit | 13.0 ms | 8.1 ms | 304 / 2,558 |
+
+Every measured edit performed exactly one frontend build, one lowering, and two
+root executions. Wall Area transferred no project-file bytes. The module edit
+transferred only the changed Geometry source (84 bytes at the median); unchanged
+Materials source was not resent. Wall Area's original UI request was 1,502 bytes
+at the median; retaining the confirmed graph in the worker reduced the JSON sent
+to WASM to 687 bytes. These request/response byte counts exclude separate file
+and cache streams.
+
+First Wall Area request startup was 609.2 ms. First multi-module request startup
+was 388.6 ms. A restarted module worker took 202.3 ms and reported five compiler
+artifact hits with zero misses; its outputs matched the previous worker. Startup
+includes worker/runtime initialization and cache restoration and is separate
+from the warm-edit measurements. It excludes the page's earlier WASM download.
+`workerMs` times the worker's evaluation request, excluding the subsequent durable
+cache write; the round trip includes that write, transport, and scheduling.
+
+The published browser compiler is 25,063,956 bytes. Its SHA-256 is
+`0fd7ec11335d36f30f7b96bef14f1c0cf33d5e53f3ef6bf075e712d11e9e933f`.
+Run the benchmark with:
+
+```sh
+node tools/browser-check.mjs --page web/workspace-benchmark.html --timeout 180000
+```
+
+## Final validation
+
+`zig build -j1`, `zig build test -j1`, `zig build package -j1`, and the artifact
+manifest check passed. The native ReleaseFast engine passed 36 compiler cases,
+121 document contracts (196 browser parity requests), and 30 complete M4
+responses. Unit tests also cover compact responses, source limits, publication
+hashing, cache envelopes, cache eviction, and verified package extraction; the
+workspace correctness tests use ReleaseSafe. The Node unit/workspace suites
+passed. Packaging produced the portable, site, and native-runner archives and
+verified 72 offline assets.
+
+The complete 121-document suite also passed against the Debug engine. A final
+Studio check caught a retained-compilation error path that discarded reports
+when an imported file was missing. The adapter now drains and preserves those
+compiler reports before retaining the failed revision. Its regression fixture
+requires the missing module's path in diagnostics and an empty value list.
+
+On the corrected published ReleaseFast WASM, Studio passed all 46 UI contracts
+at both desktop and compact widths, all 20 revision/persistence/editing/failure/
+cancellation contracts, and all 18 rich-output contracts. Screenshots were
+inspected for both layouts, including the visible missing-file diagnostic.
+
+The final six-suite Chrome run passed 11 browser unit checks and 36 compiler
+parity cases; all 196 complete document responses and 58 fresh-worker runs; all
+30 M4 parity cases plus reactive editing, rename, and failure isolation; seven
+math contracts; 11 sharing/offline contracts; and the workspace/cache/package
+suite. Missing-module diagnostics passed in both retained and fresh workers.
+The benchmark and all final browser suites verified the WASM digest above.
