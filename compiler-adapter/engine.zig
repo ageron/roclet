@@ -8,6 +8,7 @@
 const std = @import("std");
 const base = @import("base");
 const check = @import("check");
+const can = @import("can");
 const compile = @import("compile");
 const echo_platform = @import("platform.zig");
 const eval = @import("eval");
@@ -99,6 +100,7 @@ pub const Paths = struct {
 pub const CachedProgram = struct { allocator: Allocator, bytes: ?[]u8 = null };
 pub const RunOptions = struct {
     app_header: []const u8 = "",
+    root_name: ?[]const u8 = null,
     analyze: ?*const fn (*@import("can").ModuleEnv, u32) void = null,
     check_only: bool = false,
     args: []const []const u8 = &.{},
@@ -191,13 +193,15 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         countNewlines(header_str),
     );
     build_env.filesystem = echo_ctx.io();
-    var event_context: u8 = 0;
-    build_env.compile_time_event_callback = .{ .context = &event_context, .notify = observeCompileTime };
+    var event_context: DebugCapture = .{ .allocator = allocator };
+    build_env.compile_time_root_event_callback = .{ .context = &event_context, .notify = DebugCapture.observe };
+    build_env.package_cache_dir = try allocator.dupe(u8, "/packages");
     const cache = try allocator.create(compile.CacheManager);
     cache.* = compile.CacheManager.init(allocator, .{ .enabled = true, .cache_dir = "/cache", .roc_ctx = echo_ctx.io() }, echo_ctx.io());
     build_env.setCacheManager(cache);
     defer {
         last_cache_stats = cache.getStats();
+        inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |field| @field(request_cache_stats, field) += @field(last_cache_stats, field);
     }
     const runtime_target: lir.CheckedPipeline.TargetConfig = .{ .target_usize = opts.target_usize };
     if (!opts.check_only) build_env.setRuntimeLowering(.{ .target = runtime_target });
@@ -241,6 +245,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         if (build_env.getAppSemanticData()) |app| analyze(app.env, @intCast(header_str.len));
     }
     if (opts.check_only) return 0;
+    try event_context.replay(&build_env, opts.root_name orelse "main!");
 
     const import_views = build_env.collectImportedArtifactViews(allocator, root_artifact) catch |err| {
         diag.step("collectImportedArtifactViews", err);
@@ -471,6 +476,12 @@ fn echoReadFileInto(ctx_ptr: ?*anyopaque, _: std.Io, path: []const u8, buf: []u8
 fn echoWriteFile(ctx_ptr: ?*anyopaque, _: std.Io, path: []const u8, data: []const u8) Io.WriteError!void {
     return echoGetCtx(ctx_ptr).fallback.writeFile(path, data);
 }
+fn echoWriteFileStream(ctx_ptr: ?*anyopaque, _: std.Io, path: []const u8, stream: Io.FileStream) Io.WriteError!void {
+    return echoGetCtx(ctx_ptr).fallback.writeFileStream(path, stream);
+}
+fn echoListDirTop(ctx_ptr: ?*anyopaque, _: std.Io, path: []const u8, gpa: Allocator) Io.ListError![]Io.FileEntry {
+    return echoGetCtx(ctx_ptr).fallback.listDirTop(path, gpa);
+}
 fn echoStat(ctx_ptr: ?*anyopaque, _: std.Io, path: []const u8) Io.StatError!Io.FileInfo {
     return echoGetCtx(ctx_ptr).fallback.stat(path);
 }
@@ -539,9 +550,11 @@ const echo_vtable = Io.VTable{
     .readFile = &echoReadFile,
     .readFileInto = &echoReadFileInto,
     .writeFile = &echoWriteFile,
+    .writeFileStream = &echoWriteFileStream,
     .fileExists = &echoFileExists,
     .stat = &echoStat,
     .listDir = &echoListDir,
+    .listDirTop = &echoListDirTop,
     .dirName = &echoDirName,
     .baseName = &echoBaseName,
     .joinPath = &echoJoinPath,
@@ -576,3 +589,113 @@ fn observeCompileTime(_: *anyopaque, event: eval.CompileTimeFinalization.EventVi
 }
 
 pub var last_cache_stats: compile.CacheStats = .{};
+
+pub var request_cache_stats: compile.CacheStats = .{};
+
+// Finalization evaluates constants for the whole checked graph. Keep their
+// observations, then replay only the constants reachable from this output.
+// Provenance comes from checked artifacts, never from matching debug messages.
+const DebugCapture = struct {
+    allocator: Allocator,
+    events: std.ArrayList(eval.CompileTimeFinalization.ModuleRootEvent) = .empty,
+    failed: bool = false,
+    fn observe(context: *anyopaque, incoming: eval.CompileTimeFinalization.ModuleRootEvent) void {
+        const self: *@This() = @ptrCast(@alignCast(context));
+        var event = incoming;
+        event.message = self.allocator.dupe(u8, incoming.message) catch {
+            self.failed = true;
+            return;
+        };
+        self.events.append(self.allocator, event) catch {
+            self.failed = true;
+        };
+    }
+    const Item = struct { env: *can.ModuleEnv, def: can.CIR.Def.Idx };
+    fn replay(self: *@This(), build_env: *BuildEnv, root_name: []const u8) !void {
+        if (self.failed) return error.OutOfMemory;
+        if (self.events.items.len == 0) return;
+        const a = self.allocator;
+        const app = build_env.getAppSemanticData() orelse return;
+        const modules = try build_env.getCompiledModules(a);
+        var pending: std.ArrayList(Item) = .empty;
+        var reachable: std.AutoHashMapUnmanaged(Item, void) = .{};
+        for (app.env.store.sliceDefs(app.env.all_defs)) |idx| {
+            const pattern = app.env.store.getPattern(app.env.store.getDef(idx).pattern);
+            if (pattern == .assign and std.mem.eql(u8, app.env.getIdent(pattern.assign.ident), root_name)) try pending.append(a, .{ .env = app.env, .def = idx });
+        }
+        while (pending.pop()) |item| {
+            if ((try reachable.getOrPut(a, item)).found_existing) continue;
+            const env = item.env;
+            var pattern_defs: std.AutoHashMapUnmanaged(can.CIR.Pattern.Idx, can.CIR.Def.Idx) = .{};
+            var binders: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
+            var binder_stack: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
+            for (env.store.sliceDefs(env.all_defs)) |idx| {
+                binders.clearRetainingCapacity();
+                try can.DependencyGraph.appendPatternBinders(env, env.store.getDef(idx).pattern, &binders, &binder_stack, a);
+                for (binders.items) |binder| try pattern_defs.put(a, binder, idx);
+            }
+            const expr = env.store.getDef(item.def).expr;
+            var references: std.AutoHashMapUnmanaged(can.CIR.Def.Idx, void) = .{};
+            var stack: std.ArrayList(can.CIR.Expr.Idx) = .empty;
+            var defaults: std.AutoHashMapUnmanaged(can.CIR.Expr.Idx, void) = .{};
+            try can.DependencyGraph.collectNameReferences(env, &pattern_defs, expr, &references, &stack, &defaults, a);
+            var refs = references.keyIterator();
+            while (refs.next()) |def| try pending.append(a, .{ .env = env, .def = def.* });
+            const region = env.store.getExprRegion(expr);
+            for (env.store.nodes.items.items(.tag), 0..) |tag, i| {
+                if (tag != .expr_external_lookup and tag != .expr_associated_lookup_resolved) continue;
+                const occurrence = env.store.regions.items.items[i];
+                if (occurrence.start.offset < region.start.offset or occurrence.end.offset > region.end.offset) continue;
+                const external = env.store.getExpr(@fromBackingInt(@intCast(i)));
+                const identity = switch (external) {
+                    .e_lookup_external => |ref| env.moduleIdentityHash(env.importIdentity(ref.module_idx) orelse continue),
+                    .e_lookup_associated_resolved => |ref| env.moduleIdentityHash(ref.module_identity),
+                    else => continue,
+                };
+                const target = switch (external) {
+                    .e_lookup_external => |ref| ref.target_node_idx,
+                    .e_lookup_associated_resolved => |ref| ref.target_node_idx,
+                    else => unreachable,
+                };
+                for (modules) |module| {
+                    const owner = module.semantic.env;
+                    if (!std.mem.eql(u8, identity, (owner.contentIdentityHash() orelse continue))) continue;
+                    for (owner.store.sliceDefs(owner.all_defs)) |def| {
+                        const d = owner.store.getDef(def);
+                        if (@backingInt(def) == target or @backingInt(d.pattern) == target or @backingInt(d.expr) == target) try pending.append(a, .{ .env = owner, .def = def });
+                    }
+                }
+            }
+        }
+        for (self.events.items) |event| {
+            for (modules) |module| {
+                const artifact = module.semantic.checked_artifact orelse continue;
+                if (!std.meta.eql(artifact.key, event.module)) continue;
+                const env = module.semantic.env;
+                var include = false;
+                if (event.source) |source| if (source == .def) {
+                    include = reachable.contains(.{ .env = env, .def = source.def });
+                };
+                if (!include) {
+                    const region = event.region orelse if (event.source) |source| switch (source) {
+                        .def => env.store.getExprRegion(env.store.getDef(source.def).expr),
+                        .expr => |expr| env.store.getExprRegion(expr),
+                        .hoisted => |hoisted| env.store.getExprRegion(hoisted.expr),
+                        else => continue,
+                    } else continue;
+                    var it = reachable.keyIterator();
+                    while (it.next()) |item| {
+                        if (item.env != env) continue;
+                        const owner = env.store.getExprRegion(env.store.getDef(item.def).expr);
+                        if (region.start.offset >= owner.start.offset and region.end.offset <= owner.end.offset) {
+                            include = true;
+                            break;
+                        }
+                    }
+                }
+                if (include) if (echo_platform.observer) |emit| emit("dbg", event.message);
+                break;
+            }
+        }
+    }
+};

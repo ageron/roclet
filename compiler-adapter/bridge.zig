@@ -23,6 +23,7 @@ const Request = struct {
     args: []const []const u8 = &.{},
     modules: []const runner.ExtraFile = &.{},
     app_header: []const u8 = "",
+    root: ?[]const u8 = null,
     files: []const struct { path: []const u8, source: []const u8 } = &.{},
 };
 const Region = struct { start: u32, end: u32 };
@@ -239,12 +240,13 @@ fn serialize() ![]u8 {
         .events = response.events.items,
         .failure = response.failure,
         .packagesRequired = Workspace.global.required.items,
-        .workspaceCache = runner.last_cache_stats,
+        .workspaceCache = runner.request_cache_stats,
     }, .{}, &writer.writer);
     return writer.toOwnedSlice();
 }
 pub fn process(bytes: []const u8) ![]u8 {
     Workspace.global.clearRequired();
+    runner.request_cache_stats = .{};
     const probe = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch return processSource(bytes);
     defer probe.deinit();
     if (probe.value == .object) try mountFiles(probe.value, gpa);
@@ -325,9 +327,10 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
     const exit_code = runner.runEcho(.{
         .runtime_fba = &fba,
         .fallback_io = Workspace.global.io(fba.allocator()),
-        .std_io = std.Io.failing,
+        .std_io = Workspace.global.std_io,
         .source = req.source,
         .app_header = req.app_header,
+        .root_name = req.root,
         .extras = extras.items,
         .diagnostics = .{ .ctx = null, .vtable = &diag_vtable },
         .analyze = if (cache == null) analyze else null,
@@ -401,7 +404,7 @@ export fn roclet_cache_take_updates() u32 {
     return storedResponse(bytes);
 }
 export fn roclet_cache_stats() u32 {
-    const bytes = @import("snapshot.zig").json(gpa, runner.last_cache_stats) catch return 0;
+    const bytes = @import("snapshot.zig").json(gpa, runner.request_cache_stats) catch return 0;
     defer gpa.free(bytes);
     return storedResponse(bytes);
 }
@@ -434,6 +437,7 @@ fn processDocument(bytes: []const u8, value: std.json.Value) ![]u8 {
             if (previous_graph) |old| gpa.free(old);
             previous_graph = owned;
         }
+        try parsed.object.put(a, "workspaceCache", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, runner.request_cache_stats), .{}));
         try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, Workspace.global.required.items), .{}));
     }
     return @import("snapshot.zig").json(gpa, parsed);
@@ -449,13 +453,17 @@ fn mountFiles(request: std.json.Value, a: std.mem.Allocator) !void {
 }
 
 fn withRequiredPackages(result: []u8) ![]u8 {
-    if (Workspace.global.required.items.len == 0) return result;
     defer gpa.free(result);
     var temporary = std.heap.ArenaAllocator.init(gpa);
     defer temporary.deinit();
     const a = temporary.allocator();
     var parsed = try std.json.parseFromSliceLeaky(std.json.Value, a, result, .{});
     const json = @import("snapshot.zig").json;
+    try parsed.object.put(a, "workspaceCache", try std.json.parseFromSliceLeaky(std.json.Value, a, try json(a, runner.request_cache_stats), .{}));
     try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try json(a, Workspace.global.required.items), .{}));
     return json(gpa, parsed);
+}
+
+pub fn setNativeIo(io: std.Io) void {
+    Workspace.global.std_io = io;
 }

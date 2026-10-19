@@ -20,6 +20,7 @@ fn stringify(a: std.mem.Allocator, data: anytype) ![]u8 {
 }
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
+    bridge.setNativeIo(init.io);
     const args = try init.minimal.args.toSlice(a);
     if (args.len == 1 or (args.len == 2 and std.mem.eql(u8, args[1], "--help"))) {
         try std.Io.File.stdout().writeStreamingAll(init.io, usage);

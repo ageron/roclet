@@ -22,6 +22,22 @@ fn writeJson(gpa: Allocator, io: std.Io, file: []const u8, value: anytype) !void
     try out.writer.writeByte('\n');
     try cwd.writeFile(io, .{ .sub_path = file, .data = out.written() });
 }
+fn artifactHash(io: std.Io, file: []const u8) !struct { bytes: u64, sha256: [64]u8 } {
+    const f = try cwd.openFile(io, file, .{});
+    defer f.close(io);
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    var buffer: [64 * 1024]u8 = undefined;
+    var size: u64 = 0;
+    while (true) {
+        const n = try f.readStreaming(io, &.{&buffer});
+        if (n == 0) break;
+        hasher.update(buffer[0..n]);
+        size += n;
+    }
+    var hash: [32]u8 = undefined;
+    hasher.final(&hash);
+    return .{ .bytes = size, .sha256 = std.fmt.bytesToHex(hash, .lower) };
+}
 fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: []const []const u8) !void {
     try cwd.createDirPath(io, try path(gpa, root, "artifacts"));
     if (binaries.len != 2 and binaries.len != 3) return error.InvalidArguments;
@@ -33,10 +49,10 @@ fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: [
     try cwd.writeFile(io, .{ .sub_path = try path(gpa, root, "artifacts/roclet.wasm"), .data = wasm });
     var artifacts: std.json.ObjectMap = .empty;
     for ([_][]const u8{ "roclet-native", "roclet.wasm" }) |name| {
-        const bytes = try read(gpa, io, try path(gpa, root, try std.fmt.allocPrint(gpa, "artifacts/{s}", .{name})));
+        const hash = try artifactHash(io, try path(gpa, root, try std.fmt.allocPrint(gpa, "artifacts/{s}", .{name})));
         var item: std.json.ObjectMap = .empty;
-        try item.put(gpa, "bytes", .{ .integer = @intCast(bytes.len) });
-        try item.put(gpa, "sha256", .{ .string = try gpa.dupe(u8, &digest(bytes)) });
+        try item.put(gpa, "bytes", .{ .integer = @intCast(hash.bytes) });
+        try item.put(gpa, "sha256", .{ .string = try gpa.dupe(u8, &hash.sha256) });
         try artifacts.put(gpa, name, .{ .object = item });
     }
     var input_hashes: std.json.ObjectMap = .empty;
@@ -69,7 +85,7 @@ fn check(gpa: Allocator, io: std.Io, root: []const u8) !void {
     var it = manifest.object.get("artifacts").?.object.iterator();
     while (it.next()) |entry| {
         const file = try path(gpa, root, try std.fmt.allocPrint(gpa, "artifacts/{s}", .{entry.key_ptr.*}));
-        if (!std.mem.eql(u8, entry.value_ptr.object.get("sha256").?.string, &digest(try read(gpa, io, file)))) return error.ArtifactHashMismatch;
+        if (!std.mem.eql(u8, entry.value_ptr.object.get("sha256").?.string, &(try artifactHash(io, file)).sha256)) return error.ArtifactHashMismatch;
     }
 }
 pub fn main(init: std.process.Init) !void {

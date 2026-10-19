@@ -11,6 +11,7 @@ pub const RequiredPackage = struct { url: []const u8, destination: []const u8 };
 const File = struct { bytes: []u8, dirty: bool = false };
 pub const Workspace = struct {
     files: std.StringHashMapUnmanaged(File) = .{},
+    std_io: std.Io = .failing,
     required: std.ArrayList(RequiredPackage) = .empty,
     fingerprint: ?[64]u8 = null,
     pub fn contentIdentity(self: *Workspace, a: A) ![]const u8 {
@@ -67,7 +68,7 @@ pub const Workspace = struct {
         }
     }
     pub fn io(self: *Workspace, a: A) CoreCtx {
-        var result = CoreCtx.default(a, a, .failing);
+        var result = CoreCtx.default(a, a, self.std_io);
         result.ctx = self;
         result.vtable.readFile = read;
         result.vtable.readFileInto = readInto;
