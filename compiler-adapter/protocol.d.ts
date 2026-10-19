@@ -66,6 +66,17 @@ export interface Response extends Token {
     location: null | { start_line: number; start_column: number; end_line: number; end_column: number };
   }[];
   failure: string | null;
+  workspaceCache?: CompilerCacheStats;
+  /** Requests are emitted by Roc's own package resolver; browser fetches archives. */
+  packagesRequired?: {url: string; destination: string}[];
+}
+export interface CompilerCacheStats {
+  hits: number;
+  misses: number;
+  stores: number;
+  bytes_read: number;
+  bytes_written: number;
+  [counter: string]: number;
 }
 
 /** M1 formats. Conversion and parsing never execute notebook expressions. */
@@ -85,7 +96,8 @@ export interface DocumentRequest {
   /** evaluate only: output belonging to this model-cell index; the whole module is still checked. */
   selectedCell?: number;
   /** Evaluate only invalidated/forced roots. Prior strings are never execution inputs. */
-  reactivity?: {known: boolean; previous: DependencyGraph; current: DependencyGraph; roots: string[]; available: string[]; force: string[]};
+  /** Persistent browser engines may omit the confirmed baseline graphs. */
+  reactivity?: {known: boolean; previous?: DependencyGraph; current?: DependencyGraph; roots: string[]; available: string[]; force: string[]};
   forceAll?: boolean;
   isolateErrors?: boolean;
   /** Return typed MD4C rendering events for prose; never executable HTML. */
@@ -136,6 +148,10 @@ export interface RecomputePlan {
   explanations: {root: string; reason: string; dependencies: string[]}[];
 }
 export interface DocumentResponse {
+  workspaceCache?: CompilerCacheStats;
+  packagesRequired?: {url: string; destination: string}[];
+  /** Browser transport byte counts; fileBytes includes changed source only. */
+  transportMetrics?: {requestBytes: number; responseBytes: number; fileBytes: number};
   graph?: DependencyGraph;
   plan: RecomputePlan;
   protocol: 1;
