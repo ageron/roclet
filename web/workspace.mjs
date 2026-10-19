@@ -1,7 +1,7 @@
 // The editor owns a desired file set. Only changes cross into the worker and
 // WASM; compiler filesystem/cache state survives successful requests.
 export function workspacePath(path) {
-  if(typeof path!=='string' || !path.startsWith('/workspace/') || path.includes('\\') || path.includes('\0') || path.split('/').some(p=>p==='..'||p==='.') || !path.endsWith('.roc')) throw new Error('Modules require an absolute /workspace/*.roc path');
+  if(typeof path!=='string' || !path.startsWith('/workspace/') || path.length>4096 || /[\\\u0000-\u001f\u007f]/u.test(path) || path.split('/').slice(1).some(p=>!p||p==='..'||p==='.') || !path.endsWith('.roc')) throw new Error('Modules require an absolute /workspace/*.roc path');
   if(path==='/workspace/Main.roc' || path==='/workspace/main.roc') throw new Error('Main.roc is generated from the notebook');
   return path;
 }
