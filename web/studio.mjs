@@ -411,7 +411,7 @@ function reflect(reason) {
   if ($('stop').hidden && document.activeElement === $('stop')) $('run').focus({preventScroll:true});
   const status = studio.diagnosticsDeferred && /^(Needs attention|Run failed · no current results)/.test(studio.status) ? 'Editing · results pending' : studio.status;
   $('status').textContent = status; $('status').className = /failed|attention|conflict/i.test(status) ? 'error' : '';
-  $('save-status').textContent = studio.saveStatus === 'Saved in this browser' ? 'Saved locally' : studio.saveStatus; $('save-status').title = studio.saveStatus; $('save-status').className = /^Not saved|unavailable/.test(studio.saveStatus) ? 'error' : '';
+  $('save-status').textContent = studio.saveStatus; $('save-status').title = studio.saveStatus; $('save-status').className = /^Not saved|unavailable/.test(studio.saveStatus) ? 'error' : '';
   $('recovery-copy').hidden=!/^Not saved/.test(studio.saveStatus);
   $('undo').disabled = !studio.history.length; $('redo').disabled = !studio.future.length;
   $('notebook-view').setAttribute('aria-pressed', s.mode === 'notebook'); $('source-view').setAttribute('aria-pressed', s.mode === 'source');
