@@ -49,6 +49,25 @@ try {
   session.stop();
   const restored=await session.request({...request,files});assert.equal(restored.status,'ok');assert.equal(restored.values[0].text,'7');assert(restored.workspaceCache.hits>0,'Cold worker must hit the restored build cache');session.stop();
   report('PASS module edits invalidate compiled artifacts and cold workers restore browser build cache');
+  const nestedSession=new DocumentSession(bytes),nestedRequest={...request,requestId:'nested-module',cells:[{key:'code',source:'import Shapes/Wall\nout_1 = Wall.cost(5, 3)'}]};
+  const wall=extra=>`import /Materials\nWall := [].{\ncost : U64, U64 -> U64\ncost = |width, height| width * height * Materials.price + ${extra}\n}`;
+  const materials=price=>`Materials := [].{\nprice : U64\nprice = ${price}\n}`;
+  const nestedFiles=(extra,price)=>[{path:'/workspace/Shapes/Wall.roc',source:wall(extra)},{path:'/workspace/Materials.roc',source:materials(price)}];
+  for(const [extra,price,expected] of [[0,4,'60'],[1,4,'61'],[1,5,'76']]) {
+    const result=await nestedSession.request({...nestedRequest,files:nestedFiles(extra,price)});
+    assert.equal(result.status,'ok');assert.equal(result.values[0].text,expected);
+  }
+  const removed=await nestedSession.request({...nestedRequest,files:[nestedFiles(1,5)[1]]});
+  assert.notEqual(removed.status,'ok');assert.deepEqual(removed.values,[]);
+  const repaired=await nestedSession.request({...nestedRequest,files:nestedFiles(0,4)});assert.equal(repaired.status,'ok');assert.equal(repaired.values[0].text,'60');nestedSession.stop();
+  report('PASS nested Shapes/Wall imports package-root Materials; nested/dependency edits invalidate results, removal clears values, repair recovers');
+  const textSession=new DocumentSession(bytes),textRequest={...request,requestId:'text-file',cells:[{key:'code',source:'import "data/message.txt" as message : Str\nout_1 = message'}]};
+  for(const text of ['hello 🪨','updated ✓']) {
+    const result=await textSession.request({...textRequest,files:[{path:'/workspace/data/message.txt',source:text}]});
+    assert.equal(result.status,'ok');assert.equal(result.values[0].text,JSON.stringify(text));
+  }
+  const missingText=await textSession.request({...textRequest,files:[]});assert.notEqual(missingText.status,'ok');assert.deepEqual(missingText.values,[]);textSession.stop();
+  report('PASS UTF-8 text file imports update through the compiler filesystem and missing files clear previous values');
   raw.putFile('/workspace/Fresh.roc',files[0].source);assert.equal(raw(request).status,'ok');
   const coldStats=raw.cacheStats();
   const artifacts=raw.takeCacheUpdates();
