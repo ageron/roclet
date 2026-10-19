@@ -4,6 +4,9 @@ app [] {
 import Display
 import time.ExactInterval
 import time.OffsetTimestamp
+import time.EnglishGregorian
+import time.ClockTime
+import time.FixedOffset
 import time.PosixBoundary
 import time.PosixDelta
 import time.PosixSpan
@@ -52,9 +55,9 @@ bookings = [
         end: "2026-06-15T12:00:00-04:00",
     },
 ]
-out_calendar = Display.table(
+out_calendar = table_or_error(
     ["Meeting", "Start as supplied", "End as supplied"],
-    bookings.map(|booking| [booking.meeting, booking.start, booking.end]),
+    calendar_rows(bookings),
 )
 
 # %%
@@ -65,6 +68,8 @@ out_calendar = Display.table(
 #
 # Invalid dates and reversed endpoints are errors, rather than rows to silently
 # drop. The small `describe_span` helper below formats a checked span for our tables.
+# `EnglishGregorian` provides readable dates and clocks; the column headings
+# state UTC explicitly after normalization.
 
 # %%
 normalize_bookings = |entries| {
@@ -148,7 +153,7 @@ recommend_meeting = |result, minutes| {
                 .map_err(|error| Str.inspect(error))?
             meeting = PosixSpan.new(start, end).map_err(|error| Str.inspect(error))?
             chosen = describe_span(meeting)?
-            Ok("**Book ${chosen.start_utc} → ${chosen.end_utc}.**\n\nThis gives us ${minutes.to_str()} uninterrupted minutes. Qualifying gaps: **${windows.len().to_str()}**.")
+            Ok("**Book ${chosen.label}.**\n\nThis gives us ${minutes.to_str()} uninterrupted minutes. Qualifying gaps: **${windows.len().to_str()}**.")
         }
     }
 }
@@ -170,16 +175,28 @@ out_recommendation = markdown_or_error(recommend_meeting(candidate_windows, meet
 # These helpers keep the intermediate tables readable. Durations come from the
 # checked span's microsecond width; each minute is 60,000,000 microseconds.
 # All parsing or range errors travel to the relevant output as readable text.
+# roc-time's `EnglishGregorian.date` and `.clock` handle presentation. Whole-minute
+# clocks use `Minute`; clocks with seconds or fractions retain their exact value.
 
 # %%
 describe_span = |span| {
-    interval = ExactInterval.from_span(span, UnassertedUtc, 0).map_err(|error| Str.inspect(error))?
+    interval = ExactInterval.from_span(span, UnassertedUtc, 6).map_err(|error| Str.inspect(error))?
     endpoints = ExactInterval.endpoints(interval)
     width = PosixSpan.coordinate_width(span).map_err(|error| Str.inspect(error))?
+    start = OffsetTimestamp.parts(endpoints.start)
+    end = OffsetTimestamp.parts(endpoints.end)
+    start_utc = readable_timestamp(endpoints.start)
+    end_utc = readable_timestamp(endpoints.end)
+    label = if start.date == end.date {
+        "${EnglishGregorian.date(start.date)}, ${readable_clock(start.clock)}–${readable_clock(end.clock)} UTC"
+    } else {
+        "${start_utc} – ${end_utc} UTC"
+    }
     Ok({
         span,
-        start_utc: OffsetTimestamp.to_text(endpoints.start),
-        end_utc: OffsetTimestamp.to_text(endpoints.end),
+        start_utc,
+        end_utc,
+        label,
         minutes: I64.div_trunc_by(PosixDelta.to_microseconds(width), 60000000),
     })
 }
@@ -187,6 +204,41 @@ describe_spans = |spans| {
     var $windows = []
     for span in spans { $windows = $windows.append(describe_span(span)?) }
     Ok($windows)
+}
+
+# %%
+readable_clock = |clock| match EnglishGregorian.clock(clock, Minute) {
+    Ok(text) => text
+    Err(_) => ClockTime.to_text(clock)
+}
+readable_timestamp = |timestamp| {
+    parts = OffsetTimestamp.parts(timestamp)
+    "${EnglishGregorian.date(parts.date)}, ${readable_clock(parts.clock)}"
+}
+readable_offset = |offset| match offset {
+    UnassertedUtc => Ok("UTC")
+    Asserted(fixed) => {
+        seconds = FixedOffset.to_seconds(fixed).to_i64()
+        sign = if seconds < 0 { "-" } else { "+" }
+        magnitude = if seconds < 0 { -seconds } else { seconds }
+        clock = ClockTime.from_microseconds_since_midnight(magnitude * 1000000)
+            .map_err(|error| Str.inspect(error))?
+        Ok("UTC${sign}${readable_clock(clock)}")
+    }
+}
+readable_supplied = |text| {
+    timestamp = OffsetTimestamp.parse(text).map_err(|error| Str.inspect(error))?
+    offset = readable_offset(OffsetTimestamp.parts(timestamp).offset)?
+    Ok("${readable_timestamp(timestamp)} ${offset}")
+}
+calendar_rows = |entries| {
+    var $rows = []
+    for booking in entries {
+        start = readable_supplied(booking.start).map_err(|error| "${booking.meeting}: ${error}")?
+        end = readable_supplied(booking.end).map_err(|error| "${booking.meeting}: ${error}")?
+        $rows = $rows.append([booking.meeting, start, end])
+    }
+    Ok($rows)
 }
 
 # %%

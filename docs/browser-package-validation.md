@@ -57,7 +57,7 @@ result beside the algorithm.
 
 Four bookings become three busy blocks. The free gaps are 09:00–10:00,
 12:30–14:00, 14:30–15:00, and 16:00–17:00 UTC. The 30-minute gap is too short;
-the first recommendation is **09:00–09:45 UTC**. Increasing the requested length
+the first recommendation is **Book 15 Jun 2026, 09:00–09:45 UTC.** Increasing the requested length
 to 90 minutes leaves only the 12:30–14:00 gap. At 120 minutes there is no opening.
 Moving a booking outside the working day verifies clipping at the planning bounds.
 
@@ -65,6 +65,11 @@ The **App header** card starts collapsed. Expand it to edit the actual Roc app
 declaration and imports in place, with normal highlighting, auto-run, undo,
 autosave, and Ctrl/Cmd+Enter to run. The notebook retains the original released
 package URL; there is no separate package declaration format.
+
+All result tables use roc-time’s `EnglishGregorian.date` and `.clock` formatters,
+for example `15 Jun 2026, 09:00`. Supplied offsets remain explicit in the input
+table. Whole-minute clocks omit seconds; nonzero seconds and fractions remain
+exact. Recommendations spanning midnight include both dates.
 
 ```sh
 node tools/browser-check.mjs --base-url http://127.0.0.1:4179 \
@@ -99,15 +104,16 @@ The final ReleaseFast browser compiler is 25,063,956 bytes, SHA-256
 The local-endpoint test at 1280×960 and separate-origin proxy test at 390×960
 both pass the complete roc-time probe: all six intermediate/final outputs,
 booking edits, 90-minute and 120-minute requests, an off-hours booking,
-reversed-date errors, worker restart, and fresh-worker restoration with package
+readable offsets, exact fractional clocks, cross-midnight dates, reversed-date
+errors, worker restart, and fresh-worker restoration with package
 networking disabled. Both layouts have no page-level horizontal overflow, and
 screenshots were inspected. Neither run records a failed network request.
 
 The fresh worker restores the verified package archive and compiler artifacts
 from IndexedDB and recomputes all six outputs. Cache counts depend on the bounded
-cache and the preceding edits; the compact run reports 17 checked hits/two
-misses, three canonicalized hits/16 misses, and six root executions. Missing
-compiler artifacts are rebuilt without downloading the package again.
+cache and the preceding edits. The probe requires checked artifact hits and
+recomputes all six roots; missing compiler artifacts are rebuilt without
+downloading the package again.
 
 The header probe checks that a new notebook starts with the card collapsed,
 then exercises expansion, source editing, a missing-module diagnostic, undo,
@@ -126,8 +132,11 @@ valid and reversed dates, while still displaying the actual reversed-date error.
 
 The original 256 MiB retained-revision arena exhausted memory while lowering
 roc-time and the larger typed CSV parser example. The adapter now reserves
-512 MiB per retained revision. Both examples pass native ReleaseFast and Debug correctness
-checks. This is separate from the browser's package-download restriction.
+512 MiB per retained revision. Both examples pass native ReleaseFast checks.
+Earlier scheduling and typed CSV cases also passed Debug checks; the expanded
+formatted notebook reports `OutOfMemory` with the cached Debug executable.
+The current formatted notebook passes native and WASM ReleaseFast validation.
+This is separate from the browser's package-download restriction.
 
 ```sh
 ./zig-out/bin/roclet run demos/04-meeting-windows.roc
