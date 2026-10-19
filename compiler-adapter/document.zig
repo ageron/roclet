@@ -17,6 +17,41 @@ fn string(o: V, key: []const u8, fallback: []const u8) []const u8 {
     const v = if (o == .object) o.object.get(key) else null;
     return if (v != null and v.? == .string) v.?.string else fallback;
 }
+// Execution responses retain checked source locations and user-visible results.
+// Parser internals and duplicate encodings are only needed by format operations.
+const CompactCell = struct {
+    kind: []const u8,
+    source: []const u8,
+    attributes: []const u8,
+    id: []const u8,
+    output: []const u8,
+    outputs: []const frontend.Output,
+    start: u64,
+    end: u64,
+    body_start: u64,
+    source_map: []const frontend.SourceMap,
+};
+fn frontendValue(a: A, result: frontend.Result, compact: bool) !V {
+    if (!compact) return value(a, result);
+    const cells = try a.alloc(CompactCell, result.model.cells.len);
+    for (result.model.cells, cells) |c, *out| out.* = .{
+        .kind = c.kind,
+        .source = c.source,
+        .attributes = c.attributes,
+        .id = c.id,
+        .output = c.output,
+        .outputs = c.outputs,
+        .start = c.start,
+        .end = c.end,
+        .body_start = c.body_start,
+        .source_map = c.source_map,
+    };
+    return value(a, .{ .plan = result.plan, .status = result.status, .model = .{ .format = result.model.format, .preamble = result.model.preamble, .metadata = result.model.metadata, .cells = cells, .diagnostics = result.model.diagnostics }, .program = result.program, .roots = result.roots, .mappings = result.mappings });
+}
+fn finishCompact(result: *V) void {
+    _ = result.object.swapRemove("program");
+    for (fieldArray(result.object.get("model").?, "cells")) |*cell| _ = cell.object.swapRemove("source_map");
+}
 pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -31,6 +66,8 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
     if (std.mem.eql(u8, string(request, "operation", ""), "markdown")) return json(gpa, .{ .status = "ok", .events = try syntax.renderMarkdown(a, source) });
     const action = string(request, "action", "parse");
     const target = string(request, "target", format);
+    const compact_requested = request.object.get("compact") orelse .null;
+    const compact = compact_requested == .bool and compact_requested.bool and (std.mem.eql(u8, action, "analyze") or std.mem.eql(u8, action, "evaluate"));
     if ((!std.mem.eql(u8, format, "roc") and !std.mem.eql(u8, format, "markdown")) or (!std.mem.eql(u8, target, "roc") and !std.mem.eql(u8, target, "markdown"))) return json(gpa, .{ .status = "protocol_error", .failure = "Expected roc or markdown format" });
     const draft_value = request.object.get("draft");
     var draft: frontend.Draft = .{};
@@ -48,6 +85,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
     }
     draft.supplied = draft_value != null;
     var input: frontend.Input = .{
+        .compact = compact,
         .phase = "segment",
         .format = format,
         .target = target,
@@ -89,7 +127,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
     input.phase = action;
     input.model = model;
     const app_header = model.preamble[0..@intCast(@min(input.facts.header_end, model.preamble.len))];
-    var result = try value(a, try frontend.run(a, input));
+    var result = try frontendValue(a, try frontend.run(a, input), compact);
     try result.object.put(a, "protocol", .{ .integer = 1 });
     if ((std.mem.eql(u8, action, "evaluate") or std.mem.eql(u8, action, "analyze")) and std.mem.eql(u8, string(result, "status", ""), "ok")) {
         const program = string(result, "program", "");
@@ -178,6 +216,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
         }
         try result.object.put(a, "rendering", try value(a, rendering.items));
     };
+    if (compact) finishCompact(&result);
     return json(gpa, result);
 }
 
@@ -291,4 +330,48 @@ fn dependencyGraph(a: A, program: []const u8, evaluation: V, modules: V, workspa
     try context.writer.writeAll(try json(a, modules));
     try context.writer.writeAll(workspace_fingerprint);
     return value(a, .{ .definitions = definitions.items, .scope = string(evaluation, "dependency_scope", "module"), .context = try digest(a, context.written()) });
+}
+
+test "compact execution response omits parser payloads and preserves editor and output contracts" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var cell: frontend.Cell = .{
+        .kind = "code",
+        .source = "out_total = 7",
+        .attributes = "id=total",
+        .id = "total",
+        .output = "out_total",
+        .outputs = &.{.{ .kind = "text", .source = "saved 7" }},
+        .start = 0,
+        .end = 13,
+        .body_start = 0,
+        .facts = .{ .tokens = try a.alloc(syntax.Token, 100) },
+        .source_map = &.{.{ .start = 0, .end = 13, .original_start = 0, .original_end = 13 }},
+    };
+    for (cell.facts.tokens) |*token| token.* = .{ .start = 0, .end = 9, .depth = 0, .tag = "LowerIdent" };
+    const prepared: frontend.Result = .{
+        .model = .{ .original = "# %%\nout_total = 7", .cells = @as([*]frontend.Cell, @ptrCast(&cell))[0..1] },
+        .draft = .{ .cells = &.{.{ .kind = "code", .source = "out_total = 7" }} },
+        .source = "# %%\nout_total = 7",
+        .program = "out_total = 7\n\n",
+        .execution = "out_total = 7\n\nmain! = |_args| Ok({})",
+        .roots = &.{"out_total"},
+        .mappings = &.{.{ .generated_start = 0, .generated_end = 13, .source_start = 0, .source_end = 13, .cell = 0 }},
+    };
+    const full = try frontendValue(a, prepared, false);
+    var compact = try frontendValue(a, prepared, true);
+    finishCompact(&compact);
+    try std.testing.expect((try json(a, compact)).len * 4 < (try json(a, full)).len);
+    for ([_][]const u8{ "program", "execution", "source", "draft" }) |key| try std.testing.expect(compact.object.get(key) == null);
+    const model = compact.object.get("model").?;
+    try std.testing.expect(model.object.get("original") == null);
+    const out = fieldArray(model, "cells")[0];
+    for ([_][]const u8{ "facts", "blocks", "first_block", "marker_lines", "source_map" }) |key| try std.testing.expect(out.object.get(key) == null);
+    try std.testing.expectEqualStrings(cell.source, string(out, "source", ""));
+    try std.testing.expectEqualStrings(cell.output, string(out, "output", ""));
+    try std.testing.expectEqualStrings("saved 7", string(fieldArray(out, "outputs")[0], "source", ""));
+    try std.testing.expectEqual(@as(u64, 0), number(out, "body_start"));
+    try std.testing.expectEqual(@as(usize, 1), fieldArray(compact, "mappings").len);
+    try std.testing.expectEqualStrings("out_total", fieldArray(compact, "roots")[0].string);
 }

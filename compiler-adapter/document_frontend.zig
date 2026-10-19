@@ -33,7 +33,7 @@ pub const Reactive = struct { known: bool = false, previous: Graph = .{}, curren
 pub const Explanation = struct { root: S, reason: S, dependencies: []const S };
 pub const Plan = struct { changed: []const S = &.{}, evaluate: []const S = &.{}, reused: []const S = &.{}, explanations: []const Explanation = &.{} };
 pub const MetadataField = struct { key: S, value: S };
-pub const Input = struct { reactivity: Reactive = .{}, metadata_fields: []const MetadataField = &.{}, phase: S, format: S, target: S, source: S, facts: syntax.Facts = .{}, blocks: []const syntax.Block = &.{}, model: Model = .{}, draft: Draft = .{} };
+pub const Input = struct { compact: bool = false, reactivity: Reactive = .{}, metadata_fields: []const MetadataField = &.{}, phase: S, format: S, target: S, source: S, facts: syntax.Facts = .{}, blocks: []const syntax.Block = &.{}, model: Model = .{}, draft: Draft = .{} };
 pub const Mapping = struct { generated_start: u64, generated_end: u64, source_start: u64, source_end: u64, cell: u64 };
 pub const Result = struct { plan: Plan = .{}, status: S = "ok", model: Model, draft: Draft, source: S = "", program: S = "", execution: S = "", roots: []const S = &.{}, mappings: []const Mapping = &.{} };
 fn eq(x: S, y: S) bool {
@@ -659,7 +659,7 @@ fn finish(a: A, input: Input) !Result {
             try code.writer.writeAll(tail);
             try execution.writer.writeAll(code.written());
             try execution.writer.writeAll("\n\n");
-            try lowered.append(a, try escapeRoc(a, code.written(), c.*, base, maps.items));
+            try lowered.append(a, if (input.compact) "" else try escapeRoc(a, code.written(), c.*, base, maps.items));
             if (c.output.len > 0) try roots.append(a, c.output);
             const snapshots = try snapshotComments(a, c.*);
             if (snapshots.len > 0 and c.outputs.len > 0) try diagnostic(a, &ds, "duplicate-snapshot", "Both Roc comments and Markdown blocks provide saved output; both are preserved", c.body_start, c.end, index);
@@ -678,7 +678,7 @@ fn finish(a: A, input: Input) !Result {
             try ids.append(a, c.id);
         }
     }
-    const main = try mainSource(a, roots.items, try cat(a, &.{ try fresh(a, used.items, "display", false), "!" }));
+    const main = if (input.compact) "" else try mainSource(a, roots.items, try cat(a, &.{ try fresh(a, used.items, "display", false), "!" }));
     var generated: usize = 0;
     for (model.cells) |c| if (eq(c.kind, "generated")) {
         generated += 1;
@@ -691,17 +691,17 @@ fn finish(a: A, input: Input) !Result {
     };
     model.diagnostics = try ds.toOwnedSlice(a);
     const editing = oneOf(input.phase, &.{ "view", "compose" });
-    const rendered = if (eq(input.target, "roc")) try encodeRoc(a, model, lowered.items, main, conflict or handwritten, input.facts.header_end > 0, !editing, input.metadata_fields) else try encodeMarkdown(a, model, conflict, input.metadata_fields, !editing);
+    const rendered = if (input.compact) "" else if (eq(input.target, "roc")) try encodeRoc(a, model, lowered.items, main, conflict or handwritten, input.facts.header_end > 0, !editing, input.metadata_fields) else try encodeMarkdown(a, model, conflict, input.metadata_fields, !editing);
     var draft_cells: std.ArrayList(DraftCell) = .empty;
-    for (model.cells) |c| {
+    if (!input.compact) for (model.cells) |c| {
         const existing = if (eq(c.kind, "code")) (try snapshotComments(a, c)).len else 0;
         try draft_cells.append(a, .{ .kind = c.kind, .source = c.source, .attributes = c.attributes, .outputs = c.outputs[@min(existing, c.outputs.len)..] });
-    }
+    };
     var status: S = "ok";
     for (model.diagnostics) |d| if (eq(d.severity, "error")) {
         status = "diagnostic";
     };
-    return .{ .status = status, .model = model, .draft = .{ .supplied = true, .preamble = model.preamble, .metadata = model.metadata, .cells = try draft_cells.toOwnedSlice(a) }, .source = if (!input.draft.supplied and !oneOf(input.phase, &.{ "normalize", "export", "view", "compose" }) and eq(input.target, model.format)) model.original else rendered, .program = try a.dupe(u8, execution.written()), .execution = try cat(a, &.{ execution.written(), main, "\n" }), .roots = try roots.toOwnedSlice(a), .mappings = try maps.toOwnedSlice(a) };
+    return .{ .status = status, .model = model, .draft = .{ .supplied = true, .preamble = model.preamble, .metadata = model.metadata, .cells = try draft_cells.toOwnedSlice(a) }, .source = if (input.compact) "" else if (!input.draft.supplied and !oneOf(input.phase, &.{ "normalize", "export", "view", "compose" }) and eq(input.target, model.format)) model.original else rendered, .program = try a.dupe(u8, execution.written()), .execution = if (input.compact) "" else try cat(a, &.{ execution.written(), main, "\n" }), .roots = try roots.toOwnedSlice(a), .mappings = try maps.toOwnedSlice(a) };
 }
 fn definitionEqual(old: []const Definition, new: []const Definition, name: S) bool {
     var oi: usize = 0;
@@ -781,6 +781,13 @@ test "source assembly names results without losing UTF-8 source ranges or reserv
     const m = result.mappings[1];
     try std.testing.expectEqualStrings("\"héllo\"", result.program[@intCast(m.generated_start)..@intCast(m.generated_end)]);
     try std.testing.expectEqual(@as(u64, 8), m.source_end);
+    const compact = try run(a, .{ .compact = true, .phase = "evaluate", .format = "roc", .target = "roc", .source = "", .model = .{ .cells = &cells }, .draft = .{ .supplied = true } });
+    try std.testing.expectEqualStrings(result.program, compact.program);
+    try std.testing.expectEqualStrings(try json(a, result.roots), try json(a, compact.roots));
+    try std.testing.expectEqualStrings(try json(a, result.mappings), try json(a, compact.mappings));
+    try std.testing.expectEqualStrings("", compact.execution);
+    try std.testing.expectEqualStrings("", compact.source);
+    try std.testing.expectEqual(@as(usize, 0), compact.draft.cells.len);
 }
 
 test "reactive plan follows transitive dependencies and handles removed definitions" {
