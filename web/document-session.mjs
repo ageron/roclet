@@ -58,7 +58,7 @@ export class DocumentSession {
   request(request) {
     this.invalidate();
     const fresh = !this.worker;
-    const worker = this.worker ??= new this.WorkerType('./format-worker.mjs', { type: 'module' });
+    const worker = this.worker ??= new this.WorkerType(new URL('./format-worker.mjs', import.meta.url), { type: 'module' });
     let workspace;
     if(request.files || this.files?.size) {
       const changes=fileChanges(fresh?new Map():this.files??new Map(),request.files??[]);
