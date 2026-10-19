@@ -102,6 +102,8 @@ export interface DocumentRequest {
   isolateErrors?: boolean;
   /** Return typed MD4C rendering events for prose; never executable HTML. */
   render?: boolean;
+  /** analyze/evaluate only: omit duplicate sources and internal parser payloads. */
+  compact?: boolean;
 }
 export interface DocumentDraft {
   preamble: string;
@@ -129,12 +131,12 @@ export interface DocumentCell extends ByteSpan {
   /** Saved, unverified data, never evaluation input. */
   outputs: { kind: string; source: string }[];
   body_start: number;
-  source_map: (ByteSpan & { original_start: number; original_end: number })[];
+  source_map?: (ByteSpan & { original_start: number; original_end: number })[];
   /** Version-pinned compiler/Markdown facts; recompute when source changes. */
-  facts: unknown;
-  blocks: unknown[];
-  first_block: unknown;
-  marker_lines: number[];
+  facts?: unknown;
+  blocks?: unknown[];
+  first_block?: unknown;
+  marker_lines?: number[];
 }
 export interface DependencyGraph {
   context: string;
@@ -156,20 +158,20 @@ export interface DocumentResponse {
   plan: RecomputePlan;
   protocol: 1;
   status: 'ok' | 'partial' | 'diagnostic' | 'runtime_error' | 'protocol_error';
-  source: string;
+  source?: string;
   model: {
     format: 'roc' | 'markdown';
-    original: string;
+    original?: string;
     preamble: string;
     metadata: string;
     cells: DocumentCell[];
     diagnostics: DocumentDiagnostic[];
   };
-  execution: string;
+  execution?: string;
   /** Lowered user module, excluding all generated script helpers and main!. */
-  program: string;
+  program?: string;
   /** Safe editable representation; inline snapshot comments are not repeated in outputs. */
-  draft: DocumentDraft;
+  draft?: DocumentDraft;
   roots: string[];
   /** Source positions are body_start + normalized cell offsets; compose with source_map. */
   mappings: { generated_start: number; generated_end: number; source_start: number; source_end: number; cell: number }[];
