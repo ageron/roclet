@@ -48,6 +48,16 @@ pub const Suite = struct {
         try expect(eq(str(result, "status"), str(wanted, "status")));
         const model = field(result, "model");
         const cells = field(model, "cells").array.items;
+        if (wanted.object.get("compact")) |_| {
+            for ([_][]const u8{ "draft", "source", "program", "execution" }) |key| try expect(result.object.get(key) == null);
+            try expect(model.object.get("original") == null);
+            try expect(result.object.get("mappings") != null);
+            for (cells) |cell| {
+                for ([_][]const u8{ "facts", "blocks", "first_block", "marker_lines", "source_map" }) |key| try expect(cell.object.get(key) == null);
+                for ([_][]const u8{ "source", "body_start", "output", "outputs" }) |key| try expect(cell.object.get(key) != null);
+            }
+        }
+
         for ([_][]const u8{ "kinds", "ids" }) |key| if (wanted.object.get(key)) |expected| {
             var index: usize = 0;
             for (cells) |cell| {

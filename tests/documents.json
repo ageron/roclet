@@ -2602,5 +2602,52 @@
       "status": "ok",
       "roundtrip": true
     }
+  },
+  {
+    "name": "compact execution preserves Unicode results and editor source spans",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "compact": true,
+      "source": "# %%\nout_text = \"héllo\"\n# %%\nout_count = 7.U64\n"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code",
+        "code"
+      ],
+      "ids": [
+        "text",
+        "count"
+      ],
+      "roots": [
+        "out_text",
+        "out_count"
+      ],
+      "evaluated_values": [
+        "\"héllo\"",
+        "7"
+      ],
+      "events": [],
+      "compact": true
+    }
+  },
+  {
+    "name": "compact analysis preserves Unicode diagnostic mapping",
+    "request": {
+      "operation": "document",
+      "action": "analyze",
+      "format": "roc",
+      "compact": true,
+      "source": "# %%\nout_1 = (\"🦅\", missing)"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "roc-check",
+      "location_text": "missing",
+      "compact": true
+    }
   }
 ]
