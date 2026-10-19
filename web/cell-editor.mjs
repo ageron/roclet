@@ -26,14 +26,14 @@ const highlighting=HighlightStyle.define([
 const theme=EditorView.theme({
   '&':{fontSize:'14px',background:'transparent',borderRadius:'7px'},'&.cm-focused':{outline:'none'},
   '.cm-scroller':{fontFamily:'ui-monospace,SFMono-Regular,Menlo,monospace',lineHeight:'1.7',maxHeight:'min(550px,70vh)',overflow:'auto'},
-  '.cm-content':{padding:'12px 0',minHeight:'54px',caretColor:'#294338'},'.cm-line':{padding:'0 18px'},
-  '&.cm-focused .cm-cursor':{borderLeftColor:'#294338'},'.cm-selectionBackground':{background:'#dbe6de'},
-  '&.cm-focused .cm-selectionBackground':{background:'#c7dfd0'},
-  '.cm-content .tok-keyword,.tok-markup':{color:'#8750a0'},'.cm-content .tok-string':{color:'#32784e'},'.cm-content .tok-number':{color:'#a45f28'},
-  '.cm-content .tok-type':{color:'#326f9b'},'.cm-content .tok-operator':{color:'#755d91'},'.cm-content .tok-variable':{color:'#294338'},
-  '.cm-content .tok-comment':{color:'#7d8981',fontStyle:'italic'},'.tok-heading':{color:'#356d51',fontWeight:'650'},
-  '.tok-strong':{fontWeight:'700'},'.tok-emphasis':{fontStyle:'italic'},'.tok-link':{color:'#326f9b',textDecoration:'underline'},
-  '.tok-code':{color:'#9a5d37'},'.tok-strike':{textDecoration:'line-through'},
+  '.cm-content':{padding:'12px 0',minHeight:'54px',caretColor:'var(--text, #294338)'},'.cm-line':{padding:'0 18px'},
+  '&.cm-focused .cm-cursor':{borderLeftColor:'var(--text, #294338)'},'.cm-selectionBackground':{background:'var(--selection, #dbe6de)'},
+  '&.cm-focused .cm-selectionBackground':{background:'var(--selection-active, #c7dfd0)'},
+  '.cm-content .tok-keyword,.tok-markup':{color:'var(--keyword, #8750a0)'},'.cm-content .tok-string':{color:'var(--string, #32784e)'},'.cm-content .tok-number':{color:'var(--number, #a45f28)'},
+  '.cm-content .tok-type':{color:'var(--syntax-type, #326f9b)'},'.cm-content .tok-operator':{color:'var(--operator, #755d91)'},'.cm-content .tok-variable':{color:'var(--text, #294338)'},
+  '.cm-content .tok-comment':{color:'var(--comment, #7d8981)',fontStyle:'italic'},'.tok-heading':{color:'var(--accent, #356d51)',fontWeight:'650'},
+  '.tok-strong':{fontWeight:'700'},'.tok-emphasis':{fontStyle:'italic'},'.tok-link':{color:'var(--syntax-type, #326f9b)',textDecoration:'underline'},
+  '.tok-code':{color:'var(--number, #9a5d37)'},'.tok-strike':{textDecoration:'line-through'},
 });
 export class CellEditor {
   constructor(parent,{source='',kind='code',label='Cell source',positions,highlighter,onChange=()=>{},onFocus=()=>{},onSelection=()=>{},onComposition=()=>{},adjacent=()=>false,symbol=()=>null,completions=()=>[],onRename=()=>{}}={}) {
