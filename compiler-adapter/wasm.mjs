@@ -30,7 +30,8 @@ export async function createWasmTransport(bytes) {
     // alternatives, but do not serialize the same baseline graph on each edit.
     if(transport.workspace && request.operation==='document' && previousGraph && request.reactivity) {
       const {previous,current,...reactivity}=request.reactivity;
-      if(previous && JSON.stringify(previous)===previousGraph && (!current || JSON.stringify(current)===previousGraph)) request={...request,reactivity};
+      const placeholder=current?.context==='' && current.scope==='module' && current.definitions?.length===0;
+      if(previous && JSON.stringify(previous)===previousGraph && (!current || placeholder || JSON.stringify(current)===previousGraph)) request={...request,reactivity};
     }
     const bytes = encoder.encode(JSON.stringify(request));
     transport.lastRequestBytes=bytes.length;

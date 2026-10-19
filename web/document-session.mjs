@@ -58,7 +58,8 @@ export class DocumentSession {
     }
     if(!fresh && this.engineBaseline && this.graph && request.reactivity) {
       const {previous,current,...reactivity}=request.reactivity;
-      if(previous && JSON.stringify(previous)===this.graph && (!current || JSON.stringify(current)===this.graph)) request={...request,reactivity};
+      const placeholder=current?.context==='' && current.scope==='module' && current.definitions?.length===0;
+      if(previous && JSON.stringify(previous)===this.graph && (!current || placeholder || JSON.stringify(current)===this.graph)) request={...request,reactivity};
     }
     return new Promise((resolve, reject) => {
       this.pending = { resolve, reject };

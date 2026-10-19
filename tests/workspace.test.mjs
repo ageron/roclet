@@ -33,6 +33,7 @@ test('session omits only a confirmed compiler baseline graph from later requests
   const first=session.request({source:'a'});worker.onmessage({data:{result:{status:'ok',workspaceCache:{hits:0},graph}}});await first;
   const request={operation:'document',reactivity:{known:true,previous:graph,current:graph,available:['out_1']}};
   const second=session.request(request);assert.deepEqual(worker.sent.request.reactivity,{known:true,available:['out_1']});worker.onmessage({data:{result:{status:'ok',workspaceCache:{hits:1},graph}}});await second;
+  const placeholder=session.request({...request,reactivity:{...request.reactivity,current:{context:'',scope:'module',definitions:[]}}});assert.deepEqual(worker.sent.request.reactivity,{known:true,available:['out_1']});worker.onmessage({data:{result:{status:'ok',workspaceCache:{hits:1},graph}}});await placeholder;
   const different=session.request({...request,reactivity:{...request.reactivity,previous:{context:'different'}}});assert.equal(worker.sent.request.reactivity.previous.context,'different');worker.onmessage({data:{result:{status:'ok'}}});await different;session.stop();
 });
 
