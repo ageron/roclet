@@ -1,5 +1,5 @@
-import { Studio, newDraft, makeCell } from './studio-model.mjs';
-import { DraftStore } from './studio-store.mjs';
+import { Notebook, newDraft, makeCell } from './edit-model.mjs';
+import { DraftStore } from './edit-store.mjs';
 import { renderMarkdown } from './markdown-view.mjs';
 import { DocumentSession } from './document-session.mjs';
 import { assert } from '../tests/harness.mjs';
@@ -7,13 +7,13 @@ const status = document.getElementById('status'), log = document.getElementById(
 const report = text => { log.textContent += `PASS ${text}\n`; };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const until = async predicate => { for (let i = 0; i < 100; i++) { if (predicate()) return; await sleep(10); } throw new Error('Timed out waiting for test setup'); };
-let studio, recovered, markdownSession, store;
+let notebook, recovered, markdownSession, store;
 try {
   status.textContent = 'Checking revision and persistence races';
   const calls = [], pending = [];
   const memoryStore = { save: async state => { calls.push(`save:${state.revision}`); }, list: async () => [] };
   const mock = { invalidate() {}, stop() {}, request(request) { calls.push('evaluate'); return new Promise((resolve,reject) => pending.push({request,resolve,reject})); } };
-  const fake = new Studio(null, memoryStore, {session:mock,timeout:5000}); fake.state = newDraft(); fake.state.autoRun = false;
+  const fake = new Notebook(null, memoryStore, {session:mock,timeout:5000}); fake.state = newDraft(); fake.state.autoRun = false;
   const first = fake.run(); await until(() => pending.length === 1);
   assert.equal(calls[0], 'save:1'); assert.equal(calls[1], 'evaluate');
   fake.editCell(0, '2 + 2'); assert.equal(fake.result, null);
@@ -46,7 +46,7 @@ try {
   assert.equal(pending[7].request.selectedCell,0);assert.equal(fake.diagnosticsDeferred,false);
   pending[7].resolve(fresh);await afterCheck;fake.dispose();
   report('leaving manual edits checks without evaluating; resumed edits reject late diagnostics and checked-only snapshots cannot skip recomputation');
-  const inspecting = new Studio(null, memoryStore, {session:mock}); inspecting.state=newDraft(); inspecting.state.autoRun=false;
+  const inspecting = new Notebook(null, memoryStore, {session:mock}); inspecting.state=newDraft(); inspecting.state.autoRun=false;
   inspecting.state.sourceCurrent=true; inspecting.state.source='# %%\n2 # => saved'; inspecting.state.cells=[makeCell('code','2')];
   const inspection=inspecting.inspect('parse','roc',{draft:true});
   assert.equal(pending.at(-1).request.action,'parse'); assert.equal(pending.at(-1).request.source,'');
@@ -56,39 +56,39 @@ try {
   assert.equal(inspecting.state.cells[0].source,'3'); inspecting.dispose();
   report('structural edits parse editable sources without saved snapshots and reject stale syntax after another edit');
   const writes = [];
-  const saving = new Studio(null, { save: () => new Promise(resolve => writes.push(resolve)) }, {session:mock});
+  const saving = new Notebook(null, { save: () => new Promise(resolve => writes.push(resolve)) }, {session:mock});
   saving.state = newDraft();
   const earlierSave = saving.persist(); await until(() => writes.length === 1);
   saving.state.autoRun = false; const latestSave = saving.persist(); writes[0](); await earlierSave;
   assert.equal(saving.saveStatus, 'Saving in this browser…'); await until(() => writes.length === 2);
   writes[1](); await latestSave; assert.equal(saving.saveStatus,'Saved in this browser');
   saving.dispose();
-  const unavailable = new Studio(null,{save:async()=>{throw new Error('Quota exceeded');}},{session:mock});
+  const unavailable = new Notebook(null,{save:async()=>{throw new Error('Quota exceeded');}},{session:mock});
   unavailable.state=newDraft(); assert.equal(await unavailable.persist(),false); assert.match(unavailable.saveStatus,/Not saved: Quota exceeded/); unavailable.dispose();
   report('save status waits for the newest transaction and never hides a storage failure');
 
   const bytes = await fetch('../artifacts/roclet.wasm').then(r => r.arrayBuffer());
   const name = `roclet-test-${crypto.randomUUID()}`;
   store = new DraftStore(name);
-  studio = new Studio(bytes, store, {debounce:60000});
-  await studio.initialize(); studio.setAuto(false);
+  notebook = new Notebook(bytes, store, {debounce:60000});
+  await notebook.initialize(); notebook.setAuto(false);
   status.textContent = 'Checking reactive notebook snapshots';
-  let result = await studio.run();
+  let result = await notebook.run();
   assert.equal(result.status,'ok'); assert.deepEqual(result.evaluation.values.map(v=>v.text),['15.0','15.0']);
   assert.deepEqual(result.evaluation.events.map(e=>[e.cell,e.root,e.message]),[[3,'out_dimensions','15.0']]);
   report('wall-area notebook evaluates forward references and attributes debug to its root cell');
-  studio.editCell(2,'width = 8\nheight = 3');
-  result = await studio.run(); assert.deepEqual(result.evaluation.values.map(v=>v.text),['24.0','24.0']);
-  studio.change(s=>{ s.cells = [...s.cells].reverse(); });
-  result = await studio.run(); assert.deepEqual(result.evaluation.values.map(v=>v.text),['24.0','24.0']); assert.equal(result.evaluation.events[0].cell,0);
+  notebook.editCell(2,'width = 8\nheight = 3');
+  result = await notebook.run(); assert.deepEqual(result.evaluation.values.map(v=>v.text),['24.0','24.0']);
+  notebook.change(s=>{ s.cells = [...s.cells].reverse(); });
+  result = await notebook.run(); assert.deepEqual(result.evaluation.values.map(v=>v.text),['24.0','24.0']); assert.equal(result.evaluation.events[0].cell,0);
   report('editing width updates both results; moving cells preserves computation and moves debug attribution');
-  const dimensions = studio.state.cells.findIndex(c=>c.source.startsWith('width'));
-  studio.change(s=>{s.cells.splice(dimensions,1);}); result = await studio.run();
+  const dimensions = notebook.state.cells.findIndex(c=>c.source.startsWith('width'));
+  notebook.change(s=>{s.cells.splice(dimensions,1);}); result = await notebook.run();
   assert.equal(result.status,'diagnostic'); assert.deepEqual(result.evaluation.values,[]);
-  studio.undo(); result = await studio.run(); assert.equal(result.status,'ok');
+  notebook.undo(); result = await notebook.run(); assert.equal(result.status,'ok');
   report('deletion fails visibly with no stale values; undo restores a runnable snapshot');
-  await studio.persist(); const recoveredId = studio.state.id; studio.dispose();
-  recovered = new Studio(bytes,store,{debounce:60000}); await recovered.initialize(); recovered.setAuto(false);
+  await notebook.persist(); const recoveredId = notebook.state.id; notebook.dispose();
+  recovered = new Notebook(bytes,store,{debounce:60000}); await recovered.initialize(); recovered.setAuto(false);
   assert.equal(recovered.state.id,recoveredId); assert(recovered.state.cells.some(c=>c.source.includes('width = 8'))); assert.equal(recovered.result,null);
   result = await recovered.run(); assert.deepEqual(result.evaluation.values.map(v=>v.text),['24.0','24.0']);
   report('IndexedDB reopening restores the draft, never cached current results');
@@ -187,4 +187,4 @@ try {
   document.documentElement.dataset.result='pass';
 } catch(error) {
   status.textContent='FAIL'; log.textContent += error.stack??error.message; document.documentElement.dataset.result='fail';
-} finally { studio?.dispose(); recovered?.dispose(); markdownSession?.stop(); store?.close(); }
+} finally { notebook?.dispose(); recovered?.dispose(); markdownSession?.stop(); store?.close(); }

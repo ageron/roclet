@@ -2,9 +2,9 @@ import {assert} from '../tests/harness.mjs';
 import {zip,unzip,utf8,text,crc32} from './archive.mjs';
 import {captureExport,exportBundle,importBundle,exportReport,exportSite} from './sharing.mjs';
 import {prepareRelease,verifyRelease,repairRelease,sha256,cacheName} from './offline-cache.mjs';
-import {DraftStore} from './studio-store.mjs';
-import {Studio,newDraft,makeCell} from './studio-model.mjs';
-const $=id=>document.getElementById(id);let count=0,studio,store1,store2;
+import {DraftStore} from './edit-store.mjs';
+import {Notebook,newDraft,makeCell} from './edit-model.mjs';
+const $=id=>document.getElementById(id);let count=0,notebook,store1,store2;
 const report=message=>{$('log').textContent+=`PASS ${message}\n`;$('status').textContent=`${++count} checks passed…`;};
 const name=`roclet-m3-test-${crypto.randomUUID()}`,base=new URL(`./${name}/`,location.href).href;
 const release=(version,assets)=>({schema:1,version,assets});
@@ -45,19 +45,19 @@ try {
   assert.equal((await store1.get(record.id)).title,'Concurrency');
   report('aborted IndexedDB writes roll back; the previous saved draft remains readable');
   const compiler=await fetch('../artifacts/manifest.json').then(r=>r.json()),bytes=await fetch('../artifacts/roclet.wasm').then(r=>r.arrayBuffer());
-  studio=new Studio(bytes,{save:async()=>{},list:async()=>[]},{debounce:60000});studio.state=newDraft('Portable area',true);studio.state.autoRun=false;
-  let result=await studio.run();assert.equal(result.status,'ok');assert.deepEqual(result.evaluation.values.map(v=>v.text),['15.0','15.0']);
-  const capture=await captureExport(studio,compiler,{results:true,debug:true}),bundle=await exportBundle(capture),imported=await importBundle(await bundle.arrayBuffer(),compiler);
-  assert.equal(imported.record.title,'Portable area');assert.equal(imported.record.autoRun,false);assert(imported.record.cells.every(c=>!studio.state.cells.some(old=>old.key===c.key)));assert.equal(imported.record.savedResults.snapshots.length,2);
-  const bundleEntries=await unzip(await bundle.arrayBuffer());assert(!text(bundleEntries.get('document.json')).includes(studio.state.id));
+  notebook=new Notebook(bytes,{save:async()=>{},list:async()=>[]},{debounce:60000});notebook.state=newDraft('Portable area',true);notebook.state.autoRun=false;
+  let result=await notebook.run();assert.equal(result.status,'ok');assert.deepEqual(result.evaluation.values.map(v=>v.text),['15.0','15.0']);
+  const capture=await captureExport(notebook,compiler,{results:true,debug:true}),bundle=await exportBundle(capture),imported=await importBundle(await bundle.arrayBuffer(),compiler);
+  assert.equal(imported.record.title,'Portable area');assert.equal(imported.record.autoRun,false);assert(imported.record.cells.every(c=>!notebook.state.cells.some(old=>old.key===c.key)));assert.equal(imported.record.savedResults.snapshots.length,2);
+  const bundleEntries=await unzip(await bundle.arrayBuffer());assert(!text(bundleEntries.get('document.json')).includes(notebook.state.id));
   const fixture=document.createElement('a');fixture.textContent='Portable test bundle';fixture.download='portable-test.roclet.zip';fixture.href='data:application/zip;base64,'+btoa(String.fromCharCode(...new Uint8Array(await bundle.arrayBuffer())));document.body.append(fixture);
   report('portable bundles preserve cells, code, compiler identity and selected snapshots without browser IDs or automatic execution');
-  const second=new Studio(bytes,{save:async()=>{},list:async()=>[]},{debounce:60000});second.state=imported.record;result=await second.run();assert.deepEqual(result.evaluation.values.map(v=>v.text),['15.0','15.0']);second.dispose();
+  const second=new Notebook(bytes,{save:async()=>{},list:async()=>[]},{debounce:60000});second.state=imported.record;result=await second.run();assert.deepEqual(result.evaluation.values.map(v=>v.text),['15.0','15.0']);second.dispose();
   report('an independent import recomputes the same values using the shared WASM core');
   const mismatched=structuredClone(compiler);mismatched.artifacts['roclet.wasm'].sha256='0'.repeat(64);await assert.rejects(importBundle(await bundle.arrayBuffer(),mismatched),/compiler version/);
   bundleEntries.set('document.json',utf8('{}'));await assert.rejects(importBundle(await zip(bundleEntries).arrayBuffer(),compiler),/integrity/);
   report('compiler mismatches and modified bundle members fail before replacing a notebook');
-  studio.editCell(2,'width = 8\nheight = 3');const stale=await captureExport(studio,compiler,{results:true,debug:true});assert.equal(stale.snapshots.length,0);assert.equal(stale.events.length,0);
+  notebook.editCell(2,'width = 8\nheight = 3');const stale=await captureExport(notebook,compiler,{results:true,debug:true});assert.equal(stale.snapshots.length,0);assert.equal(stale.events.length,0);
   const reportHtml=await (await exportReport(capture)).text();const dom=new DOMParser().parseFromString(reportHtml,'text/html');assert.equal(dom.querySelectorAll('script,img,iframe').length,0);assert.match(dom.body.textContent,/15\.0/);assert(dom.querySelector('meta[http-equiv="Content-Security-Policy"]'));
   capture.document.title='<script>bad()</script>';capture.model.cells.push({kind:'code',source:'<img src=x onerror=bad()>'});const hostile=new DOMParser().parseFromString(await (await exportReport(capture)).text(),'text/html');assert.equal(hostile.querySelectorAll('script,img').length,0);assert.match(hostile.body.textContent,/<img src=x/);
   report('exports never label stale values current; static reports escape source/title and contain no executable notebook scripts');
@@ -68,4 +68,4 @@ try {
   report('interactive site includes all editor/compiler assets, notices and a publication covered by its offline manifest');
   $('status').textContent=`PASS — ${count} M3 contracts`;document.documentElement.dataset.result='pass';
 }catch(error){$('status').textContent='FAIL';$('log').textContent+=error.stack??error.message;document.documentElement.dataset.result='fail';}
-finally {studio?.dispose();store1?.close();store2?.close();indexedDB.deleteDatabase(name);for(const r of releaseNames) await caches.delete(cacheName(r,base));}
+finally {notebook?.dispose();store1?.close();store2?.close();indexedDB.deleteDatabase(name);for(const r of releaseNames) await caches.delete(cacheName(r,base));}

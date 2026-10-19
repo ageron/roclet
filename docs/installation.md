@@ -34,9 +34,9 @@ architecture; the current native build is tested on macOS Apple Silicon only.
 ./roclet-serve . 4173
 ```
 
-Open <http://127.0.0.1:4173/web/studio.html>. Leave the terminal running while
+Open <http://127.0.0.1:4173/web/edit.html>. Leave the terminal running while
 using the app, or prepare offline use before stopping it. Don't double-click
-`studio.html`: the interactive app needs HTTPS or a localhost server.
+`edit.html`: the interactive app needs HTTPS or a localhost server.
 
 The browser files can also be served by another static web server. The bundled
 native executable is platform-specific; the browser app is WebAssembly.
@@ -58,7 +58,7 @@ compiler checkout. If the required commit is missing, run `git -C ../roc-compile
 The first build needs network access for compiler dependencies, several GiB of
 RAM, and time to compile. No separately installed Roc, Node.js, npm, or Python is required.
 
-Open <http://127.0.0.1:4173/web/studio.html>. To choose another port:
+Open <http://127.0.0.1:4173/web/edit.html>. To choose another port:
 
 ```sh
 zig build serve -- 4174
@@ -74,7 +74,7 @@ zig build test
 zig build package
 ```
 
-Browser checks run separately: open `/web/studio-ui-conformance.html`,
+Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/document-conformance.html`, `/web/m5-conformance.html`, and
 `/web/math-conformance.html` on your local server. `zig build test` does not launch Chrome.
 Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.

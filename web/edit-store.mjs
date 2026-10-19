@@ -1,8 +1,18 @@
 // Transactional browser recovery with optimistic concurrency: a stale tab cannot
 // overwrite a draft saved by another tab. Export/fork preserves its local edits.
 export class DraftStore {
-  constructor(name = 'roclet-studio-v1') { this.name = name; this.versions=new Map(); }
+  constructor(name = 'roclet-notebooks-v1') { this.name = name; this.defaultName = name === 'roclet-notebooks-v1'; this.versions=new Map(); }
   async open() {
+    // Reuse an existing app database across product renames. Test stores always
+    // provide an explicit name. Never move or delete the user's draft records.
+    if (this.defaultName) {
+      this.defaultName = false;
+      const databases = await indexedDB.databases?.().catch(() => []) ?? [];
+      if (!databases.some(db => db.name === this.name)) {
+        const previous = databases.filter(db => /^roclet-[a-z]+-v1$/.test(db.name));
+        if (previous.length === 1) this.name = previous[0].name;
+      }
+    }
     if (!this.db) this.db = await new Promise((resolve, reject) => {
       const request = indexedDB.open(this.name, 1);
       request.onupgradeneeded = () => request.result.createObjectStore('drafts', { keyPath: 'id' });

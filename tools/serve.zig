@@ -29,6 +29,7 @@ fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
 }
 fn mime(file: []const u8) []const u8 {
     const ext = std.fs.path.extension(file);
+    if (std.mem.eql(u8, ext, ".png")) return "image/png";
     if (std.mem.eql(u8, ext, ".html")) return "text/html; charset=utf-8";
     if (std.mem.eql(u8, ext, ".mjs") or std.mem.eql(u8, ext, ".js")) return "text/javascript; charset=utf-8";
     if (std.mem.eql(u8, ext, ".css")) return "text/css; charset=utf-8";
@@ -79,7 +80,7 @@ pub fn main(init: std.process.Init) !void {
     defer server.deinit(init.io);
     var group: std.Io.Group = .init;
     defer group.cancel(init.io);
-    std.debug.print("Roclet: http://127.0.0.1:{d}/web/studio.html\n", .{port});
+    std.debug.print("Roclet: http://127.0.0.1:{d}/web/edit.html\n", .{port});
     while (true) {
         const stream = try server.accept(init.io);
         group.concurrent(init.io, handle, .{ init.io, root, stream }) catch |err| {

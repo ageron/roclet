@@ -1,16 +1,16 @@
 import { prepareOffline, offlineStatus, storageStatus } from './offline.mjs';
 import { captureExport, exportBundle, importBundle, exportReport, exportSite, download, downloadName } from './sharing.mjs';
-import { Studio, newDraft, makeCell, validDraft } from './studio-model.mjs';
+import { Notebook, newDraft, makeCell, validDraft } from './edit-model.mjs';
 import { CellEditor, editorFor } from './cell-editor.mjs';
 import { symbolAt, completionOptions } from './compiler-tools.mjs';
 import { CompilerHighlighter } from './roc-highlighting.mjs';
-import { DraftStore } from './studio-store.mjs';
+import { DraftStore } from './edit-store.mjs';
 import { renderMarkdown } from './markdown-view.mjs';
 import { renderDisplay } from './display-view.mjs';
-import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './studio-cells.mjs';
+import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './edit-cells.mjs';
 const $ = id => document.getElementById(id);
 let store, compilerManifest;
-let studio, highlighter, sourceEditor, libraryToken = 0, composing = false;
+let notebook, highlighter, sourceEditor, libraryToken = 0, composing = false;
 const cards = new Map();
 const notice = message => { $('notice').textContent = message; $('notice').hidden = !message; };
 const perform = async work => {
@@ -52,7 +52,7 @@ function renderObservation(view, kind, content, stale = false) {
     }
     block.displayValue=content.display;block.displayText=content.text;
   }
-  const updating = stale && (/^(Saving before evaluation|Running)/.test(studio.status) || (studio.state.autoRun && studio.status.startsWith('Changed')));
+  const updating = stale && (/^(Saving before evaluation|Running)/.test(notebook.status) || (notebook.state.autoRun && notebook.status.startsWith('Changed')));
   block.dataset.stale = String(stale);
   block.dataset.updating = String(updating);
   block.setAttribute('aria-label', stale ? `${kind === 'value' ? 'Result' : 'Debug'} from an earlier run, ${updating ? 'updating' : 'awaiting update'}` : content.heading);
@@ -64,8 +64,8 @@ function clearObservations(view) {
 }
 const selection = new CellSelection();
 let documentId, selectionActive = false;
-const editable = () => studio.state.cells.filter(c => c.kind !== 'generated');
-const cellIndex = key => studio.state.cells.findIndex(c => c.key === key);
+const editable = () => notebook.state.cells.filter(c => c.kind !== 'generated');
+const cellIndex = key => notebook.state.cells.findIndex(c => c.key === key);
 const textTarget = target => target instanceof Element && !!target.closest('textarea,input,select,[contenteditable=true]');
 function closeMenus(except = null) {
   document.querySelectorAll('details.popover[open]').forEach(menu => {
@@ -75,7 +75,7 @@ function closeMenus(except = null) {
   });
 }
 function focusCell(key, extend = false) {
-  studio.finishEditing();
+  notebook.finishEditing();
   closeMenus(); window.getSelection()?.removeAllRanges(); selection.select(key, extend); selectionActive = true; renderSelection();
   const card = cards.get(selection.focus)?.card;
   (card ?? $('notebook')).focus({preventScroll:true}); card?.scrollIntoView({block:'nearest'});
@@ -91,15 +91,15 @@ function actionKeys(key) {
   return selectionActive && selected.includes(key) ? selected : [key];
 }
 function editCell(key) {
-  const cell = studio.state.cells[cellIndex(key)]; if (!cell) return;
-  if (selection.focus !== key) studio.finishEditing();
+  const cell = notebook.state.cells[cellIndex(key)]; if (!cell) return;
+  if (selection.focus !== key) notebook.finishEditing();
   closeMenus(); selection.select(key); selection.mode = 'text'; selectionActive = true;
   renderSelection(); cards.get(key)?.editor.focus();
 }
 function renderSelection() {
   const selected = selection.selected;
   for (const [key, view] of cards) {
-    const cell = studio.state.cells[cellIndex(key)]; if (!cell) continue;
+    const cell = notebook.state.cells[cellIndex(key)]; if (!cell) continue;
     const active = selectionActive && selected.includes(key), editing = active && selection.mode === 'text';
     view.card.classList.toggle('selected', active); view.card.classList.toggle('current', active && key === selection.focus); view.card.classList.toggle('command-selected', active && selection.mode === 'cells');
     view.card.classList.toggle('editing', editing); view.card.classList.toggle('markdown-cell', cell.kind === 'markdown');
@@ -111,7 +111,7 @@ function renderSelection() {
     view.preview.hidden = cell.kind !== 'markdown' || editing || cell.collapsed;
     view.expand.hidden = !sourceCollapsed;
     const keys = actionKeys(key), count = keys.length;
-    const collapsed = keys.every(k => studio.state.cells[cellIndex(k)].collapsed);
+    const collapsed = keys.every(k => notebook.state.cells[cellIndex(k)].collapsed);
     view.up.textContent = count > 1 ? `Move ${count} cells up` : 'Move up';
     view.up.setAttribute('aria-label', count > 1 ? view.up.textContent : 'Move cell up');
     view.down.textContent = count > 1 ? `Move ${count} cells down` : 'Move down';
@@ -124,11 +124,11 @@ function renderSelection() {
     view.collapse.textContent = `${collapsed ? 'Expand' : 'Collapse'} ${count > 1 ? `${count} sources` : 'source'}`;
     view.collapse.setAttribute('aria-label', count > 1 ? view.collapse.textContent : `${collapsed ? 'Expand' : 'Collapse'} cell`);
   }
-  $('selection-status').textContent = !selectionActive || studio.state.mode !== 'notebook' ? '' : selection.mode === 'text' ? 'Editing · Esc to select cell' : selected.length > 1 ? `${selected.length} cells selected · ⌘ / Ctrl C, X, V` : selected.length ? 'Cell selected · Enter to edit' : 'No cells · A or B to insert';
+  $('selection-status').textContent = !selectionActive || notebook.state.mode !== 'notebook' ? '' : selection.mode === 'text' ? 'Editing · Esc to select cell' : selected.length > 1 ? `${selected.length} cells selected · ⌘ / Ctrl C, X, V` : selected.length ? 'Cell selected · Enter to edit' : 'No cells · A or B to insert';
 }
 function insertCells(position, additions, edit = false) {
-  checkInsertion(studio.state.cells, additions);
-  studio.change(s => s.cells.splice(insertionIndex(s.cells, position), 0, ...additions));
+  checkInsertion(notebook.state.cells, additions);
+  notebook.change(s => s.cells.splice(insertionIndex(s.cells, position), 0, ...additions));
   selection.select(additions[0].key); selection.select(additions.at(-1).key, true);
   selectionActive = true; renderSelection();
   if (edit) editCell(additions[0].key); else cards.get(selection.focus)?.card.focus();
@@ -141,7 +141,7 @@ function insertAtSelection(below, kind = 'code') {
 function removeCells(keys) {
   if (!keys.length) return;
   const position = Math.min(...keys.map(key => selection.keys.indexOf(key)));
-  studio.change(s => { s.cells = s.cells.filter(c => !keys.includes(c.key)); });
+  notebook.change(s => { s.cells = s.cells.filter(c => !keys.includes(c.key)); });
   selection.mode = 'cells'; focusCell(selection.keys[Math.min(position, selection.keys.length - 1)]);
 }
 function moveCells(keys, delta) {
@@ -149,7 +149,7 @@ function moveCells(keys, delta) {
   if (from + delta < 0 || from + keys.length + delta > cells.length) return;
   const moved = cells.splice(from, keys.length);
   cells.splice(from + delta, 0, ...moved);
-  studio.change(s => {
+  notebook.change(s => {
     // Reorder visible cells as a block, leaving generated sections in place.
     let next = 0;
     s.cells = s.cells.map(c => c.kind === 'generated' ? c : cells[next++]);
@@ -157,24 +157,24 @@ function moveCells(keys, delta) {
   focusCells(keys);
 }
 function collapseCells(keys) {
-  const cells = keys.map(key => studio.state.cells[cellIndex(key)]);
+  const cells = keys.map(key => notebook.state.cells[cellIndex(key)]);
   const collapsed = !cells.every(c => c.collapsed);
   for (const cell of cells) cell.collapsed = collapsed;
-  focusCells(keys); void studio.persist();
+  focusCells(keys); void notebook.persist();
 }
 function splitCell(key) {
-  const index=cellIndex(key), cell=studio.state.cells[index], editor=cards.get(key)?.editor;
+  const index=cellIndex(key), cell=notebook.state.cells[index], editor=cards.get(key)?.editor;
   if (!editor || cell.kind==='generated') return;
   const at=editor.view.state.selection.main.head, next=makeCell(cell.kind,cell.source.slice(at));
-  checkInsertion(studio.state.cells,[next]);
-  studio.change(s=>{s.cells[index].source=cell.source.slice(0,at);s.cells[index].outputs=[];s.cells.splice(index+1,0,next);});
+  checkInsertion(notebook.state.cells,[next]);
+  notebook.change(s=>{s.cells[index].source=cell.source.slice(0,at);s.cells[index].outputs=[];s.cells.splice(index+1,0,next);});
   editCell(next.key);cards.get(next.key).editor.goTo(1);
 }
 async function mergeCells(keys) {
   let indices=keys.map(cellIndex).sort((a,b)=>a-b);
   if(indices.length===1) { const next=selection.keys[selection.keys.indexOf(keys[0])+1];if(next) indices.push(cellIndex(next)); }
   if(indices.length<2) return;
-  const cells=indices.map(i=>studio.state.cells[i]);
+  const cells=indices.map(i=>notebook.state.cells[i]);
   if(cells.some(c=>c.kind!==cells[0].kind)) throw new Error('Choose cells of the same type to merge.');
   if(cells.filter(c=>c.attributes?.trim()).length>1) throw new Error('These cells have separate attributes. Keep them separate or remove the extra attributes before merging.');
   const key=cells[0].key;
@@ -182,10 +182,10 @@ async function mergeCells(keys) {
   if(cells[0].kind==='code') {
     // inspect guards against edits, undo, document changes and Stop while the
     // parser is running. These facts never require evaluating notebook code.
-    const parsed=await studio.inspect('parse', studio.state.format, {draft:true});
+    const parsed=await notebook.inspect('parse', notebook.state.format, {draft:true});
     sources=sources.map((source,i)=>i===sources.length-1 ? source : commentFinalExpression(source,parsed.model.cells[indices[i]].facts));
   }
-  studio.change(s=>{ const first=s.cells[indices[0]];first.source=sources.join('\n');first.attributes=cells.find(c=>c.attributes?.trim())?.attributes??'';first.outputs=[];s.cells=s.cells.filter((c,i)=>!indices.slice(1).includes(i)); });
+  notebook.change(s=>{ const first=s.cells[indices[0]];first.source=sources.join('\n');first.attributes=cells.find(c=>c.attributes?.trim())?.attributes??'';first.outputs=[];s.cells=s.cells.filter((c,i)=>!indices.slice(1).includes(i)); });
   focusCell(key);
 }
 function findNotebook() {
@@ -194,12 +194,12 @@ function findNotebook() {
 function updateFind() {
   const query=$('find-query').value.toLocaleLowerCase();$('find-results').replaceChildren();if(!query) return;
   let count=0;
-  const sources=studio.state.mode==='source'?[{source:studio.state.source}]:editable();
+  const sources=notebook.state.mode==='source'?[{source:notebook.state.source}]:editable();
   for(const [index,cell] of sources.entries()) {
     const lines=cell.source.split('\n');
     for(const [line,text] of lines.entries()) {
       const column=text.toLocaleLowerCase().indexOf(query);if(column<0) continue;
-      const hit=button(`${studio.state.mode==='source'?'Source':`Cell ${index+1}`} · ${line+1}: ${text.slice(0,160)}`,()=>{
+      const hit=button(`${notebook.state.mode==='source'?'Source':`Cell ${index+1}`} · ${line+1}: ${text.slice(0,160)}`,()=>{
         $('find-dialog').close();if(cell.key) {editCell(cell.key);cards.get(cell.key).editor.goTo(line+1,column+1);}else sourceEditor.goTo(line+1,column+1);
       });$('find-results').append(hit);if(++count===100) return;
     }
@@ -212,17 +212,17 @@ function insertion(position) {
   return rail;
 }
 async function runCell(key, advance = false, insert = false) {
-  const cell = studio.state.cells[cellIndex(key)]; if (!cell) return;
-  studio.finishEditing({ flush: false });
+  const cell = notebook.state.cells[cellIndex(key)]; if (!cell) return;
+  notebook.finishEditing({ flush: false });
   if (insert) insertAtSelection(true);
   else if (advance) {
     const next = selection.keys[selection.keys.indexOf(key) + 1];
     if (next) focusCell(next); else insertAtSelection(true);
   } else if (cell.kind === 'markdown') focusCell(key);
   if (cell.kind === 'markdown') {
-    studio.finishEditing();
-    if (!studio.result?.rendering) { const result = await studio.inspect(); studio.result = result; studio.emit('result'); }
-  } else await studio.run(cellIndex(key));
+    notebook.finishEditing();
+    if (!notebook.result?.rendering) { const result = await notebook.inspect(); notebook.result = result; notebook.emit('result'); }
+  } else await notebook.run(cellIndex(key));
 }
 function createCard(cell) {
   const card = document.createElement('article'); card.className = 'cell'; card.dataset.key = cell.key; card.setAttribute('aria-roledescription','cell'); card.setAttribute('aria-describedby','navigation-help');
@@ -239,7 +239,7 @@ function createCard(cell) {
   for (const [value, text] of [['code','Code'],['markdown','Markdown']]) { const option = document.createElement('option'); option.value = value; option.textContent = text; kind.append(option); }
   kindLabel.append(kind);
   const index = () => cellIndex(cell.key);
-  kind.onchange = () => { studio.change(s => { s.cells[index()].kind = kind.value; s.cells[index()].outputs = []; }); editCell(cell.key); };
+  kind.onchange = () => { notebook.change(s => { s.cells[index()].kind = kind.value; s.cells[index()].outputs = []; }); editCell(cell.key); };
   const run = button('▷', () => runCell(cell.key), 'Run cell'); run.title = 'Run cell · ⌘ / Ctrl Enter';
   const up = button('Move up', () => moveCells(actionKeys(cell.key), -1), 'Move cell up');
   const down = button('Move down', () => moveCells(actionKeys(cell.key), 1), 'Move cell down');
@@ -250,13 +250,13 @@ function createCard(cell) {
   const results = document.createElement('div'); results.className = 'cell-result'; results.id = `result-${cell.key}`; results.setAttribute('aria-live','polite');
   const editor = new CellEditor(body,{
     source:cell.source,kind:cell.kind,positions:cell.editorSelection,highlighter,
-    symbol:position=>symbolAt(studio.result,index(),position),
-    completions:prefix=>completionOptions(studio.result ?? studio.baseline?.result,prefix),
+    symbol:position=>symbolAt(notebook.result,index(),position),
+    completions:prefix=>completionOptions(notebook.result ?? notebook.baseline?.result,prefix),
     onRename:position=>openRename(index(),position),
     onFocus:()=>{ selection.select(cell.key); selection.mode='text'; selectionActive=true; renderSelection(); },
-    onChange:(value,isComposing,positions)=>studio.editCell(index(),value,isComposing || composing,positions),
-    onSelection:positions=>{ if(index()>=0) studio.state.cells[index()].editorSelection=positions; studio.group=null; },
-    onComposition:value=>{ composing=value; if(value) clearTimeout(studio.timer); else studio.schedule(); },
+    onChange:(value,isComposing,positions)=>notebook.editCell(index(),value,isComposing || composing,positions),
+    onSelection:positions=>{ if(index()>=0) notebook.state.cells[index()].editorSelection=positions; notebook.group=null; },
+    onComposition:value=>{ composing=value; if(value) clearTimeout(notebook.timer); else notebook.schedule(); },
     adjacent:(forward,goal)=>{
       const next=selection.keys[selection.keys.indexOf(cell.key)+(forward?1:-1)];
       if(!next) return false;
@@ -279,7 +279,7 @@ function createCard(cell) {
 function renderCells() {
   const focused = document.activeElement;
   const focusedEditor = editorFor(focused);
-  if (documentId !== studio.state.id) { documentId = studio.state.id; selection.anchor = selection.focus = null; selectionActive = false; selection.mode = 'cells'; for (const view of cards.values()) clearObservations(view); }
+  if (documentId !== notebook.state.id) { documentId = notebook.state.id; selection.anchor = selection.focus = null; selectionActive = false; selection.mode = 'cells'; for (const view of cards.values()) clearObservations(view); }
   const cells = editable(); selection.reconcile(cells.map(c => c.key));
   const current = new Set(selection.keys);
   for (const [key, view] of cards) if (!current.has(key)) { view.editor.destroy(); view.card.remove(); cards.delete(key); }
@@ -301,7 +301,7 @@ function renderCells() {
 }
 function showDependencies(index) {
   closeMenus();
-  const result=studio.result, cell=result?.model?.cells[index], root=cell?.output;
+  const result=notebook.result, cell=result?.model?.cells[index], root=cell?.output;
   const item=result?.plan?.explanations?.find(e=>e.root===root);
   const content=$('dependencies-content'); content.replaceChildren();
   if (!item) content.textContent='Run or check the notebook to inspect this output’s dependencies.';
@@ -316,28 +316,28 @@ function showDependencies(index) {
   $('dependencies-dialog').showModal();
 }
 function openRename(index,position) {
-  if (studio.state.cells[index]?.kind!=='code') return;
-  const d=symbolAt(studio.result,index,position);
+  if (notebook.state.cells[index]?.kind!=='code') return;
+  const d=symbolAt(notebook.result,index,position);
   if (!d) {notice('Run or check, then place the cursor on a top-level name to rename it.');return;}
   $('rename-name').value=d.name; $('rename-error').textContent='';
   $('rename-apply').onclick=()=>perform(async()=>{
-    try {await studio.rename(index,position,$('rename-name').value);$('rename-dialog').close();editCell(studio.state.cells[index].key);}
+    try {await notebook.rename(index,position,$('rename-name').value);$('rename-dialog').close();editCell(notebook.state.cells[index].key);}
     catch(error){$('rename-error').textContent=error.message;}
   });
   $('rename-dialog').showModal();$('rename-name').select();
 }
 function renderResults() {
-  const result = studio.result;
-  const showDiagnostics = !studio.diagnosticsDeferred;
+  const result = notebook.result;
+  const showDiagnostics = !notebook.diagnosticsDeferred;
   $('document-diagnostics').replaceChildren();
   for (const view of cards.values()) {
     for (const child of [...view.results.children]) if (!Object.values(view.outputBlocks).includes(child)) child.remove();
     view.meta.textContent = '';
   }
-  const cellAt = index => cards.get(studio.state.cells[index]?.key);
+  const cellAt = index => cards.get(notebook.state.cells[index]?.key);
   if (result?.rendering) for (const item of result.rendering) {
     const view = cellAt(item.cell); if (!view) continue;
-    view.preview.replaceChildren(renderMarkdown(item.events)); view.previewSource = studio.state.cells[item.cell].source;
+    view.preview.replaceChildren(renderMarkdown(item.events)); view.previewSource = notebook.state.cells[item.cell].source;
   }
   for (const cell of editable()) {
     const view = cards.get(cell.key);
@@ -349,18 +349,18 @@ function renderResults() {
   const failures = showDiagnostics ? result?.model?.diagnostics ?? [] : [];
   const diagnosticTexts = new Set();
   for (const d of failures) {
-    const view = studio.state.mode === 'notebook' ? cellAt(d.cell) : null;
+    const view = notebook.state.mode === 'notebook' ? cellAt(d.cell) : null;
     const place = d.location ? ` · ${d.scope === 'cell' ? 'line ' : 'source '}${d.location.line}:${d.location.column}` : '';
     const block = outputBlock(`${d.severity}: ${d.code}${place}`, d.message, 'diagnostic');
-    if(d.location && (view || studio.state.mode==='source')) {
-      block.querySelector('.result-heading').append(button('Go to source',()=>{if(view) editCell(studio.state.cells[d.cell].key);(view?.editor??sourceEditor).goTo(d.location.line,d.location.column,true);}));
+    if(d.location && (view || notebook.state.mode==='source')) {
+      block.querySelector('.result-heading').append(button('Go to source',()=>{if(view) editCell(notebook.state.cells[d.cell].key);(view?.editor??sourceEditor).goTo(d.location.line,d.location.column,true);}));
     }
     (view?.results ?? $('document-diagnostics')).append(block); diagnosticTexts.add(d.message);
   }
   for (const d of showDiagnostics ? result?.evaluation?.diagnostics ?? [] : []) if (!diagnosticTexts.has(d.message)) $('document-diagnostics').append(outputBlock(d.title ?? d.severity, d.message, 'diagnostic'));
   if (showDiagnostics && result?.status !== 'partial' && (result?.failure || result?.evaluation?.failure)) $('document-diagnostics').append(outputBlock('Run failed', result.failure ?? result.evaluation.failure, 'diagnostic'));
   const transcript = showDiagnostics || result?.status === 'ok' ? result?.evaluation?.events ?? [] : [];
-  for (const [index, cell] of studio.state.cells.entries()) {
+  for (const [index, cell] of notebook.state.cells.entries()) {
     const view = cellAt(index); if (!view) continue;
     const analyzed = result?.model?.cells?.[index];
     const inferredId = analyzed?.id && !/(?:^|\s)id=/.test(cell.attributes) ? `id=${analyzed.id}` : '';
@@ -380,17 +380,17 @@ function renderResults() {
       const debug = events.length ? { heading:!error && ['ok','partial'].includes(result.status) ? 'Debug · current result' : 'Debug · failed run', text:events.map(e => `${e.kind === 'dbg' ? 'dbg' : e.kind}: ${e.message}`).join('\n') }
         : value || removedOutput ? null : view.observations.debug;
       renderObservation(view, 'debug', debug, !events.length);
-      const imported=studio.state.savedResults?.snapshots?.filter(s=>s.cell===index)??[];
+      const imported=notebook.state.savedResults?.snapshots?.filter(s=>s.cell===index)??[];
       if(!displayed) for(const saved of imported) view.results.append(outputBlock('Imported result · unverified',saved.text,'unverified',saved.display));
-      const importedDebug=studio.state.savedResults?.events?.filter(e=>e.cell===index)??[];
-      if(!debug && !studio.result?.evaluation && importedDebug.length) view.results.append(outputBlock('Imported debug · unverified',importedDebug.map(e=>`${e.kind}: ${e.message}`).join('\n'),'unverified'));
+      const importedDebug=notebook.state.savedResults?.events?.filter(e=>e.cell===index)??[];
+      if(!debug && !notebook.result?.evaluation && importedDebug.length) view.results.append(outputBlock('Imported debug · unverified',importedDebug.map(e=>`${e.kind}: ${e.message}`).join('\n'),'unverified'));
       const snapshots = analyzed?.outputs ?? cell.outputs;
       if (!displayed && snapshots?.length) view.results.append(outputBlock('Saved snapshot · unverified', snapshots.map(o => o.source).join('\n'), 'unverified'));
     } else clearObservations(view);
   }
   const unassigned = transcript.filter(e => e.cell == null);
   if (unassigned.length) $('document-diagnostics').append(outputBlock('Notebook debug', unassigned.map(e => e.message).join('\n'), 'debug'));
-  if (studio.state.mode === 'source' && result?.status === 'ok' && result?.evaluation?.values?.length) $('document-diagnostics').append(outputBlock('Current results', result.evaluation.values.map(v => `${v.root}: ${v.text}`).join('\n')));
+  if (notebook.state.mode === 'source' && result?.status === 'ok' && result?.evaluation?.values?.length) $('document-diagnostics').append(outputBlock('Current results', result.evaluation.values.map(v => `${v.root}: ${v.text}`).join('\n')));
 }
 async function refreshLibrary() {
   const token = ++libraryToken;
@@ -398,22 +398,22 @@ async function refreshLibrary() {
     const records = (await store.list()).filter(validDraft);
     if (token !== libraryToken) return;
     $('recent').replaceChildren();
-    for (const record of records) { const option = document.createElement('option'); option.value = record.id; option.textContent = record.title || 'Untitled'; option.selected = record.id === studio.state.id; $('recent').append(option); }
+    for (const record of records) { const option = document.createElement('option'); option.value = record.id; option.textContent = record.title || 'Untitled'; option.selected = record.id === notebook.state.id; $('recent').append(option); }
   } catch { /* The persistent save-status message already explains the failure. */ }
 }
 function reflect(reason) {
-  if (!studio?.state) return;
-  const s = studio.state;
+  if (!notebook?.state) return;
+  const s = notebook.state;
   if ($('title').value !== s.title) $('title').value = s.title;
   document.title = `${s.title || 'Untitled'} — Roclet`;
   $('auto').checked = s.autoRun; $('format').value = s.format;
-  $('stop').hidden = !/Running|Saving before|Preparing document/.test(studio.status);
+  $('stop').hidden = !/Running|Saving before|Preparing document/.test(notebook.status);
   if ($('stop').hidden && document.activeElement === $('stop')) $('run').focus({preventScroll:true});
-  const status = studio.diagnosticsDeferred && /^(Needs attention|Run failed · no current results)/.test(studio.status) ? 'Editing · results pending' : studio.status;
+  const status = notebook.diagnosticsDeferred && /^(Needs attention|Run failed · no current results)/.test(notebook.status) ? 'Editing · results pending' : notebook.status;
   $('status').textContent = status; $('status').className = /failed|attention|conflict/i.test(status) ? 'error' : '';
-  $('save-status').textContent = studio.saveStatus; $('save-status').title = studio.saveStatus; $('save-status').className = /^Not saved|unavailable/.test(studio.saveStatus) ? 'error' : '';
-  $('recovery-copy').hidden=!/^Not saved/.test(studio.saveStatus);
-  $('undo').disabled = !studio.history.length; $('redo').disabled = !studio.future.length;
+  $('save-status').textContent = notebook.saveStatus; $('save-status').title = notebook.saveStatus; $('save-status').className = /^Not saved|unavailable/.test(notebook.saveStatus) ? 'error' : '';
+  $('recovery-copy').hidden=!/^Not saved/.test(notebook.saveStatus);
+  $('undo').disabled = !notebook.history.length; $('redo').disabled = !notebook.future.length;
   $('notebook-view').setAttribute('aria-pressed', s.mode === 'notebook'); $('source-view').setAttribute('aria-pressed', s.mode === 'source');
   $('notebook').hidden = s.mode !== 'notebook'; $('source-pane').hidden = s.mode !== 'source';
   if (s.mode === 'source') sourceEditor.sync(s.source,s.format==='roc'?'code':'markdown',s.editorSelection);
@@ -423,50 +423,50 @@ function reflect(reason) {
   if (reason === 'document') renderCells();
   renderSelection();
   if (reason === 'result' || reason === 'edit' || reason === 'diagnostics') renderResults();
-  if (!studio.result) { $('generated').textContent = ''; if (reason === 'status') renderResults(); }
+  if (!notebook.result) { $('generated').textContent = ''; if (reason === 'status') renderResults(); }
   if (reason === 'saved') void refreshLibrary();
 }
 function bind() {
   document.addEventListener('focusout', event => {
     const editor = editorFor(event.target); if (!editor) return;
-    const { id, revision } = studio.state;
+    const { id, revision } = notebook.state;
     queueMicrotask(() => {
       // Ignore editor-internal focus changes, DOM moves and old blur events
       // delivered after another cell has already been edited.
-      if (studio.state.id !== id || studio.state.revision !== revision || !editor.dom.isConnected || editor.dom.contains(document.activeElement)) return;
-      studio.finishEditing();
-      if (selection.mode === 'text' && cards.get(selection.focus)?.editor === editor && studio.state.cells[cellIndex(selection.focus)]?.collapsed) {
+      if (notebook.state.id !== id || notebook.state.revision !== revision || !editor.dom.isConnected || editor.dom.contains(document.activeElement)) return;
+      notebook.finishEditing();
+      if (selection.mode === 'text' && cards.get(selection.focus)?.editor === editor && notebook.state.cells[cellIndex(selection.focus)]?.collapsed) {
         selection.mode = 'cells';
         renderSelection();
       }
     });
   });
-  $('title').oninput = () => studio.change(s => { s.title = $('title').value; }, {group:'title',source:studio.state.sourceCurrent,reason:'edit'});
-  $('notebook-view').onclick = () => perform(async () => { await studio.mode('notebook'); if (studio.state.mode === 'notebook') focusCell(selection.focus); });
-  $('source-view').onclick = () => perform(async () => { await studio.mode('source'); sourceEditor.focus(); });
-  $('format').onchange = () => perform(async () => { await studio.format($('format').value); reflect('document'); });
-  $('run').onclick = () => perform(() => studio.run()); $('stop').onclick = () => studio.stop();
-  $('auto').onchange = () => studio.setAuto($('auto').checked);
-  const undo = redo => { studio.undo(redo); if (studio.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); };
+  $('title').oninput = () => notebook.change(s => { s.title = $('title').value; }, {group:'title',source:notebook.state.sourceCurrent,reason:'edit'});
+  $('notebook-view').onclick = () => perform(async () => { await notebook.mode('notebook'); if (notebook.state.mode === 'notebook') focusCell(selection.focus); });
+  $('source-view').onclick = () => perform(async () => { await notebook.mode('source'); sourceEditor.focus(); });
+  $('format').onchange = () => perform(async () => { await notebook.format($('format').value); reflect('document'); });
+  $('run').onclick = () => perform(() => notebook.run()); $('stop').onclick = () => notebook.stop();
+  $('auto').onchange = () => notebook.setAuto($('auto').checked);
+  const undo = redo => { notebook.undo(redo); if (notebook.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); };
   $('undo').onclick = () => undo(false); $('redo').onclick = () => undo(true);
-  $('recovery-copy').onclick=()=>perform(()=>studio.recoveryCopy());
-  $('new').onclick = () => perform(async () => { await studio.replace(newDraft()); editCell(selection.focus); });
-  $('rich-example').onclick=()=>perform(async()=>{const response=await fetch('../fixtures/documents/rich-outputs.roc');if(!response.ok) throw new Error('Example unavailable; rebuild the offline distribution.');await studio.open(await response.text(),'Rich outputs.roc');closeMenus();});
-  $('recent').onchange = () => perform(async () => { if($('recent').value===studio.state.id) return; const record = await store.get($('recent').value); if (validDraft(record)) await studio.replace(record); });
-  $('open').onchange = () => perform(async () => { const file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>8*1024*1024) throw new Error('Roclet bundles are limited to 8 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await studio.replace(record);notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await studio.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); if (studio.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); });
-  $('preview').onclick = () => perform(async () => { const result = await studio.inspect('export', 'roc'); $('generated').textContent = result.source; closeMenus(); $('generated-dialog').showModal(); });
+  $('recovery-copy').onclick=()=>perform(()=>notebook.recoveryCopy());
+  $('new').onclick = () => perform(async () => { await notebook.replace(newDraft()); editCell(selection.focus); });
+  $('rich-example').onclick=()=>perform(async()=>{const response=await fetch('../fixtures/documents/rich-outputs.roc');if(!response.ok) throw new Error('Example unavailable; rebuild the offline distribution.');await notebook.open(await response.text(),'Rich outputs.roc');closeMenus();});
+  $('recent').onchange = () => perform(async () => { if($('recent').value===notebook.state.id) return; const record = await store.get($('recent').value); if (validDraft(record)) await notebook.replace(record); });
+  $('open').onchange = () => perform(async () => { const file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>8*1024*1024) throw new Error('Roclet bundles are limited to 8 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await notebook.replace(record);notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await notebook.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); if (notebook.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); });
+  $('preview').onclick = () => perform(async () => { const result = await notebook.inspect('export', 'roc'); $('generated').textContent = result.source; closeMenus(); $('generated-dialog').showModal(); });
   $('download').onclick = () => perform(async () => {
-    const result = await studio.inspect('export');
+    const result = await notebook.inspect('export');
     const url = URL.createObjectURL(new Blob([result.source], {type:'text/plain;charset=utf-8'}));
-    const link = document.createElement('a'); link.href = url; link.download = `${(studio.state.title || 'notebook').replace(/[^a-z0-9._ -]/gi, '_')}.${studio.state.format === 'roc' ? 'roc' : 'md'}`; link.click();
+    const link = document.createElement('a'); link.href = url; link.download = `${(notebook.state.title || 'notebook').replace(/[^a-z0-9._ -]/gi, '_')}.${notebook.state.format === 'roc' ? 'roc' : 'md'}`; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     notice('Download requested for a separate copy. The original file is not updated.');
   });
-  $('share').onclick=()=>{closeMenus();$('share-dialog').showModal();$('share-results').checked=!!studio.result?.evaluation?.values?.length;$('share-debug').checked=false;$('share-type').dispatchEvent(new Event('change'));};
+  $('share').onclick=()=>{closeMenus();$('share-dialog').showModal();$('share-results').checked=!!notebook.result?.evaluation?.values?.length;$('share-debug').checked=false;$('share-type').dispatchEvent(new Event('change'));};
   $('share-type').onchange=()=>{$('share-source').closest('label').hidden=$('share-type').value==='bundle';};
   $('export-share').onclick=()=>perform(async()=>{
     const button=$('export-share');button.disabled=true;$('share-status').textContent='Preparing export…';
-    try {const type=$('share-type').value,capture=await captureExport(studio,compilerManifest,{results:$('share-results').checked,debug:$('share-debug').checked});
+    try {const type=$('share-type').value,capture=await captureExport(notebook,compilerManifest,{results:$('share-results').checked,debug:$('share-debug').checked});
       const blob=type==='report'?await exportReport(capture,{source:$('share-source').checked}):type==='site'?await exportSite(capture,{source:$('share-source').checked}):await exportBundle(capture);
       download(blob,`${downloadName(capture.document.title)}${type==='report'?'.html':type==='site'?'.site.zip':'.roclet.zip'}`);
       $('share-status').textContent=`Download requested · ${capture.snapshots.length} result snapshots, ${capture.events.length} debug messages. ${type==='site'?'Extract and serve over HTTPS or localhost.':''}`;
@@ -491,16 +491,16 @@ function bind() {
     const menu = target.closest?.('details[open]');
     if (event.key === 'Escape' && menu) { event.preventDefault(); event.stopPropagation(); menu.open = false; menu.querySelector('summary').focus(); return; }
     if (mod && event.shiftKey && key==='f') {event.preventDefault();event.stopPropagation();findNotebook();return;}
-    const inNotebook = studio.state.mode === 'notebook' && $('notebook').contains(target);
+    const inNotebook = notebook.state.mode === 'notebook' && $('notebook').contains(target);
     if(event.key==='Escape' && target.closest?.('.cm-search')) return;
-    if (event.key === 'Escape' && editorFor(target) === sourceEditor) { event.preventDefault(); event.stopPropagation(); studio.finishEditing(); sourceEditor.element.blur(); return; }
+    if (event.key === 'Escape' && editorFor(target) === sourceEditor) { event.preventDefault(); event.stopPropagation(); notebook.finishEditing(); sourceEditor.element.blur(); return; }
     if (event.key === 'Escape' && editorFor(target)?.closeCompletion()) {event.preventDefault();event.stopPropagation();return;}
     if (event.key === 'Escape' && inNotebook) { event.preventDefault(); event.stopPropagation(); focusCell(card?.dataset.key ?? selection.focus); return; }
     if (mod && key === 's') { event.preventDefault(); event.stopPropagation(); $('download').click(); return; }
     // Title, selects and menus retain native editing/navigation behavior.
     const editor = !!editorFor(target);
     if (mod && key === 'z' && (editor || (inNotebook && selection.mode === 'cells') || target === document.body)) {
-      event.preventDefault(); event.stopPropagation(); const wasCells = selection.mode === 'cells'; studio.undo(event.shiftKey, { editing: editor });
+      event.preventDefault(); event.stopPropagation(); const wasCells = selection.mode === 'cells'; notebook.undo(event.shiftKey, { editing: editor });
       if (wasCells && inNotebook) focusCell(selection.focus); return;
     }
     if (!inNotebook || menu || target.closest?.('button,summary,select')) return;
@@ -519,7 +519,7 @@ function bind() {
     else if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); event.stopPropagation(); removeCells(selection.selected); }
     else if (event.key === '?') { event.preventDefault(); event.stopPropagation(); help(); }
   }, true);
-  const ownsClipboard = event => studio.state.mode === 'notebook' && selection.mode === 'cells' && $('notebook').contains(event.target) && !textTarget(event.target) && !event.target.closest?.('details,button,a');
+  const ownsClipboard = event => notebook.state.mode === 'notebook' && selection.mode === 'cells' && $('notebook').contains(event.target) && !textTarget(event.target) && !event.target.closest?.('details,button,a');
   for (const action of ['copy','cut']) document.addEventListener(action, event => {
     if (!ownsClipboard(event) || !selection.selected.length || !event.clipboardData || window.getSelection()?.toString()) return;
     const keys = selection.selected, cells = editable().filter(c => keys.includes(c.key)), encoded = encodeCells(cells);
@@ -540,9 +540,9 @@ function bind() {
       insertCells(selection.keys.indexOf(selection.selected.at(-1)) + 1, additions);
     });
   });
-  window.addEventListener('beforeunload', event => { if (studio.saveStatus !== 'Saved in this browser') { event.preventDefault(); event.stopPropagation(); event.returnValue = ''; } });
+  window.addEventListener('beforeunload', event => { if (notebook.saveStatus !== 'Saved in this browser') { event.preventDefault(); event.stopPropagation(); event.returnValue = ''; } });
 }
-export async function startStudio(drafts = new DraftStore()) {
+export async function startNotebook(drafts = new DraftStore()) {
 store = drafts;
 try {
   const [binary, manifest] = await Promise.all([fetch('../artifacts/roclet.wasm').then(r => { if (!r.ok) throw new Error('Build the compiler adapter first.'); return r.arrayBuffer(); }), fetch('../artifacts/manifest.json').then(r => r.json())]);
@@ -551,14 +551,14 @@ try {
   compilerManifest=manifest;
   highlighter=new CompilerHighlighter(binary);
   sourceEditor=new CellEditor($('source'),{highlighter,
-    label:'Roclet notebook source',onChange:(value,isComposing,positions)=>studio.editSource(value,isComposing || composing,positions),
-    onSelection:positions=>{if(studio?.state) {studio.state.editorSelection=positions;studio.group=null;}},
-    onComposition:value=>{composing=value;if(value) clearTimeout(studio.timer);else studio.schedule();},
+    label:'Roclet notebook source',onChange:(value,isComposing,positions)=>notebook.editSource(value,isComposing || composing,positions),
+    onSelection:positions=>{if(notebook?.state) {notebook.state.editorSelection=positions;notebook.group=null;}},
+    onComposition:value=>{composing=value;if(value) clearTimeout(notebook.timer);else notebook.schedule();},
   });
-  studio = new Studio(binary, store, {onChange:reflect});
-  const dispose=studio.dispose.bind(studio);
-  studio.dispose=()=>{highlighter.dispose();sourceEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
-  bind(); await studio.initialize();
+  notebook = new Notebook(binary, store, {onChange:reflect});
+  const dispose=notebook.dispose.bind(notebook);
+  notebook.dispose=()=>{highlighter.dispose();sourceEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
+  bind(); await notebook.initialize();
   const example=new URL(location.href).searchParams.get('example');
   const examples = new Map([
     ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
@@ -568,11 +568,11 @@ try {
   ]);
   if (example) {
     // Only bundled examples, never arbitrary URLs supplied by a query parameter.
-    clearTimeout(studio.timer);
+    clearTimeout(notebook.timer);
     try {
       const entry=examples.get(example);if(!entry) throw new Error('Unknown example.');
       const response=await fetch(entry[0]);if(!response.ok) throw new Error('Example is unavailable.');
-      await studio.open(await response.text(),entry[1]);
+      await notebook.open(await response.text(),entry[1]);
       notice('Opened your own editable copy. Download a copy to keep your changes.');
       const url=new URL(location.href);url.searchParams.delete('example');history.replaceState(null,'',url.pathname+url.search+url.hash);
     } catch(error) {notice(`Example could not be opened: ${error.message}`);}
@@ -580,11 +580,11 @@ try {
   const publication=new URL(location.href).searchParams.get('publication');
   if(publication==='published.roclet.zip') {
     // A fixed filename, never an arbitrary URL import; new copies never auto-run.
-    clearTimeout(studio.timer);
-    try {const response=await fetch('./published.roclet.zip');if(!response.ok) throw new Error('Publication is missing.');const {record}=await importBundle(await response.arrayBuffer(),manifest);await studio.replace(record);notice('Opened your own editable copy. Press Run to recompute.');history.replaceState(null,'',location.pathname);}
+    clearTimeout(notebook.timer);
+    try {const response=await fetch('./published.roclet.zip');if(!response.ok) throw new Error('Publication is missing.');const {record}=await importBundle(await response.arrayBuffer(),manifest);await notebook.replace(record);notice('Opened your own editable copy. Press Run to recompute.');history.replaceState(null,'',location.pathname);}
     catch(error) {notice(`Publication could not be opened: ${error.message}`);}
   }
-  document.documentElement.dataset.ready = 'true'; return studio;
+  document.documentElement.dataset.ready = 'true'; return notebook;
 } catch (error) { $('status').textContent = 'Roclet could not start'; notice(error.message); }
 
 }

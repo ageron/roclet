@@ -1,7 +1,7 @@
 import {zip,unzip,utf8,text} from './archive.mjs';
 import {sha256,verified} from './offline-cache.mjs';
 import {workerSource} from './offline.mjs';
-import {newDraft,makeCell,validDraft} from './studio-model.mjs';
+import {newDraft,makeCell,validDraft} from './edit-model.mjs';
 import {embedMathStyles} from './math-view.mjs';
 import {renderMarkdown} from './markdown-view.mjs';
 import {renderDisplay,normalizeDisplay} from './display-view.mjs';
@@ -9,9 +9,9 @@ export const downloadName = title => (title||'notebook').replace(/[^a-z0-9._ -]/
 export function download(blob,name) {
   const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),5000);
 }
-export async function captureExport(studio,compiler,{results=false,debug=false}={}) {
-  const state=structuredClone(studio.state),current=structuredClone(studio.result);
-  const parsed=await studio.inspect('export');
+export async function captureExport(notebook,compiler,{results=false,debug=false}={}) {
+  const state=structuredClone(notebook.state),current=structuredClone(notebook.result);
+  const parsed=await notebook.inspect('export');
   const document={schema:1,title:state.title,format:state.format,preamble:state.preamble??'',metadata:state.metadata??'',source:state.sourceCurrent?state.source:'',sourceCurrent:!!state.sourceCurrent,mode:state.mode,
     cells:(state.sourceCurrent?(parsed.draft?.cells??parsed.model.cells):state.cells).map(({kind,source,attributes,outputs})=>({kind,source,attributes:attributes??'',outputs:outputs??[]}))};
   const snapshots=results && ['ok','partial'].includes(current?.status) ? (current.evaluation?.values??[]).map(v=>({cell:current.model.cells.findIndex(c=>c.output===v.root),root:v.root,text:v.text,...(v.display?{display:normalizeDisplay(v.display)}:{})})) : [];
@@ -91,7 +91,7 @@ export async function exportSite(capture,reportOptions={}) {
   files.set('web/offline-release.json',utf8(JSON.stringify(release)));
   files.set('web/offline-worker.mjs',utf8(workerSource(release)));
   const bundle=new Uint8Array(await (await exportBundle(capture)).arrayBuffer());files.set('web/published.roclet.zip',bundle);
-  files.set('index.html',utf8('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Roclet notebook</title><style>body{font:18px/1.6 system-ui;max-width:650px;margin:10vh auto;padding:2rem}a{color:#356e58}</style><h1>Roclet notebook</h1><p><a href="web/studio.html?publication=published.roclet.zip">Open an editable copy in Roclet</a></p><p><a href="report.html">Read the static report</a> · <a href="web/published.roclet.zip" download>Download the Roclet bundle</a></p><p>Run this folder on HTTPS or a localhost static server. All computation stays in your browser.</p></html>'));
+  files.set('index.html',utf8('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Roclet notebook</title><style>body{font:18px/1.6 system-ui;max-width:650px;margin:10vh auto;padding:2rem}a{color:#356e58}</style><h1>Roclet notebook</h1><p><a href="web/edit.html?publication=published.roclet.zip">Open an editable copy in Roclet</a></p><p><a href="report.html">Read the static report</a> · <a href="web/published.roclet.zip" download>Download the Roclet bundle</a></p><p>Run this folder on HTTPS or a localhost static server. All computation stays in your browser.</p></html>'));
   files.set('report.html',new Uint8Array(await (await exportReport(capture,reportOptions)).arrayBuffer()));
   files.set('README.txt',utf8('Serve this extracted directory with any static HTTP server (HTTPS or localhost). Open index.html. No build, Node, accounts, or CDN needed. File URLs are not supported. The editable copy is saved only in the recipient browser. Choose File > Offline & storage > Prepare for offline use before disconnecting. The separate report.html opens directly without a server.\n'));
   // Include the publication in this site's offline release as well.

@@ -2,7 +2,7 @@
 
 Roclet uses CodeMirror 6 and Lezer as native browser ES modules. There is no Node,
 npm, bundler or CDN requirement for building, serving or using Roclet. Modules
-are resolved by the local import map in `web/studio.html`.
+are resolved by the local import map in `web/edit.html`.
 
 These are unmodified ESM entry files from pinned npm release archives. Archives
 were verified against their registry SHA-512 integrity before extracting only the
@@ -18,7 +18,7 @@ these checked-in assets and do not contact a package registry.
 To update: choose a compatible release set, download the recorded release
 archives, verify integrity, and replace the unmodified ESM entry files and
 licenses. Update the lock and HTML import map together. Run both desktop and
-compact `/web/studio-ui-conformance.html` checks. Do not run package install
+compact `/web/edit-ui-conformance.html` checks. Do not run package install
 scripts. No dependency management command is part of the regular build.
 
 The editor owns text selection, multiple cursors and DOM layout. Its Markdown
