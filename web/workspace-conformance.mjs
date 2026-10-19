@@ -29,11 +29,11 @@ try {
   const bytes=await response.arrayBuffer(),raw=await createWasmTransport(bytes);
   assert(raw.workspace,'Compiler WASM lacks workspace ABI');
   const request={requestId:'workspace-conformance',documentRevision:1,inputRevision:0,workerGeneration:1,cells:[{key:'code',source:'import Fresh\nout_1 = Fresh.value'}],roots:['out_1']};
-  const session=new DocumentSession(bytes),files=[{path:'/workspace/Fresh.roc',source:'Fresh := [].{ value = 7 }'}];
+  const session=new DocumentSession(bytes),files=[{path:'/workspace/Fresh.roc',source:'Fresh := [].{ value : U64\nvalue = 7 }'}];
   const first=await session.request({...request,files});assert.equal(first.status,'ok');assert.equal(first.values[0].text,'7');
-  const second=await session.request({...request,files:[{...files[0],source:'Fresh := [].{ value = 8 }'}]});assert.equal(second.status,'ok');assert.equal(second.values[0].text,'8');
+  const second=await session.request({...request,files:[{...files[0],source:'Fresh := [].{ value : U64\nvalue = 8 }'}]});assert.equal(second.status,'ok');assert.equal(second.values[0].text,'8');
   session.stop();
-  const restored=await session.request({...request,files});assert.equal(restored.status,'ok');assert.equal(restored.values[0].text,'7');session.stop();
+  const restored=await session.request({...request,files});assert.equal(restored.status,'ok');assert.equal(restored.values[0].text,'7');assert(restored.workspaceCache.hits>0,'Cold worker must hit the restored build cache');session.stop();
   report('PASS module edits invalidate compiled artifacts and cold workers restore browser build cache');
   raw.putFile('/workspace/Fresh.roc',files[0].source);assert.equal(raw(request).status,'ok');
   const artifacts=raw.takeCacheUpdates();
@@ -43,4 +43,5 @@ try {
   assert.equal(restoredRaw(request).status,'ok');assert(restoredRaw.cacheStats().hits>0,'Restored compiler must use persisted build artifacts');
   report('PASS a fresh WASM instance uses restored compiler artifacts (compiler cache hits)');
   document.querySelector('#status').textContent='PASS workspace conformance';
-} catch(error) {document.querySelector('#status').textContent='FAIL';report(error.stack??error.message);throw error;}
+  document.documentElement.dataset.result='pass';
+} catch(error) {document.querySelector('#status').textContent='FAIL';document.documentElement.dataset.result='fail';report(error.stack??error.message);throw error;}

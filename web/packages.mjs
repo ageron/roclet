@@ -27,7 +27,7 @@ export class BrowserPackages {
   }
   async evaluate(transport,request) {
     const installed=new Set();
-    for(let attempt=0;attempt<32;attempt++) {
+    for(;;) {
       const result=await transport(request),required=result.packagesRequired;
       if(!required?.length) return result;
       for(const {url} of required) {
@@ -35,6 +35,5 @@ export class BrowserPackages {
         await this.install(transport,url);installed.add(url);
       }
     }
-    throw new Error('Package resolution exceeded 32 dependency rounds');
   }
 }
