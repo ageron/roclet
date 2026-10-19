@@ -105,6 +105,11 @@ pub const Suite = struct {
             try expect(values.len == expected.array.items.len);
             for (values, expected.array.items) |actual, value_text| try expect(eq(str(actual, "text"), value_text.string));
         }
+        if (wanted.object.get("root_errors")) |expected| {
+            const errors = field(field(result, "evaluation"), "root_errors").array.items;
+            try expect(errors.len == expected.array.items.len);
+            for (errors, expected.array.items) |actual, root| try expect(eq(str(actual, "root"), root.string));
+        }
         if (wanted.object.get("display_kinds")) |expected| {
             const outputs = field(field(result, "evaluation"), "values").array.items;
             try expect(outputs.len == expected.array.items.len);

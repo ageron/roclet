@@ -2271,7 +2271,21 @@
     },
     "expect": {
       "status": "diagnostic",
-      "evaluated_values": []
+      "evaluated_values": [],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_good",
+          "message": "\"good\"",
+          "cell": 0
+        },
+        {
+          "kind": "dbg",
+          "root": "out_bad",
+          "message": "\"before failure\"",
+          "cell": 1
+        }
+      ]
     }
   },
   {
@@ -2648,6 +2662,25 @@
       "diagnostic": "roc-check",
       "location_text": "missing",
       "compact": true
+    }
+  },
+  {
+    "name": "studio: isolated constant crash retains an independent value",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "isolateErrors": true,
+      "source": "# %%\nout_good = 42\n# %%\nout_bad = {\n dbg \"before failure\"\n crash \"boom\"\n 0\n}"
+    },
+    "expect": {
+      "status": "partial",
+      "evaluated_values": [
+        "42.0"
+      ],
+      "root_errors": [
+        "out_bad"
+      ]
     }
   }
 ]
