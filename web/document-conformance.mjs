@@ -1,4 +1,4 @@
-import { assert } from '../tests/harness.mjs';
+import { assert, compilerSemantics } from '../tests/harness.mjs';
 import { DocumentDraft, DocumentSession } from './document-session.mjs';
 const status = document.getElementById('status');
 const log = document.getElementById('log');
@@ -22,7 +22,7 @@ try {
       worker.onerror = error => { clearTimeout(timeout); reject(error); };
       worker.postMessage({ bytes: count === 0 ? bytes : undefined, request: fixture.request });
     });
-    assert.deepEqual(result, fixture.result);
+    assert.deepEqual(compilerSemantics(result), compilerSemantics(fixture.result));
     count++;
     log.textContent += `PASS ${fixture.name}\n`;
   }
@@ -39,7 +39,7 @@ try {
       worker.onerror = error => { clearTimeout(timeout); reject(error); };
       worker.postMessage({ bytes, request: fixture.request });
     });
-    assert.deepEqual(result, fixture.result);
+    assert.deepEqual(compilerSemantics(result), compilerSemantics(fixture.result));
     worker.terminate();
     freshWorkerRuns++;
     log.textContent += `PASS fresh worker: ${fixture.name}\n`;

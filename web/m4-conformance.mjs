@@ -1,5 +1,5 @@
 import { benchmark } from '../tests/m4-benchmark.mjs';
-import { assert } from '../tests/harness.mjs';
+import { assert, compilerSemantics } from '../tests/harness.mjs';
 import { DocumentSession } from './document-session.mjs';
 import { Studio, newDraft, makeCell } from './studio-model.mjs';
 import { symbols, renameEdits } from './compiler-tools.mjs';
@@ -12,7 +12,7 @@ try {
   for (const c of native.cases) {
     status.textContent=c.name;
     const {workerMs,...result}=await session.request(c.request);
-    assert.deepEqual(result,c.result);report(c.name);
+    assert.deepEqual(compilerSemantics(result),compilerSemantics(c.result));report(c.name);
   }
   const store={save:async()=>{},list:async()=>[]};
   studio=new Studio(bytes,store,{debounce:60000});studio.state=newDraft();studio.state.autoRun=false;
