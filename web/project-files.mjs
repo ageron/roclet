@@ -4,7 +4,7 @@ const encoder = new TextEncoder();
 export function projectPath(path) {
   if (typeof path !== 'string' || !path || path.length > 480 || path.startsWith('/') || /[\\:\u0000-\u001f\u007f]/u.test(path)
       || path.split('/').some(part => !part || part === '.' || part === '..') || path === 'Main.roc' || path === 'main.roc') {
-    throw new Error('Use a relative project path, such as Geometry.roc or shapes/Wall.roc. Main.roc is reserved for the notebook.');
+    throw new Error('Use a relative project path, such as Geometry.roc or Shapes/Wall.roc. Main.roc is reserved for the notebook.');
   }
   return path;
 }

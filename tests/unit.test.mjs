@@ -26,7 +26,7 @@ test('project paths cannot replace the notebook or escape a portable project', (
     assert.throws(()=>projectFiles([{path,source:'module []'}]));
   }
   assert.throws(()=>projectFiles([{path:'File.roc',source:''},{path:'File.roc',source:''}]));
-  assert.deepEqual(projectFiles([{path:'shapes/Wall.roc',source:'module [area]\narea = 15'}]),[{path:'shapes/Wall.roc',source:'module [area]\narea = 15'}]);
+  assert.deepEqual(projectFiles([{path:'Shapes/Wall.roc',source:'module [area]\narea = 15'}]),[{path:'Shapes/Wall.roc',source:'module [area]\narea = 15'}]);
 });
 
 test('portable bundles retain project sources once and reject modified members', async () => {
