@@ -112,7 +112,8 @@ const State = struct {
         build.defer_post_check = true;
         build.setPostCheckPublicationMode(.none);
         build.compile_time_root_event_callback = .{ .context = &self.capture, .notify = engine.DebugCapture.observe };
-        build.setSyntheticRootSourceMappingWithLineOffset(std.fs.path.basename(opts.paths.app_abs), opts.source, self.prefix, @intCast(std.mem.count(u8, header.written(), "\n")));
+        const owned_user_source = source.written()[self.prefix..][0..opts.source.len];
+        build.setSyntheticRootSourceMappingWithLineOffset(std.fs.path.basename(opts.paths.app_abs), owned_user_source, self.prefix, @intCast(std.mem.count(u8, header.written(), "\n")));
         const cache = try a.create(compile.CacheManager);
         cache.* = compile.CacheManager.init(a, .{ .cache_dir = "/cache", .roc_ctx = fs.io() }, fs.io());
         build.setCacheManager(cache);
