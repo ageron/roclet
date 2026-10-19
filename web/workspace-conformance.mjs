@@ -50,11 +50,14 @@ try {
   const restored=await session.request({...request,files});assert.equal(restored.status,'ok');assert.equal(restored.values[0].text,'7');assert(restored.workspaceCache.hits>0,'Cold worker must hit the restored build cache');session.stop();
   report('PASS module edits invalidate compiled artifacts and cold workers restore browser build cache');
   raw.putFile('/workspace/Fresh.roc',files[0].source);assert.equal(raw(request).status,'ok');
+  const coldStats=raw.cacheStats();
   const artifacts=raw.takeCacheUpdates();
   assert(decodeCacheStream(artifacts).length>0,'Compiler must emit real checked/canonicalized cache artifacts');
   report('PASS compiler emits opaque build artifacts, independent of evaluation values');
   const restoredRaw=await createWasmTransport(bytes);assert(restoredRaw.importCache(artifacts));restoredRaw.putFile('/workspace/Fresh.roc',files[0].source);
-  assert.equal(restoredRaw(request).status,'ok');assert(restoredRaw.cacheStats().hits>0,'Restored compiler must use persisted build artifacts');
+  assert.equal(restoredRaw(request).status,'ok');const restoredStats=restoredRaw.cacheStats();
+  assert(restoredStats.hits>0,'Restored compiler must use persisted build artifacts');
+  assert(restoredStats.misses<coldStats.misses,'Restored artifacts must reduce compiler cache misses versus identical empty-cache compilation');
   report('PASS a fresh WASM instance uses restored compiler artifacts (compiler cache hits)');
   const packageUrl=new URL('../artifacts/FPCEjLpsoY5fJ6nDBCeJQ1s6aMTQjMWUYAVQu6QdNuzr.tar.zst',import.meta.url).href;
   await new BuildCache(`${await compilerNamespace(bytes,raw.cacheIdentity())}:packages`).clear();
