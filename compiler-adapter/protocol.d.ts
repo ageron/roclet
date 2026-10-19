@@ -76,6 +76,11 @@ export interface CompilerCacheStats {
   stores: number;
   bytes_read: number;
   bytes_written: number;
+  /** One prepared notebook graph/image serves every selected output. */
+  frontend_builds?: number;
+  lowerings?: number;
+  executions?: number;
+  prepared_hits?: number;
   [counter: string]: number;
 }
 

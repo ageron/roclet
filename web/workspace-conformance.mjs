@@ -62,7 +62,7 @@ try {
   const repaired=await nestedSession.request({...nestedRequest,files:nestedFiles(0,4)});assert.equal(repaired.status,'ok');assert.equal(repaired.values[0].text,'60');nestedSession.stop();
   report('PASS nested Shapes/Wall imports package-root Materials; nested/dependency edits invalidate results, removal clears values, repair recovers');
   const textSession=new DocumentSession(bytes),textRequest={...request,requestId:'text-file',cells:[{key:'code',source:'import "data/message.txt" as message : Str\nout_1 = message'}]};
-  for(const text of ['hello 🪨','updated ✓']) {
+  for(const text of ['hello 🪨','other 🪨','updated ✓']) {
     const result=await textSession.request({...textRequest,files:[{path:'/workspace/data/message.txt',source:text}]});
     assert.equal(result.status,'ok');assert.equal(result.values[0].text,JSON.stringify(text));
   }
