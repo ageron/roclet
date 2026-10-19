@@ -15,7 +15,7 @@ function coldCacheWorker(action) {
   });
 }
 async function corruptCache() {
-  const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('roclet-build-cache',1);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+  const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('roclet-build-cache');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
   await new Promise((resolve,reject)=>{const tx=db.transaction('entries','readwrite'),store=tx.objectStore('entries'),request=store.get(`${namespace}\0/cache/test`);request.onsuccess=()=>{const record=request.result;record.bytes[0]=0;store.put(record);};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();
 }
 try {

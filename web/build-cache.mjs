@@ -35,8 +35,13 @@ export async function compilerNamespace(bytes,identity) {
 function openDatabase(indexedDB) {
   if(!indexedDB) return Promise.resolve(null);
   return new Promise(resolve=>{
-    const request=indexedDB.open('roclet-build-cache',1);
-    request.onupgradeneeded=()=>request.result.createObjectStore('entries',{keyPath:'key'});
+    const request=indexedDB.open('roclet-build-cache',2);
+    request.onupgradeneeded=()=>{
+      const database=request.result,store=database.objectStoreNames.contains('entries')?request.transaction.objectStore('entries'):database.createObjectStore('entries',{keyPath:'key'});
+      if(!store.indexNames.contains('namespace')) store.createIndex('namespace','namespace');
+      if(!store.indexNames.contains('recency')) store.createIndex('recency',['touched','size']);
+      const cursor=store.openCursor();cursor.onsuccess=()=>{const entry=cursor.result;if(entry){const record=entry.value;record.size=record.bytes?.byteLength??0;if(!Number.isFinite(record.touched)) record.touched=0;entry.update(record);entry.continue();}};
+    };
     request.onsuccess=()=>resolve(request.result);
     request.onerror=()=>resolve(null);request.onblocked=()=>resolve(null);
   });
@@ -63,7 +68,7 @@ export class BuildCache {
     const database=await this.database;
     if(database) {
       try {
-        const records=await transaction(database,'readonly',(store,done)=>{const request=store.getAll();request.onsuccess=()=>done(request.result);});
+        const records=await transaction(database,'readonly',(store,done)=>{const request=store.index('namespace').getAll(this.namespace);request.onsuccess=()=>done(request.result);});
         for(const record of records) if(record.namespace===this.namespace) {
           if(validPath(record.path) && record.key===this.key(record.path) && record.bytes instanceof Uint8Array && record.bytes.length<=this.maxBytes && Number.isFinite(record.touched) && record.checksum===await checksum(record.bytes)) warm.set(record.key,record);
           else {warm.delete(record.key);await transaction(database,'readwrite',store=>store.delete(record.key));}
@@ -76,20 +81,23 @@ export class BuildCache {
   }
   async save(stream) {
     const entries=decodeCacheStream(stream),touched=Date.now();
-    for(const {path,bytes} of entries) if(bytes.length<=this.maxBytes) warm.set(this.key(path),{key:this.key(path),namespace:this.namespace,path,bytes,touched,checksum:await checksum(bytes)});
+    if(!entries.length) return;
+    for(const {path,bytes} of entries) if(bytes.length<=this.maxBytes) warm.set(this.key(path),{key:this.key(path),namespace:this.namespace,path,bytes,size:bytes.length,touched,checksum:await checksum(bytes)});
     for(const record of prune([...warm.values()],this.maxBytes,this.maxEntries)) warm.delete(record.key);
     const database=await this.database;if(!database) return;
     try {
       await transaction(database,'readwrite',store=>{
         for(const {path} of entries) {const record=warm.get(this.key(path));if(record) store.put(record);}
-        const request=store.getAll();request.onsuccess=()=>{for(const record of prune(request.result,this.maxBytes,this.maxEntries)) store.delete(record.key);};
+        // Read index keys, not every artifact's bytes, on each edit.
+        let size=0,count=0;const cursor=store.index('recency').openKeyCursor(null,'prev');
+        cursor.onsuccess=()=>{const entry=cursor.result;if(entry){size+=entry.key[1];if(++count>this.maxEntries || size>this.maxBytes) store.delete(entry.primaryKey);entry.continue();}};
       });
     } catch { /* Quota/private browsing failures do not discard the live workspace. */ }
   }
   async clear() {
     for(const [key,record] of warm) if(record.namespace===this.namespace) warm.delete(key);
     const database=await this.database;if(!database) return;
-    try {await transaction(database,'readwrite',store=>{const request=store.getAll();request.onsuccess=()=>{for(const record of request.result) if(record.namespace===this.namespace) store.delete(record.key);};});} catch {}
+    try {await transaction(database,'readwrite',store=>{const request=store.index('namespace').getAllKeys(this.namespace);request.onsuccess=()=>{for(const key of request.result) store.delete(key);};});} catch {}
   }
   async remove(path) {
     warm.delete(this.key(path));const database=await this.database;if(!database) return;
