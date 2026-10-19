@@ -14,6 +14,20 @@ function coldCacheWorker(action) {
     worker.onerror=reject;worker.postMessage({namespace,action});
   });
 }
+function offlinePackageWorker(bytes,request) {
+  const module=name=>JSON.stringify(new URL(name,import.meta.url).href);
+  const source=`import {createWasmTransport} from ${module('../compiler-adapter/wasm.mjs')};
+  import {BuildCache,compilerNamespace} from ${module('./build-cache.mjs')};
+  import {BrowserPackages} from ${module('./packages.mjs')};
+  onmessage=async({data})=>{try{const transport=await createWasmTransport(data.bytes),namespace=await compilerNamespace(data.bytes,transport.cacheIdentity());
+  const packages=new BrowserPackages(new BuildCache(namespace+':packages'),{fetch:async()=>{throw new Error('Network disabled for package restore test');}});
+  postMessage({result:await packages.evaluate(transport,data.request)});}catch(error){postMessage({error:error.stack});}};`;
+  return new Promise((resolve,reject)=>{
+    const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'})),worker=new Worker(url,{type:'module'});
+    worker.onmessage=({data})=>{worker.terminate();URL.revokeObjectURL(url);data.error?reject(new Error(data.error)):resolve(data.result);};
+    worker.onerror=reject;worker.postMessage({bytes,request});
+  });
+}
 async function corruptCache() {
   const db=await new Promise((resolve,reject)=>{const request=indexedDB.open('roclet-build-cache');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
   await new Promise((resolve,reject)=>{const tx=db.transaction('entries','readwrite'),store=tx.objectStore('entries'),request=store.get(`${namespace}\0/cache/test`);request.onsuccess=()=>{const record=request.result;record.bytes[0]=0;store.put(record);};tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);});db.close();
@@ -42,6 +56,12 @@ try {
   const restoredRaw=await createWasmTransport(bytes);assert(restoredRaw.importCache(artifacts));restoredRaw.putFile('/workspace/Fresh.roc',files[0].source);
   assert.equal(restoredRaw(request).status,'ok');assert(restoredRaw.cacheStats().hits>0,'Restored compiler must use persisted build artifacts');
   report('PASS a fresh WASM instance uses restored compiler artifacts (compiler cache hits)');
+  const packageUrl=new URL('../artifacts/FPCEjLpsoY5fJ6nDBCeJQ1s6aMTQjMWUYAVQu6QdNuzr.tar.zst',import.meta.url).href;
+  const packageRequest={operation:'document',action:'evaluate',format:'roc',source:`app [] { geom: "${packageUrl}" }\n# %% id=package\nimport geom.Geometry\nGeometry.answer`};
+  const packageSession=new DocumentSession(bytes),packaged=await packageSession.request(packageRequest);packageSession.stop();
+  assert.equal(packaged.status,'ok');assert.equal(packaged.evaluation.values[0].text,'42');
+  const packageRestored=await offlinePackageWorker(bytes,packageRequest);assert.equal(packageRestored.status,'ok');assert.equal(packageRestored.evaluation.values[0].text,'42');
+  report('PASS compiler-resolved package fetch, hash verification, and cold-worker package restore without network');
   document.querySelector('#status').textContent='PASS workspace conformance';
   document.documentElement.dataset.result='pass';
 } catch(error) {document.querySelector('#status').textContent='FAIL';document.documentElement.dataset.result='fail';report(error.stack??error.message);throw error;}
