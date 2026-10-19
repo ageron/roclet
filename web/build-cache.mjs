@@ -29,8 +29,8 @@ export function encodeCacheStream(entries) {
   for(const part of parts) {view.setUint32(offset,part.path.length,true);view.setUint32(offset+4,part.bytes.length,true);offset+=8;output.set(part.path,offset);offset+=part.path.length;output.set(part.bytes,offset);offset+=part.bytes.length;}
   return output;
 }
-export async function compilerNamespace(bytes,identity) {
-  return `compiler-v1:${await checksum(bytes)}:${identity}`;
+export async function compilerNamespace(bytes,identity,digest) {
+  return `compiler-v1:${digest??await checksum(bytes)}:${identity}`;
 }
 function openDatabase(indexedDB) {
   if(!indexedDB) return Promise.resolve(null);

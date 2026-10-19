@@ -1,4 +1,13 @@
 import {fileChanges} from './workspace.mjs';
+const compiledModules=new WeakMap();
+function prepareCompiler(bytes) {
+  let prepared=compiledModules.get(bytes);
+  if(!prepared) {
+    prepared=Promise.all([WebAssembly.compile(bytes),crypto.subtle.digest('SHA-256',bytes)]).then(([module,hash])=>({module,compilerDigest:[...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,'0')).join('')}));
+    compiledModules.set(bytes,prepared);
+  }
+  return prepared;
+}
 // Owns editing views and the worker, never caches user evaluation results.
 export class DocumentDraft {
   constructor(source, format = 'roc') { this.open(source, format); }
@@ -81,7 +90,17 @@ export class DocumentSession {
         this.stop();
         reject(new Error(error.message));
       };
-      worker.postMessage({ bytes: fresh ? this.bytes : undefined, request, ...(workspace?{workspace}:{}) });
+      const message={bytes:fresh?this.bytes:undefined,request,...(workspace?{workspace}:{})};
+      if(fresh && this.WorkerType===globalThis.Worker) {
+        // Structured cloning a compiled Module shares browser-managed code,
+        // avoiding another copy of the compiler binary on every worker restart.
+        prepareCompiler(this.bytes).then(prepared=>{
+          if(this.worker===worker && this.pending?.resolve===resolve) worker.postMessage({...message,bytes:undefined,...prepared});
+        },error=>{
+          if(this.worker!==worker || this.pending?.resolve!==resolve) return;
+          this.pending=null;this.stop();reject(error);
+        });
+      } else worker.postMessage(message);
     });
   }
 }

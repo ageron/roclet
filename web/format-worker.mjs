@@ -3,10 +3,10 @@ import { BuildCache, compilerNamespace } from './build-cache.mjs';
 import { mountChanges } from './workspace.mjs';
 import { BrowserPackages } from './packages.mjs';
 let transport, cache, packages;
-async function initialize(bytes) {
-  const instance=await createWasmTransport(bytes);
+async function initialize({bytes,module,compilerDigest}) {
+  const instance=await createWasmTransport(module??bytes);
   if(instance.workspace) {
-    const namespace=await compilerNamespace(bytes,instance.cacheIdentity());
+    const namespace=await compilerNamespace(bytes,instance.cacheIdentity(),compilerDigest);
     cache=new BuildCache(namespace);
     packages=new BrowserPackages(new BuildCache(`${namespace}:packages`));
     if(!instance.importCache(await cache.load())) await cache.clear();
@@ -15,7 +15,7 @@ async function initialize(bytes) {
 }
 onmessage = async ({ data }) => {
   try {
-    transport ??= await initialize(data.bytes);
+    transport ??= await initialize(data);
     mountChanges(transport,data.workspace);
     const start = performance.now();
     const result = packages?await packages.evaluate(transport,data.request):await transport(data.request);

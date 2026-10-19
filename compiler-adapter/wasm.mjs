@@ -3,7 +3,8 @@ const decoder = new TextDecoder('utf-8', { fatal: true });
 
 export async function createWasmTransport(bytes) {
   // js_echo is an upstream ABI import, but the embedding observer must capture it.
-  const { instance } = await WebAssembly.instantiate(bytes, { env: { js_echo() { throw new Error('Uncaptured output'); } } });
+  const instantiated = await WebAssembly.instantiate(bytes, { env: { js_echo() { throw new Error('Uncaptured output'); } } });
+  const instance = instantiated.instance ?? instantiated;
   const wasm = instance.exports;
   const allocate = bytes => {
     const ptr = wasm.roclet_alloc(Math.max(1, bytes.length)) >>> 0;

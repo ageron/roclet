@@ -37,6 +37,21 @@ test('session omits only a confirmed compiler baseline graph from later requests
   const different=session.request({...request,reactivity:{...request.reactivity,previous:{context:'different'}}});assert.equal(worker.sent.request.reactivity.previous.context,'different');worker.onmessage({data:{result:{status:'ok'}}});await different;session.stop();
 });
 
+test('real-worker boot shares a compiled module across restarts without copying compiler bytes',async()=>{
+  const original=globalThis.Worker,workers=[];
+  class Worker {constructor(){workers.push(this);} postMessage(data){this.sent=data;} terminate(){}}
+  globalThis.Worker=Worker;
+  try {
+    const bytes=new Uint8Array([0,97,115,109,1,0,0,0]).buffer,session=new DocumentSession(bytes,Worker);
+    const request=session.request({source:'one'});
+    while(!workers[0].sent) await new Promise(resolve=>setImmediate(resolve));
+    const first=workers[0].sent;assert(first.module instanceof WebAssembly.Module);assert.equal(first.bytes,undefined);assert.match(first.compilerDigest,/^[a-f0-9]{64}$/);
+    workers[0].onmessage({data:{result:{status:'ok'}}});await request;session.stop();
+    const restarted=session.request({source:'two'});while(!workers[1].sent) await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(workers[1].sent.module,first.module);workers[1].onmessage({data:{result:{status:'ok'}}});await restarted;session.stop();
+  } finally {if(original===undefined)delete globalThis.Worker;else globalThis.Worker=original;}
+});
+
 test('opaque compiler artifacts restore into a cold cache in the correct namespace',async()=>{
   const namespace=await compilerNamespace(new Uint8Array([1,2,3]),'wasm32/compiler-test');
   const cache=new BuildCache(namespace,{indexedDB:null}),entry={path:'/cache/checked/a',bytes:new Uint8Array([4,5,6])};
