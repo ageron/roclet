@@ -81,7 +81,7 @@ export interface CompilerCacheStats {
   lowerings?: number;
   executions?: number;
   prepared_hits?: number;
-  [counter: string]: number;
+  [counter: string]: number | undefined;
 }
 
 /** M1 formats. Conversion and parsing never execute notebook expressions. */
