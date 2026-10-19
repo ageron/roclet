@@ -65,6 +65,7 @@ export async function createWasmTransport(bytes) {
     transport.cacheIdentity = () => decoder.decode(readResponse(wasm.roclet_cache_identity()));
     transport.importCache = bytes => withBytes(bytes, (ptr, len) => wasm.roclet_cache_import(ptr, len) === 1);
     transport.takeCacheUpdates = () => readResponse(wasm.roclet_cache_take_updates());
+    transport.cacheStats = () => JSON.parse(decoder.decode(readResponse(wasm.roclet_cache_stats())));
     transport.installPackage = (url, bytes) => withBytes(encoder.encode(url), (urlPtr, urlLen) =>
       withBytes(bytes, (ptr, len) => wasm.roclet_package_install(urlPtr, urlLen, ptr, len) === 1));
   }

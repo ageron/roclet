@@ -36,7 +36,11 @@ try {
   const restored=await session.request({...request,files});assert.equal(restored.status,'ok');assert.equal(restored.values[0].text,'7');session.stop();
   report('PASS module edits invalidate compiled artifacts and cold workers restore browser build cache');
   raw.putFile('/workspace/Fresh.roc',files[0].source);assert.equal(raw(request).status,'ok');
-  assert(decodeCacheStream(raw.takeCacheUpdates()).length>0,'Compiler must emit real checked/canonicalized cache artifacts');
+  const artifacts=raw.takeCacheUpdates();
+  assert(decodeCacheStream(artifacts).length>0,'Compiler must emit real checked/canonicalized cache artifacts');
   report('PASS compiler emits opaque build artifacts, independent of evaluation values');
+  const restoredRaw=await createWasmTransport(bytes);assert(restoredRaw.importCache(artifacts));restoredRaw.putFile('/workspace/Fresh.roc',files[0].source);
+  assert.equal(restoredRaw(request).status,'ok');assert(restoredRaw.cacheStats().hits>0,'Restored compiler must use persisted build artifacts');
+  report('PASS a fresh WASM instance uses restored compiler artifacts (compiler cache hits)');
   document.querySelector('#status').textContent='PASS workspace conformance';
 } catch(error) {document.querySelector('#status').textContent='FAIL';report(error.stack??error.message);throw error;}
