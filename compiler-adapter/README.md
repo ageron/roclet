@@ -52,7 +52,9 @@ once and produces an immutable LIR image containing the output entrypoints.
 Metadata queries and later output selections reuse that graph and image. A source,
 module, file, or configuration change replaces the retained revision.
 
-Each selected output gets a fresh interpreter and temporary allocation arena.
+The retained checked/lowered revision reserves a 512 MiB arena, including space
+for dependency packages such as roc-time. Each selected output gets a fresh
+interpreter and temporary allocation arena.
 Rich outputs also have a checked value entrypoint and a concrete serializer for
 the bundled nominal `Display` type. No evaluated Roc value is retained between
 responses. `workspaceCache.frontend_builds`, `lowerings`, `executions`, and

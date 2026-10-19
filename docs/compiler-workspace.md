@@ -127,7 +127,7 @@ from the warm-edit measurements. It excludes the page's earlier WASM download.
 `workerMs` times the worker's evaluation request, excluding the subsequent durable
 cache write; the round trip includes that write, transport, and scheduling.
 
-The published browser compiler is 25,063,956 bytes. Its SHA-256 is
+That measured browser compiler was 25,063,956 bytes. Its SHA-256 is
 `0fd7ec11335d36f30f7b96bef14f1c0cf33d5e53f3ef6bf075e712d11e9e933f`.
 Run the benchmark with:
 
@@ -135,7 +135,7 @@ Run the benchmark with:
 node tools/browser-check.mjs --page web/workspace-benchmark.html --timeout 180000
 ```
 
-## Final validation
+## Workspace baseline validation
 
 `zig build -j1`, `zig build test -j1`, `zig build package -j1`, and the artifact
 manifest check passed. The native ReleaseFast engine passed 36 compiler cases,
@@ -169,3 +169,24 @@ found that direct GitHub release downloads are blocked by CORS. The bundled
 server now provides a bounded, hash-verifying archive proxy. A configurable HTTPS
 endpoint supports static hosting; original package identities and browser
 compilation are preserved. See the validation report for the real-release checks.
+
+
+## Package-download follow-up
+
+The configurable GitHub archive proxy and roc-time demonstration were validated
+on 2026-10-20 with the rebuilt ReleaseFast native/WASM pair. The new WASM digest
+is `3791ec6d865abce743e3d8a5c868418aeae740b3ff3bb73b88296ad0e7296b0f`.
+The native suites (121 documents, 36 compiler cases, and 30 M4 responses), all six
+browser suites above, artifact verification, and packaging passed again. The
+publication now contains 75 verified offline assets. The earlier timing table
+remains a measurement of its explicitly identified baseline artifact.
+
+The actual Studio downloads released roc-parser/Unicode and roc-time packages
+through the supported proxy path. Desktop/local-endpoint and compact/separate-
+origin roc-time tests verify editable scheduling results, reversed-date errors,
+worker restart, and fresh-worker execution with package networking disabled.
+The retained revision arena increased from 256 to 512 MiB so the larger package
+graphs also pass native lowering. See the
+[package validation report](browser-package-validation.md) for reproduction and
+[hosting instructions](installation.md#package-downloads-on-a-static-host) for
+the separately deployed HTTPS service required by GitHub Pages.

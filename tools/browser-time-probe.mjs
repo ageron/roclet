@@ -22,6 +22,14 @@
   await run();assert(JSON.stringify(rows())===JSON.stringify(expected.slice(1)),'Booking edit did not remove the first free slot');assert(values().includes('Ok(2)'),'Edited count is stale');
   const changed={rows:rows(),values:values()};
   $('stop').click();await run();assert(values().includes('Ok(2)'),'Fresh Studio worker failed');
+  const openingEditor=[...document.querySelectorAll('#notebook .cm-content')].map(editorFor).find(editor=>editor?.source.startsWith('opening = '));
+  assert(openingEditor,'Opening interval cell is missing');
+  const openingSource=openingEditor.source;
+  openingEditor.view.dispatch({changes:{from:0,to:openingEditor.view.state.doc.length,insert:openingSource.replace('09:00:00Z/2026-06-15T17:00:00Z','17:00:00Z/2026-06-15T09:00:00Z')},userEvent:'input'});
+  await run();assert(rows().length===0,'Invalid interval left a current table');
+  assert(values().includes('Err(Input(ReversedBounds))'),'Reversed interval did not return the package error');
+  assert([...document.querySelectorAll('.value[data-stale="false"] .rich-output > pre')].some(node=>node.textContent==='Check your dates: Input(ReversedBounds)'),'Date error is not visible');
+  const invalid={values:values(),message:'Check your dates: Input(ReversedBounds)'};
   const manifest=await fetch('/artifacts/manifest.json').then(response=>response.json());
   const source=await fetch('/demos/04-meeting-windows.roc').then(response=>response.text());
   const bytes=await fetch('/artifacts/roclet.wasm').then(response=>response.arrayBuffer());
@@ -34,7 +42,8 @@
   assert(offline.evaluation.values.find(value=>value.root==='out_count')?.text==='Ok(3)','Offline values differ');
   assert(offline.workspaceCache.hits>0,'Offline run did not consume compiler artifacts');
   // Leave the original, readable demonstration visible for the screenshot.
+  openingEditor.view.dispatch({changes:{from:0,to:openingEditor.view.state.doc.length,insert:openingSource},userEvent:'input'});
   editor.view.dispatch({changes:{from:0,to:editor.view.state.doc.length,insert:original},userEvent:'input'});await run();
   assert(JSON.stringify(rows())===JSON.stringify(expected),'Restored demo differs');
-  return {result:'pass',buildMode:manifest.wasmOptimize,compilerSha256:manifest.artifacts['roclet.wasm'].sha256,initial,changed,studioWorkerRestart:'pass',offline:{values:offline.evaluation.values,workspaceCache:offline.workspaceCache},horizontalOverflow:document.documentElement.scrollWidth>innerWidth};
+  return {result:'pass',buildMode:manifest.wasmOptimize,compilerSha256:manifest.artifacts['roclet.wasm'].sha256,initial,changed,invalid,studioWorkerRestart:'pass',offline:{values:offline.evaluation.values,workspaceCache:offline.workspaceCache},horizontalOverflow:document.documentElement.scrollWidth>innerWidth};
 })()

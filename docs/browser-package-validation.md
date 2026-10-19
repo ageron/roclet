@@ -80,11 +80,29 @@ The test driver serves the static site on a different ephemeral origin and
 changes only its endpoint configuration. Archives still come from the actual
 proxy service. No external HTTPS deployment is claimed by this local check.
 
+## Verified browser results
+
+The final ReleaseFast browser compiler is 25,063,956 bytes, SHA-256
+`3791ec6d865abce743e3d8a5c868418aeae740b3ff3bb73b88296ad0e7296b0f`.
+The local-endpoint test at 1280×960 and separate-origin proxy test at 390×960
+both pass the complete roc-time probe: initial table/count, booking edits,
+reversed-date error, worker restart, and fresh-worker restoration with package
+networking disabled. Both layouts have no page-level horizontal overflow, and
+screenshots were inspected. Neither run records a failed network request.
+
+The fresh worker reports 18 checked artifact hits and one miss (the notebook
+revision), plus 19 canonicalized artifact hits with zero misses. The initial
+three-window table is recomputed from the restored package and compiler inputs.
+Packaging verifies all 75 offline assets, including the demo and download
+configuration. The compiler currently emits an empirical `Unused Branch` warning
+for the unused error alternative on valid input; that diagnostic is preserved.
+The probe explicitly exercises the error alternative with reversed dates.
+
 ## Compiler memory limit
 
 The original 256 MiB retained-revision arena exhausted memory while lowering
 roc-time and the larger typed CSV parser example. The adapter now reserves
-512 MiB per retained revision. Both examples pass native Debug correctness
+512 MiB per retained revision. Both examples pass native ReleaseFast and Debug correctness
 checks. This is separate from the browser's package-download restriction.
 
 ```sh
