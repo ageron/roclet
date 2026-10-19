@@ -23,7 +23,7 @@ export function validDraft(record) {
 }
 export function requestFor(state, action, target = state.format) {
   const request = { operation: 'document', action, format: state.format, target, source: state.sourceCurrent ? state.source : '', render: true };
-  request.files = projectFiles(state.files);
+  request.files = projectFiles(state.files).map(file => ({...file, path:`/workspace/${file.path}`}));
   if (state.sourceCurrent) request.context = { preamble: state.preamble, metadata: state.metadata };
   else request.draft = { preamble: state.preamble, metadata: state.metadata, cells: state.cells.map(({ kind, source, attributes, outputs }) => ({ kind, source, attributes, outputs })) };
   return request;

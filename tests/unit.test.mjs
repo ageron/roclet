@@ -13,7 +13,7 @@ test('project modules preserve raw source editing and undo as one notebook chang
   assert.equal(studio.result,null);
   assert.equal(studio.state.sourceCurrent,true);
   assert.equal(requestFor(studio.state,'evaluate').source,'out_1 = Geometry.area');
-  assert.deepEqual(requestFor(studio.state,'evaluate').files,[{path:'Geometry.roc',source:'module [area]\narea = 15'}]);
+  assert.deepEqual(requestFor(studio.state,'evaluate').files,[{path:'/workspace/Geometry.roc',source:'module [area]\narea = 15'}]);
   studio.setProjectFile('Geometry.roc','module [area]\narea = 24');
   studio.undo();assert.equal(studio.state.files[0].source,'module [area]\narea = 15');
   studio.removeProjectFile('Geometry.roc');assert.deepEqual(studio.state.files,[]);
