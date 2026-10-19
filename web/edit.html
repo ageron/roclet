@@ -136,7 +136,7 @@ dialog { background:var(--page); }
 <p><label>Export as <select id="share-type"><option value="bundle">Roclet bundle (.roclet.zip)</option><option value="report">Static report (.html)</option><option value="site">Interactive site (.site.zip)</option></select></label></p>
 <p><label><input type="checkbox" id="share-results"> Include current result snapshots</label><br><label><input type="checkbox" id="share-debug"> Include debug messages from this run</label><br><label><input type="checkbox" id="share-source" checked> Show code in the static report</label></p>
 <p>Roclet bundles include the source, cell structure, and compiler identity. Open them in a compatible version of Roclet. Reports open directly in a browser. Interactive sites include Roclet and the compiler for hosting on HTTPS or localhost. Existing saved-output comments stay part of the source. Nothing is uploaded.</p>
-<p>Using <code>import Display</code>? Bundles include the module. For standalone Roc source, save <a href="../library/Display.roc" download="Display.roc">Display.roc</a> beside your notebook.</p>
+<p>Roc downloads are runnable scripts. Rich outputs use a pinned Display package, which Roc downloads automatically. Roclet supplies it offline.</p>
 <button id="export-share">Download export</button><p id="share-status" role="status"></p></dialog>
 <dialog id="offline-dialog" aria-labelledby="offline-title"><div class="dialog-title"><h2 id="offline-title">Offline & storage</h2><button data-close aria-label="Close offline settings">×</button></div>
 <p id="offline-state" role="status">Not prepared for offline use</p><button id="prepare-offline">Prepare for offline use</button>

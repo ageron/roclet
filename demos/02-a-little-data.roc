@@ -1,5 +1,5 @@
-app [main!] {}
-import Display
+app [main!] { roclet: "https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst" }
+import roclet.Display
 
 # %%
 # # Three days of weather
@@ -14,7 +14,7 @@ days = [
 ]
 
 # %%
-Display.table(["Day", "Celsius", "Fahrenheit"], List.map(days, |day| [
+out_1 = Display.table(["Day", "Celsius", "Fahrenheit"], List.map(days, |day| [
     day.name,
     day.celsius.to_str(),
     (day.celsius * 1.8 + 32).to_str(),
@@ -23,3 +23,11 @@ Display.table(["Day", "Celsius", "Fahrenheit"], List.map(days, |day| [
 # %%
 # The table takes strings so that numeric values reach the browser without
 # JavaScript rounding them. Try changing `1.8` to see every row recompute.
+
+# %% generated
+display! = |value| echo!("${Str.inspect(value)}\n")
+
+main! = |_args| {
+    display!(out_1)
+    Ok({})
+}

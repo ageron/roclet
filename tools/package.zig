@@ -73,13 +73,15 @@ pub fn main(init: std.process.Init) !void {
     try write(a, io, root, "web/vendor/md4c.LICENSE.md", try read(a, io, root, "vendor/md4c/LICENSE.md"));
     var paths: std.ArrayList([]const u8) = .empty;
     for ([_][]const u8{
-        "LICENSE", "THIRD_PARTY_NOTICES.md", "demos/01-reactivity.roc", "demos/02-a-little-data.roc", "demos/03-circle.roc",
-        "web/assets/roclet-logo.png", "web/edit.html",             "web/edit.mjs",              "web/edit-model.mjs",     "web/compiler-tools.mjs",   "web/edit-store.mjs",                "web/edit-cells.mjs",
-        "web/cell-editor.mjs",         "web/editor-navigation.mjs",   "web/roc-highlighting.mjs", "web/document-session.mjs", "web/format-worker.mjs",               "web/markdown-view.mjs",
-        "web/archive.mjs",             "web/sharing.mjs",             "web/offline.mjs",          "web/offline-cache.mjs",    "web/offline-runtime.mjs",             "web/formats.html",
-        "web/formats.mjs",             "compiler-adapter/wasm.mjs",   "artifacts/roclet.wasm",    "artifacts/manifest.json",  "compiler-adapter/ROC-LICENSE",        "web/vendor/md4c.LICENSE.md",
-        "web/math-view.mjs", "web/vendor/katex/katex.mjs", "web/vendor/katex/katex.css", "web/vendor/katex/LICENSE", "web/vendor/katex/README.md", "web/vendor/katex/lock.json",
-        "web/vendor/editor/lock.json", "web/vendor/editor/README.md", "web/display-view.mjs",     "library/Display.roc",      "fixtures/documents/rich-outputs.roc",
+        "LICENSE",                    "THIRD_PARTY_NOTICES.md",      "demos/01-reactivity.roc",             "demos/02-a-little-data.roc",   "demos/03-circle.roc",
+        "web/assets/roclet-logo.png", "web/edit.html",               "web/edit.mjs",                        "web/edit-model.mjs",           "web/compiler-tools.mjs",
+        "web/edit-store.mjs",         "web/edit-cells.mjs",          "web/cell-editor.mjs",                 "web/editor-navigation.mjs",    "web/roc-highlighting.mjs",
+        "web/document-session.mjs",   "web/format-worker.mjs",       "web/markdown-view.mjs",               "web/archive.mjs",              "web/sharing.mjs",
+        "web/offline.mjs",            "web/offline-cache.mjs",       "web/offline-runtime.mjs",             "web/formats.html",             "web/formats.mjs",
+        "compiler-adapter/wasm.mjs",  "artifacts/roclet.wasm",       "artifacts/manifest.json",             "compiler-adapter/ROC-LICENSE", "web/vendor/md4c.LICENSE.md",
+        "web/math-view.mjs",          "web/vendor/katex/katex.mjs",  "web/vendor/katex/katex.css",          "web/vendor/katex/LICENSE",     "web/vendor/katex/README.md",
+        "web/vendor/katex/lock.json", "web/vendor/editor/lock.json", "web/vendor/editor/README.md",         "web/display-view.mjs",         "package/Display.roc",
+        "package/README.md",          "package/main.roc",            "fixtures/documents/rich-outputs.roc",
     }) |path| try paths.append(a, path);
     const lock = try std.json.parseFromSliceLeaky(std.json.Value, a, try read(a, io, root, "web/vendor/editor/lock.json"), .{});
     for (lock.object.get("packages").?.array.items) |package| {

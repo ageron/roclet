@@ -71,6 +71,16 @@ pub fn build(b: *std.Build) void {
     b.step("package", "Package the verified offline Roclet and host-platform headless runner").dependOn(&package.step);
     serve.step.dependOn(&offline.step);
 
+    const demo_tests = b.addExecutable(.{ .name = "roclet-runnable-demos", .root_module = b.createModule(.{
+        .root_source_file = b.path("tests/runnable-demos.zig"),
+        .target = b.graph.host,
+        .optimize = .small,
+    }) });
+    const demos = b.addRunArtifact(demo_tests);
+    demos.addArgs(&.{ root, b.option([]const u8, "roc", "Ordinary Roc executable for demo tests") orelse "roc" });
+    demos.has_side_effects = true;
+    b.step("test-demos", "Run published demos with ordinary Roc and the local Display package").dependOn(&demos.step);
+
     const unit_step = b.step("test-unit", "Test the snapshot protocol and compiler-overlay safeguards");
     inline for (.{ "compiler-adapter/snapshot.zig", "tools/build-tool.zig", "tools/serve.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });

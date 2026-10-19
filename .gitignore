@@ -8,3 +8,8 @@ artifacts/
 /web/offline-release.json
 /web/offline-worker.mjs
 /web/vendor/md4c.LICENSE.md
+
+# Package release artifacts
+.release/
+/package/*.tar.zst
+/tools/__pycache__/

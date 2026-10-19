@@ -457,6 +457,7 @@ function bind() {
   $('preview').onclick = () => perform(async () => { const result = await notebook.inspect('export', 'roc'); $('generated').textContent = result.source; closeMenus(); $('generated-dialog').showModal(); });
   $('download').onclick = () => perform(async () => {
     const result = await notebook.inspect('export');
+    if (notebook.state.format === 'roc' && result.status !== 'ok') throw new Error('Fix the errors before downloading runnable Roc, or switch to Markdown to save unfinished source.');
     const url = URL.createObjectURL(new Blob([result.source], {type:'text/plain;charset=utf-8'}));
     const link = document.createElement('a'); link.href = url; link.download = `${(notebook.state.title || 'notebook').replace(/[^a-z0-9._ -]/gi, '_')}.${notebook.state.format === 'roc' ? 'roc' : 'md'}`; link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);

@@ -35,7 +35,7 @@ jobs:
         id: compiler
         with:
           path: artifacts
-          key: roclet-linux-v1-${{ hashFiles('compiler.lock.json', 'build.zig', 'tools/build-tool.zig', 'compiler-adapter/**', 'core/**', 'library/**', 'vendor/**') }}
+          key: roclet-linux-v1-${{ hashFiles('compiler.lock.json', 'build.zig', 'tools/build-tool.zig', 'compiler-adapter/**', 'core/**', 'package/**', 'vendor/**') }}
       - name: Build pinned compiler
         if: steps.compiler.outputs.cache-hit != 'true'
         shell: bash

@@ -50,10 +50,10 @@ try {
   notebook.editCell(index,'width = 9\nheight = 3');await notebook.run();assert.equal(document.querySelector('#cells .rich-output > pre').textContent,'9.0');
   notebook.editCell(mdIndex,mdSource);await notebook.run();
   report('plain-text alternatives update even when the rich envelope stays identical');
-  const capture=await captureExport(notebook,compiler,{results:true,debug:true}),bundle=await exportBundle(capture),files=await unzip(await bundle.arrayBuffer());assert(files.has('Display.roc'));assert.match(text(files.get('Display.roc')),/to_inspect/);
+  const capture=await captureExport(notebook,compiler,{results:true,debug:true}),bundle=await exportBundle(capture),files=await unzip(await bundle.arrayBuffer());assert(!files.has('Display.roc'));assert.match(text(files.get('notebook.roc')),/import roclet\.Display/);assert.match(text(files.get('notebook.roc')),/main! =/);
   const imported=await importBundle(await bundle.arrayBuffer(),compiler);assert(imported.record.savedResults.snapshots.some(s=>s.display?.kind==='table'));await notebook.replace(imported.record);await until(()=>document.querySelectorAll('#cells .unverified .rich-output').length===3);assert.equal(notebook.state.autoRun,false);
   const html=new DOMParser().parseFromString(await (await exportReport(capture)).text(),'text/html');assert(html.querySelector('table'));assert(html.querySelector('img[src^="data:image/png;base64,"]'));assert.equal(html.querySelectorAll('script,[onerror]').length,0);assert.match(html.body.textContent,/9007199254740993/);
-  report('bundles preserve unverified rich snapshots and the Roc module; reports preserve safe rich output');
+  report('bundles preserve unverified rich snapshots and the pinned Display package; reports preserve safe rich output');
   const runnable=await session.request({operation:'document',action:'run',format:'roc',source:'import Display\n# %%\nDisplay.table(["Exact"], [["9007199254740993"]])'});assert.equal(runnable.status,'ok');assert(runnable.evaluation.events.some(e=>e.message.includes('9007199254740993')));
   report('generated display! uses the same readable plain-text representation in script execution');
   parent.postMessage({rocletM5:true,status:`PASS — ${count} M5 rich output contracts`,log,result:'pass'},new URL(document.baseURI).origin);

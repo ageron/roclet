@@ -2602,5 +2602,97 @@
       "status": "ok",
       "roundtrip": true
     }
+  },
+  {
+    "name": "Roc export supplies a package and executable entry point",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "import Display\n# %%\nDisplay.text(\"hello\")"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst",
+        "import roclet.Display",
+        "out_1 = Display.text",
+        "display!(out_1)",
+        "main! = |_args|"
+      ],
+      "normalized_stable": true
+    }
+  },
+  {
+    "name": "Pinned Display package runs offline",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "app [main!] { roclet: \"https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst\" }\nimport roclet.Display\n# %%\nDisplay.markdown(\"# Hi\")"
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "# Hi"
+      ],
+      "display_kinds": [
+        "markdown"
+      ]
+    }
+  },
+  {
+    "name": "Pinned package imports inside cells run offline",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "app [main!] { roclet: \"https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst\" }\n# %%\nimport roclet.Display\nDisplay.text(\"hello\")"
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "hello"
+      ],
+      "display_kinds": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "Export does not rewrite import text in strings or Markdown",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\n# import Display\n# %%\n\"import Display\""
+    },
+    "expect": {
+      "status": "ok",
+      "absent": [
+        "https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst"
+      ],
+      "contains": [
+        "# import Display",
+        "\"import Display\""
+      ]
+    }
+  },
+  {
+    "name": "Invalid types cannot be exported as runnable Roc",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\n1 + \"two\""
+    },
+    "expect": {
+      "status": "diagnostic"
+    }
   }
 ]

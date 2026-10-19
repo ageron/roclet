@@ -10,7 +10,9 @@ Your changes stay in your browser; they don't modify the published example.
 | [A bigger circle](03-circle.roc) | Double the radius; combine live results with equations. | [Open demo](https://ageron.github.io/roclet/web/edit.html?example=circle) |
 
 You can also download any source file and open it with **File → Open** in a local
-or offline Roclet installation.
+or offline Roclet installation, or run it directly with `roc notebook.roc`.
+Rich-output demos fetch the Display package automatically on the first ordinary
+Roc run; Roclet already includes it for offline use.
 
 For Markdown, tables, and an embedded image together, use
 [open the rich outputs demo](https://ageron.github.io/roclet/web/edit.html?example=rich-outputs).

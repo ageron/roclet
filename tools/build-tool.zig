@@ -2,7 +2,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cwd = std.Io.Dir.cwd();
-const inputs = [_][]const u8{ "build.zig", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/snapshot.zig", "compiler-adapter/overlay.json", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "core/Document.roc", "library/Display.roc", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
+const inputs = [_][]const u8{ "build.zig", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/snapshot.zig", "compiler-adapter/overlay.json", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "core/Document.roc", "package/Display.roc", "package/display-package-url.txt", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
 const Lock = struct { protocol: u32, compilerRepository: []const u8, compilerCommit: []const u8, zigVersion: []const u8, nativeOptimize: []const u8, wasmOptimize: []const u8 };
 const Patch = struct { path: []const u8, before: []const u8, after: []const u8 };
 fn path(gpa: Allocator, root: []const u8, relative: []const u8) ![]const u8 {
@@ -78,7 +78,8 @@ fn prepare(gpa: Allocator, io: std.Io, root: []const u8, checkout: []const u8, l
     };
     inline for (copies) |copy| try cwd.copyFile(try path(gpa, root, "compiler-adapter/" ++ copy[0]), cwd, try path(gpa, staging, "src/echo_platform/" ++ copy[1]), io, .{});
     try cwd.copyFile(try path(gpa, root, "core/Document.roc"), cwd, try path(gpa, staging, "src/echo_platform/Document.roc"), io, .{});
-    try cwd.copyFile(try path(gpa, root, "library/Display.roc"), cwd, try path(gpa, staging, "src/echo_platform/Display.roc"), io, .{});
+    try cwd.copyFile(try path(gpa, root, "package/Display.roc"), cwd, try path(gpa, staging, "src/echo_platform/Display.roc"), io, .{});
+    try cwd.copyFile(try path(gpa, root, "package/display-package-url.txt"), cwd, try path(gpa, staging, "src/echo_platform/display-package-url.txt"), io, .{});
     inline for (.{ "md4c.c", "md4c.h", "roclet-md.h" }) |file| try cwd.copyFile(try path(gpa, root, "vendor/md4c/" ++ file), cwd, try path(gpa, staging, "src/echo_platform/" ++ file), io, .{});
     // Preserve downloaded packages and compiler caches when updating the overlay.
     for ([_][]const u8{ ".zig-cache", "zig-pkg" }) |cache| {

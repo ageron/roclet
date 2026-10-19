@@ -185,6 +185,14 @@ pub fn main(init: std.process.Init) !void {
     var suite: Suite = .{ .a = a, .io = init.io, .executable = args[2], .temp = temp };
     const fixtures = try parse(a, try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, "tests/documents.json" }), a, .limited(1024 * 1024)));
     for (fixtures.array.items) |fixture| try suite.run(fixture);
+    // Published notebooks must already be in runnable form, not editing drafts.
+    for ([_][]const u8{ "demos/01-reactivity.roc", "demos/02-a-little-data.roc", "demos/03-circle.roc", "fixtures/documents/rich-outputs.roc" }) |file| {
+        const source = try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, file }), a, .limited(256 * 1024));
+        const exported = try suite.call(file, try parse(a, try json(a, .{ .operation = "document", .action = "export", .format = "roc", .target = "roc", .source = source })));
+        errdefer std.debug.print("FAIL runnable demo: {s}\n", .{file});
+        try expect(eq(str(exported, "status"), "ok"));
+        try expect(eq(str(exported, "source"), source));
+    }
     // Public CLI notebook runs share Roclet's named-root snapshot contract.
     for ([_][]const u8{ "roc", "md" }) |extension| {
         const cli_file = try std.fmt.allocPrint(a, "{s}/artifacts/cli-notebook-test.{s}", .{ root, extension });

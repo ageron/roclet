@@ -96,9 +96,21 @@ Roclet's native runner accepts notebooks too:
 ./zig-out/bin/roclet run demos/01-reactivity.roc
 ```
 
-To run an exported rich-output notebook with ordinary Roc, put
-[`Display.roc`](../library/Display.roc) beside it. Roclet supplies this module
-itself; Roclet bundles include it automatically.
+Downloaded `.roc` notebooks are ordinary runnable Roc programs, including the demos:
+
+```sh
+roc demos/01-reactivity.roc
+roc demos/02-a-little-data.roc
+```
+
+Final cell expressions become named outputs, and a generated `main!` prints them
+in notebook order. Downloads are checked first; fix reported errors before
+exporting. Browser autosave still keeps unfinished drafts.
+
+Rich-output notebooks import the content-addressed [Display package](../package/README.md).
+Ordinary Roc downloads and caches it on first use; no adjacent `Display.roc` is
+needed. Roclet includes this exact package's implementation in its native and
+browser runtimes, so running notebooks in Roclet still works offline.
 
 ## Hosting on GitHub Pages
 

@@ -12,17 +12,17 @@ export function download(blob,name) {
 export async function captureExport(notebook,compiler,{results=false,debug=false}={}) {
   const state=structuredClone(notebook.state),current=structuredClone(notebook.result);
   const parsed=await notebook.inspect('export');
+  if(state.format==='roc' && parsed.status!=='ok') throw new Error('Fix the errors before exporting runnable Roc, or switch to Markdown to save unfinished source.');
   const document={schema:1,title:state.title,format:state.format,preamble:state.preamble??'',metadata:state.metadata??'',source:state.sourceCurrent?state.source:'',sourceCurrent:!!state.sourceCurrent,mode:state.mode,
     cells:(state.sourceCurrent?(parsed.draft?.cells??parsed.model.cells):state.cells).map(({kind,source,attributes,outputs})=>({kind,source,attributes:attributes??'',outputs:outputs??[]}))};
   const snapshots=results && ['ok','partial'].includes(current?.status) ? (current.evaluation?.values??[]).map(v=>({cell:current.model.cells.findIndex(c=>c.output===v.root),root:v.root,text:v.text,...(v.display?{display:normalizeDisplay(v.display)}:{})})) : [];
   const events=debug ? (current?.evaluation?.events??[]).map(({cell,root,kind,message})=>({cell,root,kind,message})) : [];
-  return {document,source:parsed.source,model:parsed.model,rendering:parsed.rendering??[],snapshots,events,compiler:{commit:compiler.compilerCommit,wasmSha256:compiler.artifacts['roclet.wasm'].sha256,displaySha256:compiler.inputs['library/Display.roc']},createdAt:new Date().toISOString()};
+  return {document,source:parsed.source,model:parsed.model,rendering:parsed.rendering??[],snapshots,events,compiler:{commit:compiler.compilerCommit,wasmSha256:compiler.artifacts['roclet.wasm'].sha256,displaySha256:compiler.inputs['package/Display.roc']},createdAt:new Date().toISOString()};
 }
 export async function bundleFiles(capture) {
   const sourcePath=capture.document.format==='roc'?'notebook.roc':'notebook.md';
   const files=new Map([[sourcePath,utf8(capture.source)],['document.json',utf8(JSON.stringify(capture.document))]]);
   if(capture.snapshots.length || capture.events.length) files.set('results.json',utf8(JSON.stringify({snapshots:capture.snapshots,events:capture.events,createdAt:capture.createdAt})));
-  const module=await fetch(new URL('../library/Display.roc',import.meta.url));if(!module.ok) throw new Error('Display module is unavailable; rebuild the offline distribution.');const moduleBytes=new Uint8Array(await module.arrayBuffer());if(await sha256(moduleBytes)!==capture.compiler.displaySha256) throw new Error('The Display module changed. Reload Roclet before exporting.');files.set('Display.roc',moduleBytes);
   const entries=[];for(const [path,bytes] of files) entries.push({path,bytes:bytes.length,sha256:await sha256(bytes)});
   files.set('roclet.json',utf8(JSON.stringify({schema:1,type:'roclet-notebook',title:capture.document.title,source:sourcePath,compiler:capture.compiler,createdAt:capture.createdAt,files:entries},null,2)));
   return files;
@@ -36,7 +36,7 @@ export async function importBundle(bytes,compiler) {
   const paths=new Set();
   for(const entry of manifest.files) {
     if(!['notebook.roc','notebook.md','document.json','results.json','Display.roc'].includes(entry.path) || paths.has(entry.path)) throw new Error('Unsupported or duplicate bundle entry.');
-    if(entry.path==='Display.roc' && entry.sha256!==compiler.inputs?.['library/Display.roc']) throw new Error('Bundled Display module does not match this compiler distribution.');
+    if(entry.path==='Display.roc' && entry.sha256!==compiler.inputs?.['package/Display.roc']) throw new Error('Bundled Display module does not match this compiler distribution.');
     paths.add(entry.path);const file=files.get(entry.path);
     if(!file || file.length!==entry.bytes || await sha256(file)!==entry.sha256) throw new Error(`Bundle integrity check failed: ${entry.path}`);
   }
