@@ -42,28 +42,32 @@ pub const Workspace = struct {
     }
     pub fn put(self: *Workspace, path: []const u8, bytes: []const u8, dirty: bool) !void {
         if (path.len == 0 or path[0] != '/' or path.len > 4096 or std.mem.indexOfScalar(u8, path, 0) != null) return error.InvalidPath;
-        if (!std.mem.startsWith(u8, path, "/cache/")) self.fingerprint = null;
+        const normalized = try std.fs.path.resolve(gpa, &.{path});
+        defer gpa.free(normalized);
+        if (self.files.get(normalized)) |existing| if (std.mem.eql(u8, existing.bytes, bytes)) return;
         const data = try gpa.dupe(u8, bytes);
         errdefer gpa.free(data);
-        const entry = try self.files.getOrPut(gpa, path);
-        if (entry.found_existing) {
-            if (std.mem.eql(u8, entry.value_ptr.bytes, bytes)) {
-                gpa.free(data);
-                return;
-            }
-            gpa.free(entry.value_ptr.bytes);
-        } else entry.key_ptr.* = try gpa.dupe(u8, path);
-        entry.value_ptr.* = .{ .bytes = data, .dirty = dirty };
+        const owned_path = try gpa.dupe(u8, normalized);
+        errdefer gpa.free(owned_path);
+        const slot = try self.files.getOrPut(gpa, owned_path);
+        if (slot.found_existing) {
+            gpa.free(owned_path);
+            gpa.free(slot.value_ptr.bytes);
+        } else slot.key_ptr.* = owned_path;
+        slot.value_ptr.* = .{ .bytes = data, .dirty = dirty };
+        if (!std.mem.startsWith(u8, normalized, "/cache/")) self.fingerprint = null;
     }
     pub fn drop(self: *Workspace, path: []const u8) void {
-        if (!std.mem.startsWith(u8, path, "/cache/")) self.fingerprint = null;
-        if (self.files.fetchRemove(path)) |entry| {
-            gpa.free(entry.key);
-            gpa.free(entry.value.bytes);
+        const normalized = std.fs.path.resolve(gpa, &.{path}) catch return;
+        defer gpa.free(normalized);
+        if (self.files.fetchRemove(normalized)) |removed| {
+            if (!std.mem.startsWith(u8, normalized, "/cache/")) self.fingerprint = null;
+            gpa.free(removed.key);
+            gpa.free(removed.value.bytes);
         }
     }
     pub fn io(self: *Workspace, a: A) CoreCtx {
-        var result = CoreCtx.testing(a, a);
+        var result = CoreCtx.default(a, a, .failing);
         result.ctx = self;
         result.vtable.readFile = read;
         result.vtable.readFileInto = readInto;
@@ -79,11 +83,23 @@ pub const Workspace = struct {
         result.vtable.rename = rename;
         result.vtable.getEnvVar = env;
         result.vtable.fetchUrl = fetch;
+        result.vtable.copyFile = copy;
         result.vtable.deleteFile = remove;
         result.vtable.deleteTree = removeTree;
         result.vtable.deleteDir = removeTree;
         result.vtable.timestampNow = now;
         return result;
+    }
+    pub fn deinit(self: *Workspace) void {
+        self.clearRequired();
+        self.required.deinit(gpa);
+        var it = self.files.iterator();
+        while (it.next()) |e| {
+            gpa.free(e.key_ptr.*);
+            gpa.free(e.value_ptr.bytes);
+        }
+        self.files.deinit(gpa);
+        self.* = .{};
     }
     pub fn clearRequired(self: *Workspace) void {
         for (self.required.items) |item| {
@@ -98,7 +114,7 @@ pub const Workspace = struct {
         // Validate the complete envelope before mutating the live store.
         while (at < bytes.len) {
             const e = try decodeEntry(bytes, &at);
-            if (!std.mem.startsWith(u8, e.path, "/cache/") or std.mem.indexOf(u8, e.path, "..") != null) return error.InvalidCache;
+            if (!isArtifact(e.path) or std.mem.indexOf(u8, e.path, "..") != null or std.mem.indexOfScalar(u8, e.path, 0) != null or !std.unicode.utf8ValidateSlice(e.path)) return error.InvalidCache;
         }
         at = 4;
         while (at < bytes.len) {
@@ -112,7 +128,7 @@ pub const Workspace = struct {
         try w.writer.writeAll("RLC1");
         var it = self.files.iterator();
         while (it.next()) |e| {
-            if (!e.value_ptr.dirty or !std.mem.startsWith(u8, e.key_ptr.*, "/cache/") or std.mem.endsWith(u8, e.key_ptr.*, ".tmp")) continue;
+            if (!e.value_ptr.dirty or !isArtifact(e.key_ptr.*) or std.mem.endsWith(u8, e.key_ptr.*, ".tmp")) continue;
             try w.writer.writeInt(u32, @intCast(e.key_ptr.len), .little);
             try w.writer.writeInt(u32, @intCast(e.value_ptr.bytes.len), .little);
             try w.writer.writeAll(e.key_ptr.*);
@@ -150,6 +166,9 @@ fn decodeEntry(bytes: []const u8, at: *usize) !CacheEntry {
     const result: CacheEntry = .{ .path = bytes[at.* .. at.* + p], .data = bytes[at.* + p .. at.* + p + d] };
     at.* += p + d;
     return result;
+}
+fn isArtifact(path: []const u8) bool {
+    return std.mem.startsWith(u8, path, "/cache/compat-");
 }
 fn ctx(p: ?*anyopaque) *Workspace {
     return @ptrCast(@alignCast(p.?));
@@ -194,8 +213,21 @@ fn list(p: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.ListError![]C
     };
     return out.toOwnedSlice(a);
 }
-fn listTop(p: ?*anyopaque, io_: std.Io, path: []const u8, a: A) CoreCtx.ListError![]CoreCtx.FileEntry {
-    return list(p, io_, path, a);
+fn listTop(p: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.ListError![]CoreCtx.FileEntry {
+    var out: std.ArrayList(CoreCtx.FileEntry) = .empty;
+    var seen: std.StringHashMapUnmanaged(void) = .{};
+    defer seen.deinit(a);
+    var it = ctx(p).files.keyIterator();
+    while (it.next()) |key| if (child(path, key.*)) {
+        const start = path.len + @intFromBool(!std.mem.endsWith(u8, path, "/"));
+        const slash = std.mem.indexOfScalarPos(u8, key.*, start, '/');
+        const name = key.*[0 .. slash orelse key.len];
+        if (seen.contains(name)) continue;
+        const owned = try a.dupe(u8, name);
+        try seen.put(a, owned, {});
+        try out.append(a, .{ .path = owned, .kind = if (slash == null) .file else .directory });
+    };
+    return out.toOwnedSlice(a);
 }
 fn canonicalize(_: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.CanonicalizeError![]const u8 {
     return std.fs.path.resolve(a, &.{ "/workspace", path });
@@ -207,6 +239,7 @@ fn env(_: ?*anyopaque, _: std.Io, key: []const u8, a: A) CoreCtx.GetEnvVarError!
 }
 fn rename(p: ?*anyopaque, _: std.Io, old: []const u8, new: []const u8) CoreCtx.RenameError!void {
     const self = ctx(p);
+    if (std.mem.eql(u8, old, new)) return;
     if (self.files.get(old)) |f| {
         self.put(new, f.bytes, true) catch return error.IoError;
         self.drop(old);
@@ -239,6 +272,10 @@ fn removeTree(p: ?*anyopaque, io_: std.Io, path: []const u8) CoreCtx.DeleteError
         gpa.free(f.path);
     }
 }
+fn copy(p: ?*anyopaque, _: std.Io, source: []const u8, destination: []const u8) CoreCtx.CopyError!void {
+    const data = (ctx(p).files.get(source) orelse return error.FileNotFound).bytes;
+    ctx(p).put(destination, data, false) catch return error.IoError;
+}
 fn now(_: ?*anyopaque, _: std.Io) i128 {
     return 0;
 }
@@ -266,4 +303,56 @@ fn fetch(p: ?*anyopaque, _: std.Io, a: A, url: []const u8, dest: []const u8, max
         self.put(path, bytes, false) catch return error.OutOfMemory;
     }
     return size;
+}
+
+test "compiler artifact envelopes roundtrip without source files" {
+    var source: Workspace = .{};
+    defer source.deinit();
+    try source.put("/workspace/Geometry.roc", "module [area]\narea = 1", false);
+    try source.put("/cache/compat-test/can/aa/example.bin", "opaque-canonicalized-module", true);
+    const stream = try source.takeUpdates();
+    defer gpa.free(stream);
+    var restored: Workspace = .{};
+    defer restored.deinit();
+    try restored.importCache(stream);
+    try std.testing.expectEqualStrings("opaque-canonicalized-module", restored.files.get("/cache/compat-test/can/aa/example.bin").?.bytes);
+    try std.testing.expect(!restored.files.contains("/workspace/Geometry.roc"));
+    const empty = try source.takeUpdates();
+    defer gpa.free(empty);
+    try std.testing.expectEqualStrings("RLC1", empty);
+    try std.testing.expectError(error.InvalidCache, restored.importCache("RLC1\x01\x00\x00\x00"));
+}
+
+test "workspace content identity ignores compiler artifacts and detects imported source changes" {
+    var fs: Workspace = .{};
+    defer fs.deinit();
+    try fs.put("/workspace/Geometry.roc", "module [area]\narea = 1", false);
+    const before = try fs.contentIdentity(gpa);
+    defer gpa.free(before);
+    try fs.put("/cache/compat-test/mod/00/entry.bin", "checked-artifact", true);
+    const after_cache = try fs.contentIdentity(gpa);
+    defer gpa.free(after_cache);
+    try std.testing.expectEqualStrings(before, after_cache);
+    try fs.put("/workspace/Geometry.roc", "module [area]\narea = 2", false);
+    const after_edit = try fs.contentIdentity(gpa);
+    defer gpa.free(after_edit);
+    try std.testing.expect(!std.mem.eql(u8, before, after_edit));
+}
+
+test "package extraction verifies content hashes before publishing" {
+    var fs: Workspace = .{};
+    defer fs.deinit();
+    const fixture = unbundle.test_support;
+    const bytes = try fixture.archive(gpa, &.{ .{ .name = "main.roc", .data = "package [Geometry] {}\n" }, .{ .name = "Geometry.roc", .data = "module [answer]\nanswer = 42\n" } });
+    defer gpa.free(bytes);
+    var hash_buffer: [44]u8 = undefined;
+    const hash = fixture.hashName(bytes, &hash_buffer);
+    const url = try std.fmt.allocPrint(gpa, "https://packages.example.test/{s}.tar.zst", .{hash});
+    defer gpa.free(url);
+    try fs.installPackage(url, bytes);
+    const file = try std.fmt.allocPrint(gpa, "/bundles/{s}/Geometry.roc", .{hash});
+    defer gpa.free(file);
+    try std.testing.expectEqualStrings("module [answer]\nanswer = 42\n", fs.files.get(file).?.bytes);
+    bytes[bytes.len - 1] ^= 1;
+    try std.testing.expectError(error.HashMismatch, fs.installPackage(url, bytes));
 }

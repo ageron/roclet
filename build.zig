@@ -12,6 +12,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode (default ReleaseFast)") orelse .fast;
     const roc = b.dependency("roc", .{ .target = b.graph.host, .optimize = optimize });
     const native = adapter(b, roc, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
+    b.step("native-adapter", "Build only the native engine").dependOn(&native.step);
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const wasm = adapter(b, roc, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
     wasm.entry = .disabled;
@@ -64,6 +65,14 @@ pub fn build(b: *std.Build) void {
     b.step("package", "Package the verified offline Roclet and host-platform headless runner").dependOn(&package.step);
     serve.step.dependOn(&offline.step);
 
+    const workspace_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("compiler-adapter/workspace.zig"), .target = b.graph.host, .optimize = .safe }) });
+    inline for (.{ "ctx", "unbundle", "build_options" }) |module| workspace_tests.root_module.addImport(module, roc.module(module));
+    b.step("test-workspace", "Verify compiler artifact persistence and package extraction").dependOn(&b.addRunArtifact(workspace_tests).step);
+    const fixture_tool = b.addExecutable(.{ .name = "roclet-package-fixture", .root_module = b.createModule(.{ .root_source_file = b.path("tools/package-fixture.zig"), .target = b.graph.host, .optimize = .small }) });
+    const fixture_run = b.addRunArtifact(fixture_tool);
+    fixture_run.setCwd(b.path("."));
+    fixture_run.has_side_effects = true;
+    b.step("package-fixture", "Write a verified local package for browser integration tests").dependOn(&fixture_run.step);
     const unit_step = b.step("test-unit", "Test the snapshot protocol and host utilities");
     inline for (.{ "compiler-adapter/snapshot.zig", "compiler-adapter/document.zig", "tools/build-tool.zig", "tools/serve.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });

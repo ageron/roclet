@@ -110,7 +110,7 @@ fn invoke(gpa: Allocator, arena: Allocator, s: Snapshot, source: []const u8, roo
     const request = try json(arena, .{ .protocol = @as(u32, 1), .source = full_source, .user_bytes = source.len, .check_only = root == null, .rich_output = rich, .modules = s.modules, .app_header = s.app_header });
     const bytes = try compile(request);
     defer gpa.free(bytes);
-    const response = try std.json.parseFromSliceLeaky(RawResponse, arena, bytes, .{ .allocate = .alloc_always });
+    const response = try std.json.parseFromSliceLeaky(RawResponse, arena, bytes, .{ .allocate = .alloc_always, .ignore_unknown_fields = true });
     if (response.protocol != 1) return error.ProtocolMismatch;
     return response;
 }

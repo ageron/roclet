@@ -27,7 +27,10 @@ fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: [
     if (binaries.len != 2 and binaries.len != 3) return error.InvalidArguments;
     const mode = if (binaries.len == 3) binaries[2] else lock.nativeOptimize;
     try cwd.copyFile(binaries[0], cwd, try path(gpa, root, "artifacts/roclet-native"), io, .{});
-    try cwd.copyFile(binaries[1], cwd, try path(gpa, root, "artifacts/roclet.wasm"), io, .{});
+    try cwd.copyFile(binaries[1], cwd, try path(gpa, root, "artifacts/roclet-profile.wasm"), io, .{});
+    const wasm = try stripWasmDebug(gpa, try read(gpa, io, binaries[1]));
+    defer gpa.free(wasm);
+    try cwd.writeFile(io, .{ .sub_path = try path(gpa, root, "artifacts/roclet.wasm"), .data = wasm });
     var artifacts: std.json.ObjectMap = .empty;
     for ([_][]const u8{ "roclet-native", "roclet.wasm" }) |name| {
         const bytes = try read(gpa, io, try path(gpa, root, try std.fmt.allocPrint(gpa, "artifacts/{s}", .{name})));
@@ -78,4 +81,51 @@ pub fn main(init: std.process.Init) !void {
     if (std.mem.eql(u8, args[1], "publish")) return publish(gpa, init.io, root, lock, args[3..]);
     if (std.mem.eql(u8, args[1], "check")) return check(gpa, init.io, root);
     return error.InvalidArguments;
+}
+
+// Keep full DWARF in the adjacent profiling artifact; browsers load only code,
+// data and function names. This does not require an external wasm-strip tool.
+fn readLeb(bytes: []const u8, at: *usize) !u32 {
+    var result: u32 = 0;
+    var shift: u5 = 0;
+    for (0..5) |i| {
+        if (at.* == bytes.len) return error.InvalidWasm;
+        const byte = bytes[at.*];
+        at.* += 1;
+        if (i == 4 and byte > 15) return error.InvalidWasm;
+        result |= @as(u32, byte & 127) << shift;
+        if (byte < 128) return result;
+        if (i < 4) shift += 7;
+    }
+    return error.InvalidWasm;
+}
+fn stripWasmDebug(a: Allocator, bytes: []const u8) ![]u8 {
+    if (bytes.len < 8 or !std.mem.eql(u8, bytes[0..8], "\x00asm\x01\x00\x00\x00")) return error.InvalidWasm;
+    var out: std.Io.Writer.Allocating = .init(a);
+    errdefer out.deinit();
+    try out.writer.writeAll(bytes[0..8]);
+    var at: usize = 8;
+    while (at < bytes.len) {
+        const start = at;
+        const kind = bytes[at];
+        at += 1;
+        const size: usize = try readLeb(bytes, &at);
+        if (size > bytes.len - at) return error.InvalidWasm;
+        const end = at + size;
+        var skip = false;
+        if (kind == 0) {
+            const name_len: usize = try readLeb(bytes[0..end], &at);
+            if (name_len > end - at) return error.InvalidWasm;
+            skip = std.mem.startsWith(u8, bytes[at..][0..name_len], ".debug_");
+        }
+        if (!skip) try out.writer.writeAll(bytes[start..end]);
+        at = end;
+    }
+    return out.toOwnedSlice();
+}
+test "WASM publication removes DWARF but keeps named code" {
+    const input = "\x00asm\x01\x00\x00\x00" ++ "\x00\x0a\x08.debug_x!" ++ "\x00\x06\x04name!";
+    const output = try stripWasmDebug(std.testing.allocator, input);
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("\x00asm\x01\x00\x00\x00\x00\x06\x04name!", output);
 }

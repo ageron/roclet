@@ -193,8 +193,9 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     build_env.filesystem = echo_ctx.io();
     var event_context: u8 = 0;
     build_env.compile_time_event_callback = .{ .context = &event_context, .notify = observeCompileTime };
-    var cache = compile.CacheManager.init(allocator, .{ .enabled = true, .cache_dir = "/cache", .roc_ctx = echo_ctx.io() }, echo_ctx.io());
-    build_env.setCacheManager(&cache);
+    const cache = try allocator.create(compile.CacheManager);
+    cache.* = compile.CacheManager.init(allocator, .{ .enabled = true, .cache_dir = "/cache", .roc_ctx = echo_ctx.io() }, echo_ctx.io());
+    build_env.setCacheManager(cache);
     defer {
         last_cache_stats = cache.getStats();
     }

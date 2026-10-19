@@ -247,11 +247,12 @@ pub fn process(bytes: []const u8) ![]u8 {
     Workspace.global.clearRequired();
     const probe = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch return processSource(bytes);
     defer probe.deinit();
+    if (probe.value == .object) try mountFiles(probe.value, gpa);
     if (probe.value == .object and probe.value.object.contains("operation")) {
         return processDocument(bytes, probe.value);
     }
     if (probe.value == .object and probe.value.object.contains("cells")) {
-        return @import("snapshot.zig").evaluate(gpa, bytes, processSource);
+        return withRequiredPackages(try @import("snapshot.zig").evaluate(gpa, bytes, processSource));
     }
     return processSource(bytes);
 }
@@ -419,11 +420,6 @@ fn processDocument(bytes: []const u8, value: std.json.Value) ![]u8 {
     defer storage.deinit();
     const a = storage.allocator();
     var request = try std.json.parseFromSliceLeaky(std.json.Value, a, bytes, .{});
-    if (request.object.get("files")) |files| if (files == .array) for (files.array.items) |file| {
-        const path = file.object.get("path").?.string;
-        const full = if (std.mem.startsWith(u8, path, "/")) path else try std.mem.concat(a, u8, &.{ "/workspace/", path });
-        try Workspace.global.put(full, file.object.get("source").?.string, false);
-    };
     try request.object.put(a, "workspaceFingerprint", .{ .string = try Workspace.global.contentIdentity(a) });
     if (request.object.getPtr("reactivity")) |reactivity| if (reactivity.* == .object and reactivity.object.get("previous") == null) {
         if (previous_graph) |graph| try reactivity.object.put(a, "previous", try std.json.parseFromSliceLeaky(std.json.Value, a, graph, .{}));
@@ -441,4 +437,25 @@ fn processDocument(bytes: []const u8, value: std.json.Value) ![]u8 {
         try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, Workspace.global.required.items), .{}));
     }
     return @import("snapshot.zig").json(gpa, parsed);
+}
+
+fn mountFiles(request: std.json.Value, a: std.mem.Allocator) !void {
+    if (request.object.get("files")) |files| if (files == .array) for (files.array.items) |file| {
+        const path = file.object.get("path").?.string;
+        const full = if (std.mem.startsWith(u8, path, "/")) path else try std.mem.concat(a, u8, &.{ "/workspace/", path });
+        defer if (full.ptr != path.ptr) a.free(full);
+        try Workspace.global.put(full, file.object.get("source").?.string, false);
+    };
+}
+
+fn withRequiredPackages(result: []u8) ![]u8 {
+    if (Workspace.global.required.items.len == 0) return result;
+    defer gpa.free(result);
+    var temporary = std.heap.ArenaAllocator.init(gpa);
+    defer temporary.deinit();
+    const a = temporary.allocator();
+    var parsed = try std.json.parseFromSliceLeaky(std.json.Value, a, result, .{});
+    const json = @import("snapshot.zig").json;
+    try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try json(a, Workspace.global.required.items), .{}));
+    return json(gpa, parsed);
 }
