@@ -29,8 +29,11 @@ fn artifactHash(io: std.Io, file: []const u8) !struct { bytes: u64, sha256: [64]
     var buffer: [64 * 1024]u8 = undefined;
     var size: u64 = 0;
     while (true) {
-        const n = try f.readStreaming(io, &.{&buffer});
-        if (n == 0) break;
+        const n = f.readStreaming(io, &.{&buffer}) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
+        if (n == 0) continue;
         hasher.update(buffer[0..n]);
         size += n;
     }
@@ -145,4 +148,19 @@ test "WASM publication removes DWARF but keeps named code" {
     const output = try stripWasmDebug(std.testing.allocator, input);
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("\x00asm\x01\x00\x00\x00\x00\x06\x04name!", output);
+}
+
+test "streaming artifact hashes include the complete file and stop at EOF" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const io = std.testing.io;
+    const data = try std.testing.allocator.alloc(u8, 128 * 1024 + 7);
+    defer std.testing.allocator.free(data);
+    for (data, 0..) |*byte, i| byte.* = @truncate(i);
+    try tmp.dir.writeFile(io, .{ .sub_path = "artifact", .data = data });
+    const name = try tmp.dir.realPathFileAlloc(io, "artifact", std.testing.allocator);
+    defer std.testing.allocator.free(name);
+    const result = try artifactHash(io, name);
+    try std.testing.expectEqual(data.len, result.bytes);
+    try std.testing.expectEqualStrings(&digest(data), &result.sha256);
 }
