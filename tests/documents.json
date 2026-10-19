@@ -2703,5 +2703,23 @@
         null
       ]
     }
+  },
+  {
+    "name": "workspace: missing module preserves its file diagnostic",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "compact": true,
+      "source": "# %%\nimport Geometry\nout_value = Geometry.value",
+      "files": []
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": [],
+      "evaluation_diagnostic_contains": [
+        "/workspace/Geometry.roc"
+      ]
+    }
   }
 ]

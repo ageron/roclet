@@ -105,6 +105,16 @@ pub const Suite = struct {
             try expect(values.len == expected.array.items.len);
             for (values, expected.array.items) |actual, value_text| try expect(eq(str(actual, "text"), value_text.string));
         }
+        if (wanted.object.get("evaluation_diagnostic_contains")) |expected| {
+            const diagnostics = field(field(result, "evaluation"), "diagnostics").array.items;
+            for (expected.array.items) |snippet| {
+                var found = false;
+                for (diagnostics) |diagnostic| if (std.mem.find(u8, str(diagnostic, "message"), snippet.string) != null) {
+                    found = true;
+                };
+                try expect(found);
+            }
+        }
         if (wanted.object.get("root_errors")) |expected| {
             const errors = field(field(result, "evaluation"), "root_errors").array.items;
             try expect(errors.len == expected.array.items.len);
