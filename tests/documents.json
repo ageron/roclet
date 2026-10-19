@@ -2682,5 +2682,26 @@
         "out_bad"
       ]
     }
+  },
+  {
+    "name": "workspace: an explicit Display module remains ordinary",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "import Display\n# %%\nDisplay.({text: \"custom\"})",
+      "files": [
+        {
+          "path": "/workspace/Display.roc",
+          "source": "Display := { text : Str }"
+        }
+      ]
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        null
+      ]
+    }
   }
 ]

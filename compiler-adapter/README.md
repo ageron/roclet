@@ -52,6 +52,9 @@ notebook. The Studio stores relative portable paths and translates them into
 workspace paths. It sends only changed files and explicit removals, remounting the
 full desired set after worker replacement. **File → Project files** edits these
 sources; portable Roclet bundles include them once under `project/`.
+Nested module paths use slash imports such as `import Shapes/Wall`. UTF-8 text
+files use Roc's file import, for example
+`import "data/message.txt" as message : Str`.
 
 Packages use ordinary Roc app-header declarations and compiler-resolved content
 identities. A synchronous compile can return `packagesRequired` containing URLs.

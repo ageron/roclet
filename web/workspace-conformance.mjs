@@ -68,6 +68,10 @@ try {
   }
   const missingText=await textSession.request({...textRequest,files:[]});assert.notEqual(missingText.status,'ok');assert.deepEqual(missingText.values,[]);textSession.stop();
   report('PASS UTF-8 text file imports update through the compiler filesystem and missing files clear previous values');
+  const customDisplaySession=new DocumentSession(bytes);
+  const customDisplay=await customDisplaySession.request({...request,requestId:'custom-display',cells:[{key:'custom',source:'import Display\nout_1 = Display.({text: "custom"})'}],files:[{path:'/workspace/Display.roc',source:'Display := { text : Str }'}]});
+  assert.equal(customDisplay.status,'ok');assert(customDisplay.values[0].text.includes('custom'));assert.equal(customDisplay.values[0].display,undefined);customDisplaySession.stop();
+  report('PASS an explicit workspace Display module overrides the default library and remains ordinary inspected text');
   raw.putFile('/workspace/Fresh.roc',files[0].source);assert.equal(raw(request).status,'ok');
   const coldStats=raw.cacheStats();
   const artifacts=raw.takeCacheUpdates();

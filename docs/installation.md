@@ -98,6 +98,11 @@ Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
   syntax. Browser downloads require the package server to allow CORS. Verified
   packages are cached locally for reuse without a network connection.
 
+For example, attach `Shapes/Wall.roc` and import it with `import Shapes/Wall`.
+A text attachment can be imported with
+`import "data/message.txt" as message : Str`. Editing or removing either kind of
+file invalidates the results that depend on the workspace.
+
 The [demos](../demos/README.md) have **Open demo** links for the hosted app.
 For local use, download the source file and open it in Roclet.
 
