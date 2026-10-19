@@ -14,7 +14,7 @@ fn json(gpa: std.mem.Allocator, value: anytype) ![]const u8 {
     return w.toOwnedSlice();
 }
 fn read(gpa: std.mem.Allocator, io: std.Io, root: []const u8, relative: []const u8) ![]const u8 {
-    return cwd.readFileAlloc(io, try std.fs.path.join(gpa, &.{ root, relative }), gpa, .limited(64 * 1024 * 1024));
+    return cwd.readFileAlloc(io, try std.fs.path.join(gpa, &.{ root, relative }), gpa, .unlimited);
 }
 fn write(gpa: std.mem.Allocator, io: std.Io, root: []const u8, relative: []const u8, bytes: []const u8) !void {
     const path = try std.fs.path.join(gpa, &.{ root, relative });

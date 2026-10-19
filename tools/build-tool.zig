@@ -40,8 +40,9 @@ fn artifactHash(io: std.Io, file: []const u8) !struct { bytes: u64, sha256: [64]
 }
 fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: []const []const u8) !void {
     try cwd.createDirPath(io, try path(gpa, root, "artifacts"));
-    if (binaries.len != 2 and binaries.len != 3) return error.InvalidArguments;
-    const mode = if (binaries.len == 3) binaries[2] else lock.nativeOptimize;
+    if (binaries.len < 2 or binaries.len > 4) return error.InvalidArguments;
+    const native_mode = if (binaries.len >= 3) binaries[2] else lock.nativeOptimize;
+    const wasm_mode = if (binaries.len == 4) binaries[3] else if (binaries.len == 3) binaries[2] else lock.wasmOptimize;
     try cwd.copyFile(binaries[0], cwd, try path(gpa, root, "artifacts/roclet-native"), io, .{});
     try cwd.copyFile(binaries[1], cwd, try path(gpa, root, "artifacts/roclet-profile.wasm"), io, .{});
     const wasm = try stripWasmDebug(gpa, try read(gpa, io, binaries[1]));
@@ -62,8 +63,8 @@ fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: [
         .compilerRepository = lock.compilerRepository,
         .compilerCommit = lock.compilerCommit,
         .zigVersion = lock.zigVersion,
-        .nativeOptimize = mode,
-        .wasmOptimize = mode,
+        .nativeOptimize = native_mode,
+        .wasmOptimize = wasm_mode,
         .host = @tagName(@import("builtin").os.tag) ++ "-" ++ @tagName(@import("builtin").cpu.arch),
         .inputs = std.json.Value{ .object = input_hashes },
         .artifacts = std.json.Value{ .object = artifacts },
@@ -71,14 +72,14 @@ fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: [
 }
 fn check(gpa: Allocator, io: std.Io, root: []const u8) !void {
     const bytes = read(gpa, io, try path(gpa, root, "artifacts/manifest.json")) catch {
-        std.debug.print("Build the adapter first: zig build -Droc-source=/path/to/roc\n", .{});
+        std.debug.print("Prepare the compiler with sh tools/prepare-compiler.sh /path/to/roc, then run zig build\n", .{});
         return error.MissingAdapter;
     };
     const manifest = try std.json.parseFromSliceLeaky(std.json.Value, gpa, bytes, .{});
     for (inputs) |name| {
         const expected = manifest.object.get("inputs").?.object.get(name) orelse return error.OutdatedAdapter;
         if (!std.mem.eql(u8, expected.string, &digest(try read(gpa, io, try path(gpa, root, name))))) {
-            std.debug.print("Adapter inputs changed ({s}); rebuild with -Droc-source=/path/to/roc\n", .{name});
+            std.debug.print("Adapter inputs changed ({s}); rebuild with zig build\n", .{name});
             return error.OutdatedAdapter;
         }
     }
