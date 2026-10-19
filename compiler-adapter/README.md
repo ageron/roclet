@@ -75,8 +75,10 @@ files use Roc's file import, for example
 Packages use ordinary Roc app-header declarations and compiler-resolved content
 identities. A synchronous compile can return `packagesRequired` containing URLs.
 The worker downloads those archives asynchronously, asks Roc to validate their
-content hashes and unbundle them, then resumes compilation. Package servers must
-allow browser CORS. Verified archives are cached separately and can be restored
+content hashes and unbundle them, then resumes compilation. The configurable
+archive downloader uses the bundled server for GitHub releases; static hosts can
+select a separate HTTPS endpoint in `web/package-config.json`. Other package
+servers must allow browser CORS. Verified archives are cached separately and can be restored
 into a fresh worker without network access. JavaScript does not resolve Roc
 imports or implement another package manager.
 

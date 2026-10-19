@@ -76,7 +76,7 @@ pub fn build(b: *std.Build) void {
     fixture_run.has_side_effects = true;
     b.step("package-fixture", "Write a verified local package for browser integration tests").dependOn(&fixture_run.step);
     const unit_step = b.step("test-unit", "Test the snapshot protocol and host utilities");
-    inline for (.{ "compiler-adapter/snapshot.zig", "compiler-adapter/document.zig", "tools/build-tool.zig", "tools/serve.zig" }) |file| {
+    inline for (.{ "compiler-adapter/snapshot.zig", "compiler-adapter/document.zig", "tools/build-tool.zig", "tools/serve.zig", "tools/package-proxy.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
     }

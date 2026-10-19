@@ -587,6 +587,7 @@ try {
     ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
     ['weather', ['../demos/02-a-little-data.roc', 'Three days of weather.roc']],
     ['circle', ['../demos/03-circle.roc', 'A bigger circle.roc']],
+    ['meeting-windows', ['../demos/04-meeting-windows.roc', 'Find a free meeting slot.roc']],
     ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich outputs.roc']],
   ]);
   if (example) {

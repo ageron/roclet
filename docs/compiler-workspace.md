@@ -163,3 +163,9 @@ parity cases; all 196 complete document responses and 58 fresh-worker runs; all
 math contracts; 11 sharing/offline contracts; and the workspace/cache/package
 suite. Missing-module diagnostics passed in both retained and fresh workers.
 The benchmark and all final browser suites verified the WASM digest above.
+
+Subsequent [real-package browser validation](browser-package-validation.md)
+found that direct GitHub release downloads are blocked by CORS. The bundled
+server now provides a bounded, hash-verifying archive proxy. A configurable HTTPS
+endpoint supports static hosting; original package identities and browser
+compilation are preserved. See the validation report for the real-release checks.

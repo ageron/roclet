@@ -2,13 +2,16 @@ import { createWasmTransport } from '../compiler-adapter/wasm.mjs';
 import { BuildCache, compilerNamespace } from './build-cache.mjs';
 import { mountChanges } from './workspace.mjs';
 import { BrowserPackages } from './packages.mjs';
+import { configuredPackageFetch } from './package-download.mjs';
 let transport, cache, packages;
 async function initialize({bytes,module,compilerDigest}) {
   const instance=await createWasmTransport(module??bytes);
   if(instance.workspace) {
     const namespace=await compilerNamespace(bytes,instance.cacheIdentity(),compilerDigest);
     cache=new BuildCache(namespace);
-    packages=new BrowserPackages(new BuildCache(`${namespace}:packages`));
+    // Load downloader configuration only if an uncached package is requested.
+    let downloader;
+    packages=new BrowserPackages(new BuildCache(`${namespace}:packages`),{fetch:async(...args)=>(downloader??=await configuredPackageFetch())(...args)});
     if(!instance.importCache(await cache.load())) await cache.clear();
   }
   return instance;

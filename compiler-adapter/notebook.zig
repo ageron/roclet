@@ -263,7 +263,7 @@ pub fn run(opts: Options) !u8 {
     }
     if (current != null) engine.request_prepared_hits += 1;
     if (current == null) {
-        const buffer = try gpa.alignedAlloc(u8, .@"16", 256 * 1024 * 1024);
+        const buffer = try gpa.alignedAlloc(u8, .@"16", 512 * 1024 * 1024);
         errdefer gpa.free(buffer);
         const state = try gpa.create(State);
         errdefer gpa.destroy(state);

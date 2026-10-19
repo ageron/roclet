@@ -9,17 +9,22 @@ import {tmpdir} from 'node:os';
 const args=process.argv.slice(2),option=(key,fallback)=>{const i=args.indexOf(key);return i<0?fallback:args[i+1];};
 const root=resolve(import.meta.dirname,'..'),page=option('--page','web/workspace-conformance.html');
 const timeout=Number(option('--timeout','120000')),profile=await mkdtemp(resolve(tmpdir(),'roclet-browser-'));
+const networkLog=option('--network-log',null),requests=new Map(),networkFailures=[];
+const packageEndpoint=option('--package-endpoint',null);
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const types={'.mjs':'text/javascript','.js':'text/javascript','.wasm':'application/wasm','.html':'text/html; charset=utf-8','.json':'application/json','.css':'text/css','.svg':'image/svg+xml'};
 const server=createServer(async(req,res)=>{
   try {
+    if(packageEndpoint && new URL(req.url,'http://localhost').pathname==='/web/package-config.json') {
+      res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({endpoint:packageEndpoint}));return;
+    }
     const path=resolve(root,'.'+decodeURIComponent(new URL(req.url,'http://localhost').pathname));
     if(!path.startsWith(root+sep)) {res.writeHead(403);res.end();return;}
     const bytes=await readFile(path);res.writeHead(200,{'Content-Type':types[extname(path)]??'application/octet-stream','Cache-Control':'no-store'});res.end(bytes);
   } catch {res.writeHead(404);res.end();}
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-const base=`http://127.0.0.1:${server.address().port}`;
+const base=option('--base-url',`http://127.0.0.1:${server.address().port}`);
 const chrome=spawn(option('--chrome',process.env.CHROME_PATH??'google-chrome'),['--headless=new','--no-sandbox','--disable-gpu','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
 let startupError;chrome.on('error',error=>{startupError=error;});
 let stderr='';chrome.stderr.on('data',chunk=>{stderr+=chunk;});
@@ -43,6 +48,8 @@ try {
     const value=JSON.parse(data);
     if(value.id){const item=pending.get(value.id);pending.delete(value.id);value.error?item.reject(new Error(JSON.stringify(value.error))):item.resolve(value.result);}
     else if(value.method==='Runtime.exceptionThrown')exceptions.push(value.params.exceptionDetails.exception?.description??value.params.exceptionDetails.text);
+    else if(networkLog && value.method==='Network.requestWillBeSent')requests.set(value.params.requestId,{url:value.params.request.url,type:value.params.type});
+    else if(networkLog && value.method==='Network.loadingFailed')networkFailures.push({...requests.get(value.params.requestId),errorText:value.params.errorText,blockedReason:value.params.blockedReason,corsErrorStatus:value.params.corsErrorStatus});
   });
   const send=(method,params={})=>new Promise((resolve,reject)=>{pending.set(++id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
   const evaluate=async expression=>{
@@ -51,6 +58,7 @@ try {
     return result.result?.value;
   };
   await send('Page.enable');await send('Runtime.enable');
+  if(networkLog)await send('Network.enable');
   // Native focus events are required by editor and iframe UI contracts.
   // Headless Chrome otherwise changes activeElement in a background document
   // without dispatching those events.
@@ -76,6 +84,7 @@ try {
   }
   const screenshot=option('--screenshot',null);
   if(screenshot){const {data}=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});await writeFile(screenshot,Buffer.from(data,'base64'));console.log(`Screenshot: ${screenshot}`);}
+  if(networkLog)await writeFile(networkLog,JSON.stringify(networkFailures,null,2)+'\n');
   if(exceptions.length)throw new Error(exceptions.join('\n'));
 } finally {
   socket?.close();chrome.kill();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));

@@ -89,3 +89,18 @@ test('packages use compiler resolver URLs and persist only compiler-verified arc
   await assert.rejects(new BrowserPackages(cache,{fetch:async()=>new Response(new Uint8Array([0]))}).evaluate(transport,{}),/invalid archive or content hash/);
   assert.deepEqual(decodeCacheStream(await cache.load()),[]);
 });
+
+test('configured downloader routes GitHub releases while retaining other package URLs',async()=>{
+  const {configuredPackageFetch,githubPackagePath}=await import('../web/package-download.mjs');
+  const source='https://github.com/lukewilliamboswell/roc-time/releases/download/0.2.0/roc-time-7QH5VBiCwDLu3UkizpgB3FESJitahxR82Vgg2bWkJvHL.tar.zst';
+  const requested=[],configUrl=new URL('https://app.example/web/package-config.json');
+  const fetch=async(url,options)=>{requested.push({url:String(url),options});return String(url)===configUrl.href?Response.json({endpoint:'https://packages.example/api/packages/'}):new Response(new Uint8Array([1]));};
+  const download=await configuredPackageFetch({fetch,configUrl});
+  await download(source,{credentials:'omit'});
+  assert.equal(requested.at(-1).url,'https://packages.example/api/packages/lukewilliamboswell/roc-time/0.2.0/roc-time-7QH5VBiCwDLu3UkizpgB3FESJitahxR82Vgg2bWkJvHL.tar.zst');
+  await download('https://other.example/hash.tar.zst',{});assert.equal(requested.at(-1).url,'https://other.example/hash.tar.zst');
+  for(const url of ['https://github.com.evil.invalid/a/b/releases/download/v/x.tar.zst','https://github.com/a/b/releases/download/v/x.tar.zst?url=evil','https://github.com/a/b/releases/download/../x.tar.zst'])assert.equal(githubPackagePath(url),null);
+  await assert.rejects(configuredPackageFetch({configUrl,fetch:async()=>Response.json({endpoint:'http://remote.example/api/'})}),/HTTPS/);
+  const direct=await configuredPackageFetch({configUrl,fetch:async url=>String(url)===configUrl.href?Response.json({endpoint:null}):(requested.push({url:String(url)}),new Response())});
+  await direct(source,{});assert.equal(requested.at(-1).url,source);
+});
