@@ -1,4 +1,4 @@
-import {BuildCache,decodeCacheStream} from './build-cache.mjs';
+import {BuildCache,decodeCacheStream,compilerNamespace} from './build-cache.mjs';
 import {DocumentSession} from './document-session.mjs';
 import {createWasmTransport} from '../compiler-adapter/wasm.mjs';
 import {assert} from '../tests/harness.mjs';
@@ -57,6 +57,7 @@ try {
   assert.equal(restoredRaw(request).status,'ok');assert(restoredRaw.cacheStats().hits>0,'Restored compiler must use persisted build artifacts');
   report('PASS a fresh WASM instance uses restored compiler artifacts (compiler cache hits)');
   const packageUrl=new URL('../artifacts/FPCEjLpsoY5fJ6nDBCeJQ1s6aMTQjMWUYAVQu6QdNuzr.tar.zst',import.meta.url).href;
+  await new BuildCache(`${await compilerNamespace(bytes,raw.cacheIdentity())}:packages`).clear();
   const packageRequest={operation:'document',action:'evaluate',format:'roc',source:`app [] { geom: "${packageUrl}" }\n# %% id=package\nimport geom.Geometry\nGeometry.answer`};
   const packageSession=new DocumentSession(bytes),packaged=await packageSession.request(packageRequest);packageSession.stop();
   assert.equal(packaged.status,'ok');assert.equal(packaged.evaluation.values[0].text,'42');
