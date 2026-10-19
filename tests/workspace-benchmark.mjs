@@ -8,7 +8,7 @@ const measure=async(session,request)=>{
   const start=performance.now(),result=await session.request(request),roundTripMs=performance.now()-start;
   if(result.status!=='ok')throw new Error(JSON.stringify({status:result.status,diagnostics:result.model?.diagnostics,evaluation:result.evaluation}));
   assert(result.workspaceCache,'Benchmark requires the persistent compiler workspace');
-  return {result,sample:{roundTripMs,compilerMs:result.workerMs,outsideCompilerMs:roundTripMs-result.workerMs,
+  return {result,sample:{roundTripMs,workerMs:result.workerMs,outsideWorkerMs:roundTripMs-result.workerMs,
     originalRequestBytes:encoder.encode(JSON.stringify(request)).length,...result.transportMetrics,
     cacheHits:result.workspaceCache.hits,cacheMisses:result.workspaceCache.misses}};
 };
