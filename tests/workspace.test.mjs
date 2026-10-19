@@ -12,7 +12,7 @@ test('workspace sends only changed modules and removes deleted modules',()=>{
   const next=fileChanges(first.next,[{path:'/workspace/Geometry.roc',source:'area = 3'},{path:'/workspace/Other.roc',source:'x = 1'}]);
   assert.equal(next.patch.put.length,2);
   assert.deepEqual(fileChanges(next.next,[]).patch.drop,['/workspace/Geometry.roc','/workspace/Other.roc']);
-  for(const path of ['/workspace/../escape.roc','/packages/X.roc','Geometry.roc','/workspace/Main.roc']) assert.throws(()=>fileChanges(new Map(),[{path,source:''}]));
+  for(const path of ['/workspace/../escape.roc','/packages/X.roc','Geometry.roc','/workspace/Main.roc','/workspace/main.roc']) assert.throws(()=>fileChanges(new Map(),[{path,source:''}]));
   assert.throws(()=>mountChanges({workspace:false},first.patch),/Rebuild/);
 });
 
