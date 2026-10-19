@@ -1,17 +1,19 @@
 # Little Roclet demos
 
-Download a `.roc` file using GitHub's **Download raw file** button, then choose
-**File → Open** in Roclet. From a local checkout or release ZIP, open the file
-directly through that same menu.
+Click **Open demo** to start an editable copy in [Roclet](https://ageron.github.io/roclet/).
+Your changes stay in your browser; they don't modify the published example.
 
-| Notebook | Try this |
-|---|---|
-| [A result before its ingredients](01-reactivity.roc) | Change the number of guests, then move the cells around. |
-| [Three days of weather](02-a-little-data.roc) | Edit a record and watch a table recompute. |
-| [A bigger circle](03-circle.roc) | Double the radius; combine live results with equations. |
+| Notebook | Try this | |
+|---|---|---|
+| [A result before its ingredients](01-reactivity.roc) | Change the number of guests, then move the cells around. | [Open demo](https://ageron.github.io/roclet/web/studio.html?example=reactivity) |
+| [Three days of weather](02-a-little-data.roc) | Edit a record and watch a table recompute. | [Open demo](https://ageron.github.io/roclet/web/studio.html?example=weather) |
+| [A bigger circle](03-circle.roc) | Double the radius; combine live results with equations. | [Open demo](https://ageron.github.io/roclet/web/studio.html?example=circle) |
+
+You can also download any source file and open it with **File → Open** in a local
+or offline Roclet installation.
 
 For Markdown, tables, and an embedded image together, use
-**File → Rich outputs example** in the app.
+[open the rich outputs demo](https://ageron.github.io/roclet/web/studio.html?example=rich-outputs).
 
 These are small, editable examples, not screenshots. Keep experimenting, then
 use **Download a copy** to save your version. [Installation and offline use](../docs/installation.md).

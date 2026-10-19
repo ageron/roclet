@@ -14,8 +14,11 @@ Roclet runs Roc locally through WebAssembly—and keeps working offline.
 
 ## Try it
 
-Follow the [installation guide](docs/installation.md), then open
-**File → Rich outputs example**. Change `width` and see what happens.
+**[Open Roclet](https://ageron.github.io/roclet/)** — no installation needed.
+
+[Try the rich outputs demo](https://ageron.github.io/roclet/web/studio.html?example=rich-outputs),
+change `width`, and see what happens. The [installation guide](docs/installation.md)
+covers offline use and running locally.
 
 Or explore the [little demos](demos/README.md): a reactive calculation, a tiny
 weather dataset, and a mathematical notebook. Each takes just a few minutes.

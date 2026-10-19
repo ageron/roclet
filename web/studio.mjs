@@ -559,6 +559,24 @@ try {
   const dispose=studio.dispose.bind(studio);
   studio.dispose=()=>{highlighter.dispose();sourceEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
   bind(); await studio.initialize();
+  const example=new URL(location.href).searchParams.get('example');
+  const examples = new Map([
+    ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
+    ['weather', ['../demos/02-a-little-data.roc', 'Three days of weather.roc']],
+    ['circle', ['../demos/03-circle.roc', 'A bigger circle.roc']],
+    ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich outputs.roc']],
+  ]);
+  if (example) {
+    // Only bundled examples, never arbitrary URLs supplied by a query parameter.
+    clearTimeout(studio.timer);
+    try {
+      const entry=examples.get(example);if(!entry) throw new Error('Unknown example.');
+      const response=await fetch(entry[0]);if(!response.ok) throw new Error('Example is unavailable.');
+      await studio.open(await response.text(),entry[1]);
+      notice('Opened your own editable copy. Download a copy to keep your changes.');
+      const url=new URL(location.href);url.searchParams.delete('example');history.replaceState(null,'',url.pathname+url.search+url.hash);
+    } catch(error) {notice(`Example could not be opened: ${error.message}`);}
+  }
   const publication=new URL(location.href).searchParams.get('publication');
   if(publication==='published.roclet.zip') {
     // A fixed filename, never an arbitrary URL import; new copies never auto-run.

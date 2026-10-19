@@ -4,11 +4,9 @@ Roclet is an experimental alpha. Only Chrome has been tested so far.
 
 ## Use a hosted copy
 
-Open the Roclet address provided with the release in Chrome. Nothing needs to be
+Open **[ageron.github.io/roclet](https://ageron.github.io/roclet/)** in Chrome. Nothing needs to be
 installed: the compiler and editor run in your browser. The first visit downloads
 the compiler, so give it a moment to load.
-
-There is no public demo URL configured in this repository yet.
 
 Choose **File → Rich outputs example** for a first notebook. Change `width`, or
 create your own with **File → New notebook**. Use the insertion buttons between
@@ -89,8 +87,8 @@ Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
   Reports open directly and include math fonts. Interactive sites need a static server.
 - Bundles can include results, but imported results remain unverified until you run them.
 
-The [demos](../demos/README.md) are ordinary notebook files. Download one using
-GitHub's **Download raw file** button, then open it in Roclet.
+The [demos](../demos/README.md) have **Open demo** links for the hosted app.
+For local use, download the source file and open it in Roclet.
 
 Roclet's native runner accepts notebooks too:
 
@@ -104,22 +102,24 @@ itself; Roclet bundles include it automatically.
 
 ## Hosting on GitHub Pages
 
-Yes—Roclet is a static app, so GitHub Pages can host it. No execution server is
-needed. A project site normally lives at `https://<owner>.github.io/<repository>/`.
+The public app is **https://ageron.github.io/roclet/**. GitHub Pages serves the
+built static files from the `gh-pages` branch, with no execution server.
+The source code remains on `main`.
 
-Build with `zig build package`, then extract `zig-out/roclet.zip` into a clean
-publishing directory. Publish the extracted contents, not the ZIP or the source
-checkout: the compiled WASM is deliberately excluded from source control.
-Keep the `web/`, `artifacts/`, `compiler-adapter/`, and other bundled directories
-in their original relative positions. The native `roclet-serve` file can be
-omitted from a hosted site.
+To prepare an update, run `zig build package`. The resulting
+`zig-out/roclet-pages.zip` contains the complete static site, including the WASM
+compiler, offline assets, demos, a root redirect, and `.nojekyll`. It excludes
+native executables. Extract it into a clean checkout of the `gh-pages` branch,
+replace the previous site's files, commit, and push that branch. Do not publish
+the source checkout: compiled artifacts are intentionally ignored on `main`.
 
-Add an empty `.nojekyll` file to the publishing root. In the repository's
-**Settings → Pages**, choose your publishing branch/folder, or upload that directory
-with a Pages deployment workflow. Use HTTPS. The app address is
-`https://<owner>.github.io/<repository>/web/studio.html`.
+In **Settings → Pages**, use **Deploy from a branch → gh-pages → / (root)**.
+Keep HTTPS enabled and preserve all relative paths in the archive.
+Only publish a build you've tested; pushing source changes to `main` does not
+update the hosted site automatically.
 
-See GitHub's [Pages documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages).
-Before announcing, test that address in a fresh Chrome profile: open a demo,
-edit it, download it, and prepare/reopen offline. Deployment is a separate step;
-these instructions do not publish anything.
+After deployment, open the public app in Chrome, try the [demos](../demos/README.md),
+then check offline preparation. Existing offline users must close all Roclet tabs
+and reopen after the update is prepared.
+
+See GitHub's [Pages documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site).

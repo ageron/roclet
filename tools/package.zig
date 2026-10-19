@@ -103,6 +103,11 @@ pub fn main(init: std.process.Init) !void {
         try files.append(a, .{ .path = "README.txt", .data = instructions });
         try files.append(a, .{ .path = "roclet-serve", .data = try read(a, io, root, "zig-out/bin/roclet-serve") });
         for ([_][]const u8{ "docs/installation.md", "demos/README.md" }) |path| try files.append(a, .{ .path = path, .data = try read(a, io, root, path) });
+        var site: std.ArrayList(File) = .empty;
+        for (files.items) |file| if (!std.mem.eql(u8, file.path, "roclet-serve")) try site.append(a, file);
+        try site.append(a, .{ .path = ".nojekyll", .data = "" });
+        try site.append(a, .{ .path = "index.html", .data = "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Roclet</title><meta http-equiv=\"refresh\" content=\"0;url=web/studio.html\"><p><a href=\"web/studio.html\">Open Roclet</a></p><script>location.replace('web/studio.html'+location.search+location.hash)</script></html>" });
+        try write(a, io, root, "zig-out/roclet-pages.zip", try archive(a, site.items));
         const distribution = try archive(a, files.items);
         try write(a, io, root, "zig-out/roclet.zip", distribution);
         var runner: std.ArrayList(File) = .empty;
@@ -110,7 +115,7 @@ pub fn main(init: std.process.Init) !void {
         try runner.append(a, .{ .path = "README.txt", .data = "Roclet native runner\n\nRun: ./roclet run notebook.roc (or notebook.md).\nThis executable must match your operating system and architecture; see artifacts/manifest.json. The current native build is tested on macOS Apple Silicon.\nJSON stdout reports named values and diagnostics. Exit 0 is success; 1 is a notebook failure.\nLicensed under UPL-1.0; see LICENSE and THIRD_PARTY_NOTICES.md.\n" });
         for ([_][]const u8{ "LICENSE", "THIRD_PARTY_NOTICES.md", "artifacts/manifest.json", "compiler-adapter/ROC-LICENSE", "vendor/md4c/LICENSE.md" }) |path| try runner.append(a, .{ .path = path, .data = try read(a, io, root, path) });
         try write(a, io, root, "zig-out/roclet-headless.zip", try archive(a, runner.items));
-        std.debug.print("Packaged zig-out/roclet.zip and zig-out/roclet-headless.zip\n", .{});
+        std.debug.print("Packaged zig-out/roclet.zip, roclet-headless.zip and roclet-pages.zip\n", .{});
     }
     std.debug.print("Offline release: {d} verified assets\n", .{assets.items.len});
 }
