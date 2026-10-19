@@ -1,0 +1,45 @@
+{
+  "date": "2026-10-16",
+  "zigVersion": "0.17.0",
+  "nativePlatform": "macos-aarch64",
+  "sourceBuild": {
+    "command": "zig build test -Droc-source=/path/to/roc --summary all",
+    "result": "pass"
+  },
+  "zigUnitTests": {
+    "passed": 5,
+    "failed": 0
+  },
+  "nativeConformance": {
+    "passed": 36,
+    "failed": 0,
+    "cellPermutations": 21
+  },
+  "browser": {
+    "name": "Codex In-app Browser",
+    "unitTests": 5,
+    "nativeWasmParityCases": 36,
+    "cellPermutations": 21,
+    "result": "pass",
+    "workerCancellationRestartDeletion": "pass",
+    "inlineDebugDisplay": "pass",
+    "referenceManifestAndWasmHashVerified": true
+  },
+  "repeatedSourceBuild": {
+    "command": "zig build -Droc-source=/path/to/roc --summary all",
+    "preparedSourceReused": true,
+    "compilerBuildMilliseconds": 954,
+    "artifactHashesUnchanged": true
+  },
+  "standaloneCli": {
+    "command": "env -i PATH=/nonexistent ./zig-out/bin/roclet fixtures/debug.json",
+    "result": "pass"
+  },
+  "staticServer": {
+    "wasmContentType": "application/wasm",
+    "headStatus": 200,
+    "encodedTraversalStatus": 404,
+    "unsupportedPostStatus": 405
+  },
+  "rocCore": "unchanged; evaluated in native and WASM conformance cases"
+}

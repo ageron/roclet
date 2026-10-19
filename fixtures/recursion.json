@@ -1,0 +1,9 @@
+{
+  "name": "Typed recursive function",
+  "cells": [
+    { "key": "result", "source": "out_1 = factorial(5)" },
+    { "key": "function", "source": "factorial : U64 -> U64\nfactorial = |n| if n == 0 { 1 } else { n * factorial(n - 1) }" }
+  ],
+  "roots": ["out_1"],
+  "expected": ["120"]
+}

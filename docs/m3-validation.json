@@ -1,0 +1,56 @@
+{
+  "milestone": "M3 and editor polish",
+  "validatedAt": "2026-10-17T23:17:14.889517+00:00",
+  "compilerCommit": "38a3029aa71b239c79b380adab7e90d4a848df96",
+  "wasmSha256": "0f14948ea4d0c40d88b9e2272e7caf3a992e25cf573decc5e88ffc37251649dd",
+  "nativeSha256": "a9168133747e509404279b813274e5d5e168f96c8b0ac7f438f654aa9ae2e1d3",
+  "offlineRelease": {
+    "version": "8e49c7314dcf73a0d0ad02b3f373504239e8525bf533c13c6e9ea5e9e2a2760a",
+    "assets": 53,
+    "bytes": 16785058
+  },
+  "checks": {
+    "installedZigBuild": "passed",
+    "zigPackage": "passed",
+    "nativeCases": 36,
+    "cellPermutations": 21,
+    "documentContracts": 106,
+    "publicCliRocMarkdownParity": 2,
+    "browserUnitTests": 8,
+    "nativeWasmDocumentResponses": 180,
+    "freshDocumentWorkers": 45,
+    "studioContracts": 13,
+    "editorUiDesktop": 21,
+    "editorUiCompact390px": 21,
+    "m3Contracts": 11
+  },
+  "manual": [
+    "Prepared localhost:4175, stopped its dedicated server, closed and reopened Studio successfully.",
+    "Changed width from 5 to 9 with server unavailable; both outputs and debug recomputed to 27.0 and edit saved locally.",
+    "Requested notebook and full interactive-site exports with server unavailable; export status reported two result snapshots.",
+    "Independently decoded the browser-generated ZIP, verified its CRCs/member SHA-256 hashes, and ran its Roc source with the packaged native runner.",
+    "Imported that browser-generated bundle on a separate prepared origin while its server was unavailable; auto-run remained off, imported values were unverified, manual run reproduced two 15.0 values.",
+    "Prepared a new release on localhost:4176 while the previous version was active; UI reported waiting for tabs to close and the old DOM remained unchanged.",
+    "Stopped that server, closed Studio, reopened; observed the new release marker and recovered the saved draft.",
+    "Verified every extracted Studio runtime asset and ZIP CRC; packaged native runner returned named 15.0 outputs and attributed debug for both Roc and Markdown source.",
+    "Served the extracted distribution independently on localhost:4177; publication created an editable copy with unverified result/debug snapshots and manual run produced current named results.",
+    "Installed preview passed its isolated UI and M3 tests; production browser drafts were not edited by testing."
+  ],
+  "limitations": [
+    "Only the available in-app Chromium browser was exercised; Firefox, WebKit, and separate-profile validation remain release checks.",
+    "Network-unavailable testing stopped the dedicated localhost servers; it did not disable the user computer network globally.",
+    "Interactive sites require HTTPS or localhost. Static reports can open as files.",
+    "User attachments, external module/package resolution, direct file writes, PWA install promotion, and collaborative merging are not added in this increment.",
+    "Native distribution is macOS ARM64; native nontermination needs a job supervisor timeout."
+  ],
+  "packages": {
+    "roclet-studio.zip": {
+      "bytes": 17009255,
+      "sha256": "a6733f40e23a556a8235801ec4b0e5b51c604022c8ab79a22c9e9e79adf14060"
+    },
+    "roclet-headless.zip": {
+      "bytes": 50957813,
+      "sha256": "a130b0d741209c657feb16a2ebfeafaf077afda9951c9134a188667517556d4b"
+    }
+  }
+}

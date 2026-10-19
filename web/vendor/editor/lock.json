@@ -1,0 +1,218 @@
+{
+  "packages": [
+    {
+      "name": "@codemirror/state",
+      "version": "6.7.6",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@codemirror/state/-/state-6.7.6.tgz",
+      "integrity": "sha512-kAz+AncRtKuIknedxT1bq4XwXv4UowhbkHU1myPrtVb/jZtImWuV5BXzv5vK6i3kYACsdiZiQKFQQ5Mq7elW8w==",
+      "dependencies": {
+        "@marijn/find-cluster-break": "^1.0.0"
+      },
+      "slug": "codemirror-state",
+      "file": "codemirror-state.mjs",
+      "sha256": "cf4ffe7d177bf2c7c5da66c49be0811cc79a29e12cb658238876bbdcef12939c",
+      "licenseFile": "codemirror-state.LICENSE",
+      "licenseSha256": "05c6130cda97e7600ca91427a41e8a065efcf82365fc0293e7de80faec494c07"
+    },
+    {
+      "name": "@codemirror/view",
+      "version": "6.43.14",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@codemirror/view/-/view-6.43.14.tgz",
+      "integrity": "sha512-hC45YnmJNR1rz42OF57BLoQNFMV12/13drnvibDsR2quNDmldcb4WvYVV81hFQg56i9lcqQMEDqilhX2QDcGQQ==",
+      "dependencies": {
+        "crelt": "^1.0.6",
+        "style-mod": "^4.1.0",
+        "w3c-keyname": "^2.2.4",
+        "@codemirror/state": "^6.7.0"
+      },
+      "slug": "codemirror-view",
+      "file": "codemirror-view.mjs",
+      "sha256": "73339f0c64071b55fc2d24e69ad6527a37068c2465b1fec3a50726923f3b7ea5",
+      "licenseFile": "codemirror-view.LICENSE",
+      "licenseSha256": "05c6130cda97e7600ca91427a41e8a065efcf82365fc0293e7de80faec494c07"
+    },
+    {
+      "name": "@codemirror/commands",
+      "version": "6.11.1",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@codemirror/commands/-/commands-6.11.1.tgz",
+      "integrity": "sha512-O/4hG3SC1YwcmQ0d2UVNDs+AsaNWd1iHVxbTeEBuqH+6bExAiPK3iS/BvpY6rZGURALv4ZD3sIgcCmRvw3ehBg==",
+      "dependencies": {
+        "@lezer/common": "^1.1.0",
+        "@codemirror/view": "^6.27.0",
+        "@codemirror/state": "^6.7.0",
+        "@codemirror/language": "^6.0.0"
+      },
+      "slug": "codemirror-commands",
+      "file": "codemirror-commands.mjs",
+      "sha256": "395c41fb17d4966162e8d29106e438278123bc3a3fa1b11825debdf1523594a4",
+      "licenseFile": "codemirror-commands.LICENSE",
+      "licenseSha256": "05c6130cda97e7600ca91427a41e8a065efcf82365fc0293e7de80faec494c07"
+    },
+    {
+      "name": "@codemirror/language",
+      "version": "6.13.1",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@codemirror/language/-/language-6.13.1.tgz",
+      "integrity": "sha512-zfvU2r3TyylQLMj/te+5CnQ0rSqZi8B1oTCBbQkagcLW4Xc6imab6qN+pEJhsuNOLaJqiRyBXp9UhWA1DhVvDw==",
+      "dependencies": {
+        "@lezer/lr": "^1.0.0",
+        "style-mod": "^4.0.0",
+        "@lezer/common": "^1.5.0",
+        "@codemirror/view": "^6.23.0",
+        "@lezer/highlight": "^1.0.0",
+        "@codemirror/state": "^6.0.0",
+        "@codemirror/streamparser": "^6.0.0"
+      },
+      "slug": "codemirror-language",
+      "file": "codemirror-language.mjs",
+      "sha256": "3ee82597686d97904b1c0df409661c2e6386e206b9122ac309622e225a0075ff",
+      "licenseFile": "codemirror-language.LICENSE",
+      "licenseSha256": "05c6130cda97e7600ca91427a41e8a065efcf82365fc0293e7de80faec494c07"
+    },
+    {
+      "name": "@codemirror/search",
+      "version": "6.7.2",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@codemirror/search/-/search-6.7.2.tgz",
+      "integrity": "sha512-gUYkYhT2+n/+VGZ+8EzE5WFkYZUZYm1VOKDudIsNqh42uRVQJ0a6Yss9sdKT3MeOYfuL1N6AZA57oza0Oyr0LA==",
+      "dependencies": {
+        "crelt": "^1.0.5",
+        "@codemirror/view": "^6.37.0",
+        "@codemirror/state": "^6.0.0"
+      },
+      "slug": "codemirror-search",
+      "file": "codemirror-search.mjs",
+      "sha256": "1155a69fb8d6f56c1d644e3e93222348481d6b2df78d6bebcf3293fe209f3fd7",
+      "licenseFile": "codemirror-search.LICENSE",
+      "licenseSha256": "05c6130cda97e7600ca91427a41e8a065efcf82365fc0293e7de80faec494c07"
+    },
+    {
+      "name": "@lezer/markdown",
+      "version": "1.8.0",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@lezer/markdown/-/markdown-1.8.0.tgz",
+      "integrity": "sha512-X6w3A2NpyhdtGqTWRJB8gR4QDXBaFMbTOs780ZdZ15KKCfBXOQTKcB3Vr+W6tqJHVlealt53tLmHRvOqPTQgYA==",
+      "dependencies": {
+        "@lezer/common": "^1.5.0",
+        "@lezer/highlight": "^1.0.0"
+      },
+      "slug": "lezer-markdown",
+      "file": "lezer-markdown.mjs",
+      "sha256": "5d3e761ba9d49ba81ddf0f148c02196d3ede2d4aa2b76a939e454eb88cbfb12c",
+      "licenseFile": "lezer-markdown.LICENSE",
+      "licenseSha256": "54bd812a6d334e0c438b78a43cea74b67e882739fd3450115ddc7c52be5706c1"
+    },
+    {
+      "name": "@lezer/highlight",
+      "version": "1.2.5",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@lezer/highlight/-/highlight-1.2.5.tgz",
+      "integrity": "sha512-O1GMVKgtf5YspFaRzpmqkVgMtIk2HG9uMAbH6wdAIdNh3TVzCsch/+cRi+6l2//UGDKe6NB9BW3cvuR5ezMQ0w==",
+      "dependencies": {
+        "@lezer/common": "^1.3.0"
+      },
+      "slug": "lezer-highlight",
+      "file": "lezer-highlight.mjs",
+      "sha256": "8984bb2887a6354d3e5ac79bdd7e522948f1cee1dda16aac77d9473f10696d7c",
+      "licenseFile": "lezer-highlight.LICENSE",
+      "licenseSha256": "568902fb66eaf1f11750e966b33fd7b5d7c618e65af09f35ef843635bcf5f1ba"
+    },
+    {
+      "name": "@marijn/find-cluster-break",
+      "version": "1.0.4",
+      "module": "src/index.js",
+      "tarball": "https://registry.npmjs.org/@marijn/find-cluster-break/-/find-cluster-break-1.0.4.tgz",
+      "integrity": "sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==",
+      "dependencies": {},
+      "slug": "marijn-find-cluster-break",
+      "file": "marijn-find-cluster-break.mjs",
+      "sha256": "4e9e441fac9db54e09e4e3b1cb0b0393da207ebe943f2ff9efc577821fc03751",
+      "licenseFile": "marijn-find-cluster-break.LICENSE",
+      "licenseSha256": "9360b00fdd091f05c783b568bdd46c679c41b72415599252de98949462ea1acb"
+    },
+    {
+      "name": "crelt",
+      "version": "1.0.7",
+      "module": "index.js",
+      "tarball": "https://registry.npmjs.org/crelt/-/crelt-1.0.7.tgz",
+      "integrity": "sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA==",
+      "dependencies": {},
+      "slug": "crelt",
+      "file": "crelt.mjs",
+      "sha256": "924800defa2bf95a0bfd16dde589ecebbcd9e36b03635274da84968c77a3721e",
+      "licenseFile": "crelt.LICENSE",
+      "licenseSha256": "23852ebf6aef7fadffc92514b3c5df163a8651f2c3ed0dbb494cb49d93bd5de5"
+    },
+    {
+      "name": "style-mod",
+      "version": "4.1.4",
+      "module": "src/style-mod.js",
+      "tarball": "https://registry.npmjs.org/style-mod/-/style-mod-4.1.4.tgz",
+      "integrity": "sha512-XXWIQt633/EpAFx8aZDOTjBzrCaGmhvEQlQo6MVPfa2OzO2cWo+4hV9h+6UkHYlXGfy+ODXKUdP7Pthmcu5ATw==",
+      "dependencies": {},
+      "slug": "style-mod",
+      "file": "style-mod.mjs",
+      "sha256": "4bd6b34edda52f362553d33df7e3a10f31fbdc0c95125aabec89c4de6be80b0a",
+      "licenseFile": "style-mod.LICENSE",
+      "licenseSha256": "cb4474e26547397169061d3586c00022cda5330a1b64fa13e872319f3b63aff1"
+    },
+    {
+      "name": "w3c-keyname",
+      "version": "2.2.8",
+      "module": "index.js",
+      "tarball": "https://registry.npmjs.org/w3c-keyname/-/w3c-keyname-2.2.8.tgz",
+      "integrity": "sha512-dpojBhNsCNN7T82Tm7k26A6G9ML3NkhDsnw9n/eoxSRlVBB4CEtIQ/KTCLI2Fwf3ataSXRhYFkQi3SlnFwPvPQ==",
+      "dependencies": {},
+      "slug": "w3c-keyname",
+      "file": "w3c-keyname.mjs",
+      "sha256": "b649dec4f01c7c5eb05be4641b5b698c6938231ee50b38e17a2f0f822ca3df2e",
+      "licenseFile": "w3c-keyname.LICENSE",
+      "licenseSha256": "869c30f368eb08735e779027b9f4bc9fea2f39624351856aebe42741f0bc0884"
+    },
+    {
+      "name": "@lezer/common",
+      "version": "1.5.3",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@lezer/common/-/common-1.5.3.tgz",
+      "integrity": "sha512-H0iErY4e43LpXbYDyBci5W4v/RwTgGV3YzYOlJPiGZ8RY8w51kVE+xLn1tg3Z6UmSfyETvtsUK3r7YsgDQEI7Q==",
+      "dependencies": {},
+      "slug": "lezer-common",
+      "file": "lezer-common.mjs",
+      "sha256": "4f08d3cc772b63930aa424b5f75f41c244f2de98da43cd0d72e157a6cbff2dd5",
+      "licenseFile": "lezer-common.LICENSE",
+      "licenseSha256": "568902fb66eaf1f11750e966b33fd7b5d7c618e65af09f35ef843635bcf5f1ba"
+    },
+    {
+      "name": "@lezer/lr",
+      "version": "1.4.11",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@lezer/lr/-/lr-1.4.11.tgz",
+      "integrity": "sha512-UwgZcl1R66H2hDzBrA7kWyYmX6s8p5TQ+e/t7CuvgCtBEPxbEPaHYHu+pJBvTvDotEJpuQkJjbXuHiw5Cixxgw==",
+      "dependencies": {
+        "@lezer/common": "^1.0.0"
+      },
+      "slug": "lezer-lr",
+      "file": "lezer-lr.mjs",
+      "sha256": "81b041bec6702785b5e858d72ec52f8169094181a9aa8cb35ea178e34fd59538",
+      "licenseFile": "lezer-lr.LICENSE",
+      "licenseSha256": "568902fb66eaf1f11750e966b33fd7b5d7c618e65af09f35ef843635bcf5f1ba"
+    },
+    {
+      "name": "@codemirror/streamparser",
+      "version": "6.0.0",
+      "module": "dist/index.js",
+      "tarball": "https://registry.npmjs.org/@codemirror/streamparser/-/streamparser-6.0.0.tgz",
+      "integrity": "sha512-JTFPF6xrfjt0mnfGPgzcLiMwYmvIyNaoizp8BYzv8FE8KrT6GBGDZ190rtt+O7Wke3gG/MFHyiY9YGNeimof4w==",
+      "dependencies": {},
+      "slug": "codemirror-streamparser",
+      "file": "codemirror-streamparser.mjs",
+      "sha256": "03b1109bc091c1f70e34abbd6161cd1675280a10ac5d26fffdede446076e4bb6",
+      "licenseFile": "codemirror-streamparser.LICENSE",
+      "licenseSha256": "05c6130cda97e7600ca91427a41e8a065efcf82365fc0293e7de80faec494c07"
+    }
+  ],
+  "javascriptBytes": 1166035
+}

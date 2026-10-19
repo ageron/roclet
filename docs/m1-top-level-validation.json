@@ -1,0 +1,79 @@
+{
+  "status": "pass",
+  "validatedAt": "2026-10-16T20:45:09.376646+00:00",
+  "manifest": {
+    "protocol": 1,
+    "compilerRepository": "https://github.com/roc-lang/roc",
+    "compilerCommit": "38a3029aa71b239c79b380adab7e90d4a848df96",
+    "zigVersion": "0.17.0",
+    "nativeOptimize": "ReleaseSmall",
+    "wasmOptimize": "ReleaseSmall",
+    "host": "macos-aarch64",
+    "inputs": {
+      "build.zig": "78d0f015ee4e717001dfcfc56c49a8faf24a5521300080496b262a09c91b298a",
+      "tools/build-tool.zig": "78e4082405a64a455455789abb990a8d2f2449ffa23269a95fecf23f6421a6d6",
+      "compiler.lock.json": "d0ab6cb4e06ec21f5f0cfa42171726f00ac88f970cde5043e2baf4d4e31989c6",
+      "compiler-adapter/bridge.zig": "9140f7c73d79e6e1e3391e7707d99646a5635ef1557128c87e5ca3670edad756",
+      "compiler-adapter/native.zig": "78ccf78854217265d3f7436b5cd99cd0998e623cd55f06ec23e6ad936ef0d711",
+      "compiler-adapter/snapshot.zig": "40da6bf374b651422db426885ad145209d605341bb618c887f6f16538dac4991",
+      "compiler-adapter/overlay.json": "795d18932002bb5eb0ec1277f89a927648effbdc99c720102b6b0d19d56ae745",
+      "compiler-adapter/syntax.zig": "728efa0c17a0f772cb61fc27f9b289ad99a89c244dba531df5d7384f90aafe96",
+      "compiler-adapter/document.zig": "dbb300ac44d8a199d520fc714a58fb27a8327ed52a84b655ece45c4614faa472",
+      "core/Document.roc": "7a82fde573fc97b3d83ed92334ba067ec3877ee0e8cbb483cfece52eccaf060a",
+      "vendor/md4c/md4c.c": "22f5a470593f6b800d11f9279155361b1d09c23c2d866fe572cd1ec7adbfd502",
+      "vendor/md4c/md4c.h": "4efd19bf7ec270691d5b4189f496886e421768a814b5e817eb945aa85e859f18",
+      "vendor/md4c/roclet-md.h": "a8dc345d23b0f118ab645e7c51773c0a3ee2a7a135d4d78b901fdd0067060006"
+    },
+    "artifacts": {
+      "roclet-native": {
+        "bytes": 50931848,
+        "sha256": "34bf348f975fd43bc4105c7e22f19fd415c2d62aeff8be9c017547846c273f89"
+      },
+      "roclet.wasm": {
+        "bytes": 15441942,
+        "sha256": "3da84d3840dd72e6010569315e557e33d2bd8890045c8981f1ae661723716bd2"
+      }
+    }
+  },
+  "changes": [
+    "Only final expressions extend ordinary top-level Roc syntax.",
+    "Top-level dbg is rejected and preserved without execution.",
+    "Nested/function dbg remains supported.",
+    "Observation wrapper generation and restoration are removed.",
+    "Generated output uses echo!(\"${Str.inspect(cell_result)}\\n\") in cell presentation order."
+  ],
+  "native": {
+    "command": "zig build test",
+    "exitCode": 0,
+    "documentContracts": 60,
+    "documentParityRequests": 90,
+    "compilerCases": 36,
+    "cellPermutations": 21,
+    "zigUnitTests": 5
+  },
+  "browser": {
+    "unitTests": 8,
+    "compilerParityCases": 36,
+    "documentParityCases": 90,
+    "freshWorkerRuns": 14,
+    "editingWorkflow": "pass",
+    "topLevelDbgDiagnostic": "pass",
+    "blockLocalDbgAndResult": "pass",
+    "generatedExportPreview": "pass",
+    "wallResult": "15.0"
+  },
+  "ordinaryRocExport": {
+    "status": "pass",
+    "stdout": "15.0\n"
+  },
+  "interpolationSyntaxProbe": {
+    "plainBraces": "literal text",
+    "dollarBraces": "interpolated value"
+  },
+  "browserSourceHashes": {
+    "web/formats.html": "019818c09da00f07a420678cb2a42496445ebb66cd20d817282c4167af96eab7",
+    "web/document-conformance.mjs": "9726990c8c5e3983d56a9d79c0a761891ec24c15076c0876051afc0969bd7cfe",
+    "web/document-session.mjs": "d33c98e7bcdbbe462aef227a4adcb80a6ba3ea7d86fcc5fcdcfffc0c96cf5866",
+    "web/formats.mjs": "bfb281401d286f7357a2cb0f09cc505a7b60f02b667fc24b5fb6c8b9ccb7bfd3"
+  }
+}

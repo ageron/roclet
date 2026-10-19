@@ -1,0 +1,98 @@
+{
+  "milestone": "M1",
+  "validatedAt": "2026-10-16T11:00:37.236949+00:00",
+  "status": "pass",
+  "manifest": {
+    "protocol": 1,
+    "compilerRepository": "https://github.com/roc-lang/roc",
+    "compilerCommit": "38a3029aa71b239c79b380adab7e90d4a848df96",
+    "zigVersion": "0.17.0",
+    "nativeOptimize": "ReleaseSmall",
+    "wasmOptimize": "ReleaseSmall",
+    "host": "macos-aarch64",
+    "inputs": {
+      "build.zig": "78d0f015ee4e717001dfcfc56c49a8faf24a5521300080496b262a09c91b298a",
+      "tools/build-tool.zig": "78e4082405a64a455455789abb990a8d2f2449ffa23269a95fecf23f6421a6d6",
+      "compiler.lock.json": "d0ab6cb4e06ec21f5f0cfa42171726f00ac88f970cde5043e2baf4d4e31989c6",
+      "compiler-adapter/bridge.zig": "d5e90c3682b9b25c82155cab167a24e0bd537bd2a03f2a1ed2ad006197bfa371",
+      "compiler-adapter/native.zig": "78ccf78854217265d3f7436b5cd99cd0998e623cd55f06ec23e6ad936ef0d711",
+      "compiler-adapter/snapshot.zig": "40da6bf374b651422db426885ad145209d605341bb618c887f6f16538dac4991",
+      "compiler-adapter/overlay.json": "53a9489a9e246823b650f197cab4107dd77a468976e717360dbb43923be83c5d",
+      "compiler-adapter/syntax.zig": "728efa0c17a0f772cb61fc27f9b289ad99a89c244dba531df5d7384f90aafe96",
+      "compiler-adapter/document.zig": "f2d17a8165b9964eaa38ea19905bb41f35949c5d3132d58d411398c14af5e93e",
+      "core/Document.roc": "d1ad379d087ea88726c0fb993ff816e79fea08130c83d4057b1613173d2efdce",
+      "vendor/md4c/md4c.c": "22f5a470593f6b800d11f9279155361b1d09c23c2d866fe572cd1ec7adbfd502",
+      "vendor/md4c/md4c.h": "4efd19bf7ec270691d5b4189f496886e421768a814b5e817eb945aa85e859f18",
+      "vendor/md4c/roclet-md.h": "a8dc345d23b0f118ab645e7c51773c0a3ee2a7a135d4d78b901fdd0067060006"
+    },
+    "artifacts": {
+      "roclet-native": {
+        "bytes": 50930408,
+        "sha256": "567a670a808aaebf5299b1a8461ee184ca70680113e70b705772b81b58982e32"
+      },
+      "roclet.wasm": {
+        "bytes": 15427629,
+        "sha256": "adec85a01b3c4297c48345d3062e83cf6ae274895a68017370d202cb3ec922ba"
+      }
+    }
+  },
+  "browserSourceHashes": {
+    "compiler-adapter/wasm.mjs": "8ab8af2269313764f77684ba63750d6a2b8f981934a070ab04d42a9a463eec57",
+    "web/format-worker.mjs": "13413a52470f61ae2138f7aa2eb2498ac96f6800647fafbce35d73fdb16db589",
+    "web/formats.mjs": "3b12d1c19c2c2bde04cdc8c88ca01afbf425510f9219abe1a9512eaa48ff7b8d",
+    "web/document-conformance.mjs": "47fb13edb00a1d0f767fc0de83e748e629b88b926ae05fd683abc57beab54858",
+    "web/conformance.mjs": "474441c7357a3800aff675fd683463599c1b4cfa80c83104dd5d5ce89d795049"
+  },
+  "native": {
+    "command": "zig build test -Droc-source=/Users/ageron/dev/software/roc",
+    "exitCode": 0,
+    "zigUnitTests": 5,
+    "compilerCases": 36,
+    "cellPermutations": 21,
+    "documentContracts": 46,
+    "documentParityRequests": 73
+  },
+  "browser": {
+    "engine": "Codex in-app browser",
+    "m0": {
+      "unitTests": 5,
+      "parityCases": 36,
+      "cellPermutations": 21,
+      "workerLifecycle": "pass"
+    },
+    "m1": {
+      "completeResponseParityCases": 73,
+      "freshWorkerRuns": 9
+    },
+    "playground": {
+      "rocRun": "pass",
+      "rocToMarkdown": "pass",
+      "convertedMarkdownRun": "pass",
+      "observedValue": "15.0",
+      "observedDebug": "15.0"
+    }
+  },
+  "cli": {
+    "standaloneWithoutToolsOnPath": [
+      "parse",
+      "check",
+      "run"
+    ],
+    "exactSameFormatSaves": [
+      "roc",
+      "markdown"
+    ],
+    "existingOutputProtected": true,
+    "ordinaryRocRuns": [
+      "fixtures/documents/wall.roc",
+      "Markdown-to-Roc export"
+    ],
+    "observedStdout": "15.0\n[dbg] 15.0\n"
+  },
+  "limits": [
+    "Format playground only; reactive cell editor is M2.",
+    "Core is recompiled per operation and reserves 1 GiB of scratch memory.",
+    "Embedded evaluation uses the in-memory echo platform and explicitly supplied modules.",
+    "Service-worker installation and full offline packaging remain later work."
+  ]
+}

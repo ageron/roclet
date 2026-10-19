@@ -1,0 +1,118 @@
+[
+  {
+    "name": "lambda-dependency",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\na = 4\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "evaluate": [
+      "out_left"
+    ],
+    "reused": [
+      "out_right"
+    ]
+  },
+  {
+    "name": "no-change",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "evaluate": [],
+    "reused": [
+      "out_left",
+      "out_right"
+    ]
+  },
+  {
+    "name": "rewire",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\na = 2\nf = |x| x + a\nout_left = b + 1\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "evaluate": [
+      "out_left"
+    ],
+    "reused": [
+      "out_right"
+    ]
+  },
+  {
+    "name": "type-change",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7.I64\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "evaluate": [
+      "out_right"
+    ],
+    "reused": [
+      "out_left"
+    ]
+  },
+  {
+    "name": "deleted-definition",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\n\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "evaluate": [],
+    "reused": []
+  },
+  {
+    "name": "added-definition",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\na = 2\nextra = 5\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "evaluate": [
+      "out_left",
+      "out_right"
+    ],
+    "reused": []
+  },
+  {
+    "name": "apparent-cell-cycle",
+    "before": "# %%\na = 3\nb\n# %%\nb = a + 1\na\n# %%\nout_independent = 7\n",
+    "after": "# %%\na = 6\nb\n# %%\nb = a + 1\na\n# %%\nout_independent = 7\n",
+    "evaluate": [
+      "out_1",
+      "out_2"
+    ],
+    "reused": [
+      "out_independent"
+    ]
+  },
+  {
+    "name": "isolated-runtime-error",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\na = 2\nf = |x| x + a\nout_left = {\n    crash \"boom\"\n    f(3)\n}\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "evaluate": [
+      "out_left"
+    ],
+    "reused": [
+      "out_right"
+    ]
+  },
+  {
+    "name": "import-change",
+    "before": "# %%\nimport Fresh\nout_import = Fresh.value\n# %%\nout_other = 7\n",
+    "after": "# %%\nimport Fresh\nout_import = Fresh.value\n# %%\nout_other = 7\n",
+    "evaluate": [
+      "out_import",
+      "out_other"
+    ],
+    "reused": [],
+    "modules": [
+      {
+        "name": "Fresh",
+        "content": "Fresh := [].{ value = 7 }"
+      }
+    ],
+    "afterModules": [
+      {
+        "name": "Fresh",
+        "content": "Fresh := [].{ value = 8 }"
+      }
+    ]
+  },
+  {
+    "name": "recursive-function",
+    "before": "# %%\nlimit = 5.U64\nfactorial : U64 -> U64\nfactorial = |n| if n == 0 { 1 } else { n * factorial(n - 1) }\nout_factorial = factorial(limit)\n# %%\nout_other = 8\n",
+    "after": "# %%\nlimit = 6.U64\nfactorial : U64 -> U64\nfactorial = |n| if n == 0 { 1 } else { n * factorial(n - 1) }\nout_factorial = factorial(limit)\n# %%\nout_other = 8\n",
+    "evaluate": [
+      "out_factorial"
+    ],
+    "reused": [
+      "out_other"
+    ]
+  }
+]

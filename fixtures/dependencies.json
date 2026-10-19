@@ -1,0 +1,9 @@
+{
+  "name": "Definition dependencies that would form a false cell cycle",
+  "cells": [
+    { "key": "first", "source": "a = b + 1\nc = 1" },
+    { "key": "second", "source": "b = c + 1\nout_1 = a" }
+  ],
+  "roots": ["out_1"],
+  "expected": ["3.0"]
+}

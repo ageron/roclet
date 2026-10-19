@@ -1,0 +1,28 @@
+{
+  "protocol": 1,
+  "compilerRepository": "https://github.com/roc-lang/roc",
+  "compilerCommit": "38a3029aa71b239c79b380adab7e90d4a848df96",
+  "zigVersion": "0.17.0",
+  "nativeOptimize": "ReleaseSmall",
+  "wasmOptimize": "ReleaseSmall",
+  "host": "macos-aarch64",
+  "inputs": {
+    "build.zig": "02ddde6f5b1c657f5be9494f889d05c2e409aee5d555382dbd8b5df6a0411990",
+    "tools/build-tool.zig": "685ab451bb5e53c1c2b29fc544bf3564432d522382d13a9a6f89f509bfc957ef",
+    "compiler.lock.json": "d0ab6cb4e06ec21f5f0cfa42171726f00ac88f970cde5043e2baf4d4e31989c6",
+    "compiler-adapter/bridge.zig": "69567b9255b95647cab6cb5b094fddbe581b8d9ca22a8a141e6b0f0ef15fb74b",
+    "compiler-adapter/native.zig": "41ba84de1bba8dcb9b6d7e6280e8f8799b58ef276721e66dc2b76894249bad36",
+    "compiler-adapter/snapshot.zig": "40da6bf374b651422db426885ad145209d605341bb618c887f6f16538dac4991",
+    "compiler-adapter/overlay.json": "519922ab9f7850538c224e061724e97b24a5abf7b1237c206aeb83962fa5f1a4"
+  },
+  "artifacts": {
+    "roclet-native": {
+      "bytes": 50790520,
+      "sha256": "770b71e89917ed21a3103a8cb9120bf10906e96ef160c4d0468637336c3574f3"
+    },
+    "roclet.wasm": {
+      "bytes": 15292566,
+      "sha256": "f5ac01ac692c3307e7258cb4985951bc4981b6d1d3d55a51938feef310811a12"
+    }
+  }
+}

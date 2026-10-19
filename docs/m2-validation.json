@@ -1,0 +1,111 @@
+{
+  "testedAt": "2026-10-17T05:31:32.200078+00:00",
+  "manifest": {
+    "protocol": 1,
+    "compilerRepository": "https://github.com/roc-lang/roc",
+    "compilerCommit": "38a3029aa71b239c79b380adab7e90d4a848df96",
+    "zigVersion": "0.17.0",
+    "nativeOptimize": "ReleaseSmall",
+    "wasmOptimize": "ReleaseSmall",
+    "host": "macos-aarch64",
+    "inputs": {
+      "build.zig": "78d0f015ee4e717001dfcfc56c49a8faf24a5521300080496b262a09c91b298a",
+      "tools/build-tool.zig": "78e4082405a64a455455789abb990a8d2f2449ffa23269a95fecf23f6421a6d6",
+      "compiler.lock.json": "d0ab6cb4e06ec21f5f0cfa42171726f00ac88f970cde5043e2baf4d4e31989c6",
+      "compiler-adapter/bridge.zig": "90e12d6722c417d76b77edad83ea46160cb19fe77c27bf2cd05f1a498f1ce771",
+      "compiler-adapter/native.zig": "78ccf78854217265d3f7436b5cd99cd0998e623cd55f06ec23e6ad936ef0d711",
+      "compiler-adapter/snapshot.zig": "e0d3e57724a675c7d31171498a7d4e157e18a196d72dc7adaad2f56cf86f75e8",
+      "compiler-adapter/overlay.json": "795d18932002bb5eb0ec1277f89a927648effbdc99c720102b6b0d19d56ae745",
+      "compiler-adapter/syntax.zig": "539131d21f76ed352d6b5149c30e498a4d20262f219568ee50d27212b960abf3",
+      "compiler-adapter/document.zig": "83f98f86df792f00f65c291b4f6beb9439c73260fbf9b18b9f069f66441c0974",
+      "core/Document.roc": "3ec6d70c9116dae83da56c8f91fed51f4153dd3438e768369296134359beea80",
+      "vendor/md4c/md4c.c": "22f5a470593f6b800d11f9279155361b1d09c23c2d866fe572cd1ec7adbfd502",
+      "vendor/md4c/md4c.h": "4efd19bf7ec270691d5b4189f496886e421768a814b5e817eb945aa85e859f18",
+      "vendor/md4c/roclet-md.h": "a8dc345d23b0f118ab645e7c51773c0a3ee2a7a135d4d78b901fdd0067060006"
+    },
+    "artifacts": {
+      "roclet-native": {
+        "bytes": 50951304,
+        "sha256": "f2fbe5ebeeb3a67d1ba82624b99f8b0183a189cdde7935baac433067adafb05e"
+      },
+      "roclet.wasm": {
+        "bytes": 15460620,
+        "sha256": "753696388affc7deace5abb6122672d83826f036fabc80d3c47e089d993deca0"
+      }
+    }
+  },
+  "native": {
+    "documentContracts": 106,
+    "compilerCases": 36,
+    "compilerPermutations": 21,
+    "zigUnitTests": "pass"
+  },
+  "browser": {
+    "documentParityResponses": 180,
+    "freshWorkerDocumentRuns": 45,
+    "editingWorkflow": "pass",
+    "compilerParityCases": 36,
+    "compilerPermutations": 21,
+    "unitTests": 8,
+    "workerLifecycle": "pass",
+    "studioContracts": 13,
+    "studio": "pass"
+  },
+  "formatWorkflowTimingsMs": {
+    "prepare": 1266,
+    "check": 91,
+    "run": 87,
+    "convert": 80,
+    "editedConvert": 87,
+    "editedRun": 84
+  },
+  "manualStudioChecks": [
+    "width edit updates both outputs",
+    "dependent cell moved before its inputs",
+    "draft restored on reload",
+    "runnable Roc upload hides generated helper",
+    "download matches source export and runs with Roc, printing 15.0"
+  ],
+  "limits": [
+    "whole-module checking and per-root recompilation",
+    "plain text values; originating dbg source regions unavailable",
+    "buffered events; Stop discards undelivered observations",
+    "CodeMirror 6; no completion/split/merge/refactoring yet",
+    "browser recovery is origin-local; direct file writes and multi-tab coediting are not implemented",
+    "offline installation and portable bundles remain M3"
+  ],
+  "uiRefinement": {
+    "testedAt": "2026-10-17T21:11:50.982055+00:00",
+    "desktopUiContracts": 10,
+    "compactUiContracts": 10,
+    "compactWidthPx": 390,
+    "existingStudioContracts": 13,
+    "result": "pass",
+    "manualChecks": [
+      "native keyboard copy/cut/paste of multiple cells",
+      "single-click Markdown edit and Cmd+Enter rendering",
+      "source view and return focus",
+      "desktop notebook and contextual-menu visual review"
+    ],
+    "compilerRebuilt": false,
+    "markdownUndoWithoutAutoRun": "pass"
+  },
+  "editorIntegration": {
+    "testedAt": "2026-10-17T22:08:53.360659+00:00",
+    "desktopUiContracts": 17,
+    "compactUiContracts": 17,
+    "compactWidthPx": 390,
+    "existingStudioContracts": 13,
+    "result": "pass",
+    "vendoredModules": 14,
+    "vendoredJavaScriptBytes": 1166035,
+    "vendorIntegrity": "all module and license SHA-256 hashes match; archives verified with SHA-512",
+    "manualChecks": [
+      "actual Cmd+D multiple-selection typing and undo",
+      "actual Alt-click cursors editing two lines",
+      "navigation between cell editors",
+      "Roc and Markdown syntax highlighting visual review"
+    ],
+    "compilerRebuilt": false
+  }
+}

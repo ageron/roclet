@@ -1,0 +1,6 @@
+{
+  "name": "Anonymous expression after notebook lowering",
+  "cells": [{ "key": "result", "source": "out_1 = 1 + 1" }],
+  "roots": ["out_1"],
+  "expected": ["2.0"]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Forward references and multiple outputs",
+  "cells": [
+    { "key": "result", "source": "out_1 = area" },
+    { "key": "inputs", "source": "width = 5\nheight = 3" },
+    { "key": "dimensions", "source": "area = width * height\nout_dimensions = area" }
+  ],
+  "roots": ["out_1", "out_dimensions"],
+  "expected": ["15.0", "15.0"]
+}

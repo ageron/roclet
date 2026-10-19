@@ -1,0 +1,2606 @@
+[
+  {
+    "name": "forward references",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\narea\n# %%\nwidth = 5\nheight = 3\n# %%\narea = width * height"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code",
+        "code",
+        "code"
+      ],
+      "values": [
+        "15.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "inferred and explicit kinds",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\n# # Title\n# Text\n# %% code\n# still code\n# %% markdown\n"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown",
+        "code",
+        "markdown"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "empty cells",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\n# %% markdown\n# %%\n"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code",
+        "markdown",
+        "code"
+      ]
+    }
+  },
+  {
+    "name": "local scope and marker lookalikes",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nx = \"# %%\"\nout_1 = {\n# %%\n    local = 1\n    local + 1\n}\n# %%\ny = 2"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code",
+        "code"
+      ],
+      "values": [
+        "2.0\n"
+      ]
+    }
+  },
+  {
+    "name": "anonymous binding collision",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\n1 + 1\n# %%\nout_1 = 4"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code",
+        "code"
+      ],
+      "roots": [
+        "out_2",
+        "out_1"
+      ],
+      "values": [
+        "2.0\n",
+        "4.0\n"
+      ]
+    }
+  },
+  {
+    "name": "debug inside a final expression block",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\na = 3\n{\n    dbg a\n    a + 1\n}"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code"
+      ],
+      "values": [
+        "4.0\n"
+      ],
+      "debug": [
+        "3.0"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "top-level dbg is rejected and preserved",
+    "request": {
+      "operation": "document",
+      "action": "run",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\ndbg 42"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "top-level-dbg",
+      "location_text": "dbg 42",
+      "exact": true,
+      "no_evaluation": true,
+      "absent": [
+        "roclet_observe",
+        "# roclet:observe"
+      ]
+    }
+  },
+  {
+    "name": "local cell binding is not output",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nf = |_| { out_private = 9\n out_private }"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code"
+      ],
+      "roots": []
+    }
+  },
+  {
+    "name": "multiple outputs",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nout_a = 1\nout_b = 2"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "multiple-outputs"
+    }
+  },
+  {
+    "name": "extra expression",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nout_a = 1\n2 + 2"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "ambiguous-expression"
+    }
+  },
+  {
+    "name": "nonfinal expression",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\n1 + 1\na = 2"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "ambiguous-expression"
+    }
+  },
+  {
+    "name": "duplicate definitions",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\na = 1\n# %%\na = 2"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "duplicate-definition"
+    }
+  },
+  {
+    "name": "explicit ids",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %% id=answer\nout_1 = 2\n# %% id=intro layout=wide\n# Text"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code",
+        "markdown"
+      ],
+      "ids": [
+        "answer",
+        "intro"
+      ],
+      "contains": [
+        "id=answer",
+        "layout=wide"
+      ]
+    }
+  },
+  {
+    "name": "duplicate ids",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %% id=a\nx = 1\n# %% id=a\ny = 2"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "duplicate-id"
+    }
+  },
+  {
+    "name": "handwritten entry",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nmain! = |_args| { dbg 42\n Ok({}) }"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "handwritten-main",
+      "contains": [
+        "dbg 42"
+      ]
+    }
+  },
+  {
+    "name": "generated conflict",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nout_1 = 2\n# %% generated\nmain! = |_args| { echo!(\"custom\")\n Ok({}) }"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "generated-conflict",
+      "contains": [
+        "custom"
+      ]
+    }
+  },
+  {
+    "name": "malformed draft exact save",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "roc",
+      "source": "#%% id=draft\r\nout_1 = {\r\n# %%\r\nunfinished"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "exact": true
+    }
+  },
+  {
+    "name": "valid exact save",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "roc",
+      "source": "app [main!] {}\r\n\r\n#%% id=demo\r\nout_a=1 # ordinary comment\r\n"
+    },
+    "expect": {
+      "status": "ok",
+      "exact": true
+    }
+  },
+  {
+    "name": "text snapshots",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nout_1 = 2 # => hello\n# => world"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "```text\nhello\nworld\n```"
+      ],
+      "outputs": [
+        "text"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "orphan snapshot",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %% code\n# => old result"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "orphan-snapshot"
+    }
+  },
+  {
+    "name": "snapshot lookalike string",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nout_1 = \"# => literal\""
+    },
+    "expect": {
+      "status": "ok",
+      "outputs": [],
+      "contains": [
+        "# => literal"
+      ]
+    }
+  },
+  {
+    "name": "plain markdown and outputs",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "# Title\n\n```roc\n1 + 1\n```\n\n```text\n2\n```\n\n<!-- %% -->\n```text\nauthored\n```"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown",
+        "code",
+        "markdown"
+      ],
+      "outputs": [
+        "text"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "consecutive code",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "```roc\nx = 1\n```\n\n~~~roc\nout_1 = x + 1\n~~~"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code",
+        "code"
+      ],
+      "values": [
+        "2.0\n"
+      ]
+    }
+  },
+  {
+    "name": "nested and literal examples",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "> ```roc\n> 1 + 1\n> ```\n\n- item\n\n  ```roc\n  2 + 2\n  ```\n\n```roc example\n3 + 3\n```"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "empty markdown and code",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "<!-- %% markdown -->\n\n```roc\n```\n\n<!-- %% markdown -->"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown",
+        "code",
+        "markdown"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "consecutive markdown",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "First\n\n<!-- %% -->\n\nSecond"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown",
+        "markdown"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "ordinary comments",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "<!-- -->\n\n<!-- id=abc -->\n\nParagraph"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown"
+      ]
+    }
+  },
+  {
+    "name": "rich outputs",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "```roc\nout_1 = 1\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n![image](a.png)"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code"
+      ],
+      "outputs": [
+        "table",
+        "image"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "prose stops output inference",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "```roc\nout_1 = 2\n```\n\nExplanation\n\n```text\nnot output\n```"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code",
+        "markdown"
+      ],
+      "outputs": []
+    }
+  },
+  {
+    "name": "duplicate snapshots",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "```roc\nout_1 = 2 # => a\n```\n\n```text\nb\n```"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "duplicate-snapshot",
+      "outputs": [
+        "text",
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "escaped markers and fenced literals",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\n# <!-- %% -->\n#\n# ```html\n# <!-- \\%% -->\n# ```"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "literal backslash marker",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\n# <!-- \\%% id=x -->"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "unknown document metadata",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "<!-- roclet:document {\"format\":1,\"rocPreamble\":\"app [main!] {}\",\"future\":{\"x\":\"-->\"}} -->\n\nHello"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "unicode bytes",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\n# Café 🦅\n# %%\nout_1 = \"naïve 🦅\""
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown",
+        "code"
+      ],
+      "values": [
+        "\"naïve 🦅\"\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "newer format",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# roclet:format=2\n# %%\nx = 1"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "format-version"
+    }
+  },
+  {
+    "name": "literal code marker",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "```roc\nx = 1\n# %%\nout_1 = x + 2\n```"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code"
+      ],
+      "values": [
+        "3.0\n"
+      ],
+      "roundtrip": true,
+      "contains": [
+        "# roclet:literal-marker "
+      ]
+    }
+  },
+  {
+    "name": "roc example in prose",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\n# ```roc\n# 1 + 1\n# ```"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown"
+      ],
+      "contains": [
+        "```roc example"
+      ]
+    }
+  },
+  {
+    "name": "image with nested URL",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "```roc\nout_1 = 1\n```\n\n![A](image(a).png \"Title\")"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code"
+      ],
+      "outputs": [
+        "image"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "reference image",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "[picture]: photo.png\n\n```roc\nout_1 = 1\n```\n\n![A][picture]"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown",
+        "code"
+      ],
+      "outputs": [
+        "image"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "malformed marker attributes",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "<!-- %% id= -->\n\nText"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "malformed-attribute"
+    }
+  },
+  {
+    "name": "unicode diagnostic mapping",
+    "request": {
+      "operation": "document",
+      "action": "check",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nname = \"🦅\"\n# %%\nmissing + 1"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "roc-check",
+      "location_text": "missing"
+    }
+  },
+  {
+    "name": "markdown diagnostic mapping",
+    "request": {
+      "operation": "document",
+      "action": "check",
+      "format": "markdown",
+      "target": "roc",
+      "source": "# 🦅\n\n```roc\nmissing + 1\n```"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "roc-check",
+      "location_text": "missing"
+    }
+  },
+  {
+    "name": "nested debug diagnostic",
+    "request": {
+      "operation": "document",
+      "action": "check",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nout_1 = {\n    dbg missing\n    1\n}"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "roc-check",
+      "location_text": "missing"
+    }
+  },
+  {
+    "name": "same-line Unicode diagnostic",
+    "request": {
+      "operation": "document",
+      "action": "check",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = (\"🦅\", missing)"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "roc-check",
+      "location_text": "missing"
+    }
+  },
+  {
+    "name": "reference image author prose",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "[picture]: photo.png\n\n```roc\nout_1 = 1\n```\n\n<!-- %% -->\n\n![A][picture]"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown",
+        "code",
+        "markdown"
+      ],
+      "outputs": [],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "Markdown CRLF exact save",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "markdown",
+      "source": "# Title\r\n\r\n~~~roc\r\nout_1 = 1\r\n~~~\r\n"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown",
+        "code"
+      ],
+      "exact": true,
+      "values": [
+        "1.0\n"
+      ]
+    }
+  },
+  {
+    "name": "editing Markdown preserves bare expressions and nested dbg",
+    "request": {
+      "operation": "document",
+      "action": "view",
+      "format": "roc",
+      "target": "markdown",
+      "source": "app [main!] {}\n\n# %%\narea\n# %%\narea = {\n    result = 15\n    dbg result\n    result\n}"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "```roc\narea\n```",
+        "dbg result"
+      ],
+      "absent": [
+        "rocPreamble",
+        "roclet_observe",
+        "out_1 =",
+        "main!"
+      ]
+    }
+  },
+  {
+    "name": "editing Roc preserves bare expressions and nested dbg",
+    "request": {
+      "operation": "document",
+      "action": "view",
+      "format": "markdown",
+      "target": "roc",
+      "source": "```roc\narea\n```\n\n```roc\narea = {\n    result = 15\n    dbg result\n    result\n}\n```"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "# %%\narea\n",
+        "dbg result"
+      ],
+      "absent": [
+        "roclet_observe",
+        "out_1 =",
+        "main! =",
+        "roclet:document"
+      ]
+    }
+  },
+  {
+    "name": "default header needs no Markdown metadata",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "app [main!] {}\n\n# %%\nout_1 = 2"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "```roc"
+      ],
+      "absent": [
+        "roclet:document",
+        "rocPreamble"
+      ]
+    }
+  },
+  {
+    "name": "reserved Markdown preamble metadata is not echoed into Roc",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "markdown",
+      "target": "roc",
+      "source": "<!-- roclet:document {\"format\":1,\"rocPreamble\":\"app [main!] {}\\n\\n\",\"title\":\"Demo\"} -->\n\n```roc\nout_1 = 2\n```"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "# roclet:document {\"title\":\"Demo\"}"
+      ],
+      "absent": [
+        "rocPreamble"
+      ]
+    }
+  },
+  {
+    "name": "editing Markdown context survives Roc conversion",
+    "request": {
+      "operation": "document",
+      "action": "view",
+      "format": "markdown",
+      "target": "roc",
+      "source": "```roc\nout_1 = base\n```",
+      "context": {
+        "preamble": "app [main!] {}\nbase = 7\n",
+        "metadata": ""
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "base = 7"
+      ],
+      "absent": [
+        "rocPreamble"
+      ]
+    }
+  },
+  {
+    "name": "Markdown context is included in a portable export",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "markdown",
+      "target": "markdown",
+      "source": "```roc\nout_1 = base\n```",
+      "context": {
+        "preamble": "app [main!] {}\nbase = 7\n",
+        "metadata": ""
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "rocPreamble",
+        "base = 7"
+      ],
+      "absent": []
+    }
+  },
+  {
+    "name": "explicit Markdown metadata overrides editing context",
+    "request": {
+      "operation": "document",
+      "action": "view",
+      "format": "markdown",
+      "target": "roc",
+      "source": "<!-- roclet:document {\"format\":1,\"rocPreamble\":\"app [main!] {}\\nbase = 9\\n\"} -->\n\n```roc\nout_1 = base\n```",
+      "context": {
+        "preamble": "app [main!] {}\nbase = 7\n",
+        "metadata": ""
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "base = 9"
+      ],
+      "absent": [
+        "base = 7"
+      ]
+    }
+  },
+  {
+    "name": "top-level dbg before a final expression is rejected",
+    "request": {
+      "operation": "document",
+      "action": "run",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\na = 3\ndbg a\na + 1"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "top-level-dbg",
+      "exact": true,
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "top-level Markdown dbg is rejected",
+    "request": {
+      "operation": "document",
+      "action": "check",
+      "format": "markdown",
+      "target": "markdown",
+      "source": "```roc\ndbg 42\n```"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "top-level-dbg",
+      "location_text": "dbg 42",
+      "exact": true,
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "top-level preamble dbg is rejected",
+    "request": {
+      "operation": "document",
+      "action": "run",
+      "format": "roc",
+      "target": "roc",
+      "source": "app [main!] {}\ndbg 42\n# %%\nout_1 = 1"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "top-level-dbg",
+      "location_text": "dbg 42",
+      "exact": true,
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "ordinary function dbg remains supported",
+    "request": {
+      "operation": "document",
+      "action": "normalize",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\ntwice = |x| {\n    dbg x\n    x * 2\n}\n# %%\ntwice(6)"
+    },
+    "expect": {
+      "status": "ok",
+      "values": [
+        "12.0\n"
+      ],
+      "debug": [
+        "6.0"
+      ],
+      "absent": [
+        "roclet_observe",
+        "# roclet:observe"
+      ],
+      "contains": [
+        "dbg x"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "generated display calls follow cell order",
+    "request": {
+      "operation": "document",
+      "action": "normalize",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\narea\n# %%\nwidth = 5\nheight = 3\n# %%\narea = width * height\nout_dimensions = area"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_1",
+        "out_dimensions"
+      ],
+      "values": [
+        "15.0\n",
+        "15.0\n"
+      ],
+      "contains": [
+        "out_1 = area",
+        "display! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display!(out_1)\n    display!(out_dimensions)\n    Ok({})\n}"
+      ],
+      "absent": [
+        ".concat(",
+        "roclet_observe"
+      ],
+      "roundtrip": true,
+      "normalized_stable": true
+    }
+  },
+  {
+    "name": "generated display helper normalizes stably",
+    "request": {
+      "operation": "document",
+      "action": "normalize",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2\n# %% generated\ndisplay! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display!(out_1)\n    Ok({})\n}"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "display! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display!(out_1)\n    Ok({})\n}"
+      ],
+      "roundtrip": true,
+      "normalized_stable": true,
+      "values": [
+        "2.0\n"
+      ]
+    }
+  },
+  {
+    "name": "unrecognized generated helper is preserved as a conflict",
+    "request": {
+      "operation": "document",
+      "action": "run",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2\n# %% generated\ndisplay! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display!(out_1)\n    unexpected!()\n    Ok({})\n}"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "generated-conflict",
+      "exact": true,
+      "no_evaluation": true,
+      "contains": [
+        "unexpected!()"
+      ]
+    }
+  },
+  {
+    "name": "explicit ID names final expression in runnable Roc",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\n10\n# %% id=sum\n1 + 2"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_1",
+        "out_sum"
+      ],
+      "ids": [
+        "1",
+        "sum"
+      ],
+      "contains": [
+        "# %%\nout_sum = 1 + 2",
+        "display!(out_1)\n    display!(out_sum)"
+      ],
+      "absent": [
+        "id=sum"
+      ],
+      "values": [
+        "10.0\n",
+        "3.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "Markdown ID names final expression and preserves other attributes",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "markdown",
+      "target": "roc",
+      "source": "<!-- %% id=sum layout=wide -->\n```roc\n1 + 2\n```"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_sum"
+      ],
+      "ids": [
+        "sum"
+      ],
+      "contains": [
+        "# %% layout=wide\nout_sum = 1 + 2"
+      ],
+      "absent": [
+        "id=sum"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "redundant ID omitted in Markdown export",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %% id=sum\n1 + 2"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_sum"
+      ],
+      "ids": [
+        "sum"
+      ],
+      "contains": [
+        "```roc\nout_sum = 1 + 2\n```"
+      ],
+      "absent": [
+        "id=sum"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "Roc expression ID preserved in Markdown editing view",
+    "request": {
+      "operation": "document",
+      "action": "view",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %% id=sum\n1 + 2"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_sum"
+      ],
+      "ids": [
+        "sum"
+      ],
+      "contains": [
+        "<!-- %% id=sum -->",
+        "```roc\n1 + 2\n```"
+      ],
+      "absent": [
+        "out_sum ="
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "Markdown expression ID preserved in Roc editing view",
+    "request": {
+      "operation": "document",
+      "action": "view",
+      "format": "markdown",
+      "target": "roc",
+      "source": "<!-- %% id=sum -->\n```roc\n1 + 2\n```"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_sum"
+      ],
+      "ids": [
+        "sum"
+      ],
+      "contains": [
+        "# %% id=sum\n1 + 2"
+      ],
+      "absent": [
+        "out_sum ="
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "explicit expression ID no-op save is exact",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "roc",
+      "source": "#%% id=sum\r\n1 + 2\r\n"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_sum"
+      ],
+      "ids": [
+        "sum"
+      ],
+      "exact": true
+    }
+  },
+  {
+    "name": "explicit ID output name collision keeps ID",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %% id=sum\n1 + 2\n# %% id=previous\nout_sum = 4"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_sum_2",
+        "out_sum"
+      ],
+      "ids": [
+        "sum",
+        "previous"
+      ],
+      "contains": [
+        "# %% id=sum\nout_sum_2 = 1 + 2",
+        "id=previous"
+      ],
+      "values": [
+        "3.0\n",
+        "4.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "nonidentifier ID keeps attribute and safe output name",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %% id=sales-total\n1 + 2\n# %% id=1\n4"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_2",
+        "out_1"
+      ],
+      "ids": [
+        "sales-total",
+        "1"
+      ],
+      "contains": [
+        "# %% id=sales-total\nout_2 = 1 + 2"
+      ],
+      "values": [
+        "3.0\n",
+        "4.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "anonymous output reserves later explicit ID",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\n1\n# %% id=1\n2"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_2",
+        "out_1"
+      ],
+      "ids": [
+        "2",
+        "1"
+      ],
+      "absent": [
+        "id=1"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "collision suffix reserves later explicit ID",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "out_sum = 9\n# %% id=sum\n1\n# %% id=sum_2\n2"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_sum_3",
+        "out_sum_2"
+      ],
+      "ids": [
+        "sum",
+        "sum_2"
+      ],
+      "contains": [
+        "# %% id=sum\nout_sum_3 = 1",
+        "# %%\nout_sum_2 = 2"
+      ],
+      "values": [
+        "1.0\n",
+        "2.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "ID with digits and uppercase forms valid output name",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %% id=2026_Q3\n1 + 2"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_2026_Q3"
+      ],
+      "ids": [
+        "2026_Q3"
+      ],
+      "absent": [
+        "id=2026_Q3"
+      ],
+      "values": [
+        "3.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "empty ID attribute survives canonical export diagnostics",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %% id=\n1 + 2"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "malformed-attribute",
+      "contains": [
+        "# %% id=\nout_1 = 1 + 2"
+      ]
+    }
+  },
+  {
+    "name": "unnamed results are numbered from one",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\n10\n# %%\n20\n# %%\n30"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_1",
+        "out_2",
+        "out_3"
+      ],
+      "ids": [
+        "1",
+        "2",
+        "3"
+      ],
+      "contains": [
+        "# %%\nout_1 = 10",
+        "# %%\nout_2 = 20",
+        "# %%\nout_3 = 30"
+      ],
+      "absent": [
+        "out_1_2",
+        "cell_"
+      ],
+      "values": [
+        "10.0\n",
+        "20.0\n",
+        "30.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "numbering skips occupied names and explicit numeric IDs",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\n10\n# %%\nout_1 = 20\n# %% id=2\n30\n# %%\n40"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_3",
+        "out_1",
+        "out_2",
+        "out_4"
+      ],
+      "ids": [
+        "3",
+        "1",
+        "2",
+        "4"
+      ],
+      "absent": [
+        "out_1_2",
+        "id=2"
+      ],
+      "values": [
+        "10.0\n",
+        "20.0\n",
+        "30.0\n",
+        "40.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "named outputs do not consume unnamed numbering",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %% id=sum\n3\n# %%\n4\n# %% id=product\n5\n# %%\n6"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_sum",
+        "out_1",
+        "out_product",
+        "out_2"
+      ],
+      "ids": [
+        "sum",
+        "1",
+        "product",
+        "2"
+      ],
+      "absent": [
+        "id=sum",
+        "id=product"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "bare out is an ordinary definition",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout = 10\n# %%\nout + 2"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_1"
+      ],
+      "ids": [
+        "out",
+        "1"
+      ],
+      "values": [
+        "12.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "local output-like binding does not select a result",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nf = |_| { out_private = 9\n out_private }"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "cell prefix is an ordinary definition name",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\ncell_one = 1\ncell_two = 2\nout_sum = cell_one + cell_two"
+    },
+    "expect": {
+      "status": "ok",
+      "roots": [
+        "out_sum"
+      ],
+      "ids": [
+        "sum"
+      ],
+      "values": [
+        "3.0\n"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "display helper accepts different output types",
+    "request": {
+      "operation": "document",
+      "action": "normalize",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\n1 + 2\n# %%\n\"hello\"\n# %%\nTrue"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "display! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display!(out_1)\n    display!(out_2)\n    display!(out_3)\n    Ok({})\n}"
+      ],
+      "values": [
+        "3.0\n",
+        "\"hello\"\n",
+        "True\n"
+      ],
+      "roundtrip": true,
+      "normalized_stable": true
+    }
+  },
+  {
+    "name": "no outputs need no display helper",
+    "request": {
+      "operation": "document",
+      "action": "normalize",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nwidth = 5"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "main! = |_args| {\n    Ok({})\n}"
+      ],
+      "absent": [
+        "display!",
+        "echo!"
+      ],
+      "values": [],
+      "normalized_stable": true
+    }
+  },
+  {
+    "name": "display helper avoids user names and stays stable",
+    "request": {
+      "operation": "document",
+      "action": "normalize",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\ndisplay! = |value| {\n    dbg value\n    {}\n}\n# %%\ndisplay_2 = 7\n# %%\nout_answer = display_2"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "display_3! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display_3!(out_answer)\n    Ok({})\n}"
+      ],
+      "values": [
+        "7.0\n"
+      ],
+      "debug": [],
+      "roundtrip": true,
+      "normalized_stable": true
+    }
+  },
+  {
+    "name": "display helper avoids preamble names",
+    "request": {
+      "operation": "document",
+      "action": "normalize",
+      "format": "roc",
+      "target": "roc",
+      "source": "app [main!] {}\ndisplay = 7\n# %%\nout_answer = display"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "display_2! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display_2!(out_answer)\n    Ok({})\n}"
+      ],
+      "values": [
+        "7.0\n"
+      ],
+      "normalized_stable": true
+    }
+  },
+  {
+    "name": "editing roc hides generated display helper",
+    "request": {
+      "operation": "document",
+      "action": "view",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2\n# %% generated\ndisplay! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display!(out_1)\n    Ok({})\n}"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code"
+      ],
+      "absent": [
+        "display!",
+        "main! =",
+        "rocPreamble"
+      ],
+      "roots": [
+        "out_1"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "editing markdown hides generated display helper",
+    "request": {
+      "operation": "document",
+      "action": "view",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\nout_1 = 2\n# %% generated\ndisplay! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display!(out_1)\n    Ok({})\n}"
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code"
+      ],
+      "absent": [
+        "display!",
+        "main! =",
+        "rocPreamble"
+      ],
+      "roots": [
+        "out_1"
+      ],
+      "roundtrip": true
+    }
+  },
+  {
+    "name": "edited display body is preserved without execution",
+    "request": {
+      "operation": "document",
+      "action": "run",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2\n# %% generated\ndisplay! = |value| echo!(\"changed\\n\")\n\nmain! = |_args| {\n    display!(out_1)\n    Ok({})\n}"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "generated-conflict",
+      "exact": true,
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "mismatched display call is preserved without execution",
+    "request": {
+      "operation": "document",
+      "action": "run",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2\n# %% generated\ndisplay! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display_2!(out_1)\n    Ok({})\n}"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "generated-conflict",
+      "exact": true,
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "missing display helper is preserved without execution",
+    "request": {
+      "operation": "document",
+      "action": "run",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2\n# %% generated\nmain! = |_args| {\n    display!(out_1)\n    Ok({})\n}"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "generated-conflict",
+      "exact": true,
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "extra display helper is preserved without execution",
+    "request": {
+      "operation": "document",
+      "action": "run",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2\n# %% generated\ndisplay_2! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\ndisplay! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display!(out_1)\n    Ok({})\n}"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "generated-conflict",
+      "exact": true,
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "expression in display call is preserved without execution",
+    "request": {
+      "operation": "document",
+      "action": "run",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2\n# %% generated\ndisplay! = |value| echo!(\"${Str.inspect(value)}\\n\")\n\nmain! = |_args| {\n    display!(out_1 + 1)\n    Ok({})\n}"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "generated-conflict",
+      "exact": true,
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "studio: wall permutation 0",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "area",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "width = 5\nheight = 3",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area = width * height\nout_dimensions = {\n    dbg area\n    area\n}",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15.0",
+        "15.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_dimensions",
+          "message": "15.0",
+          "cell": 2,
+          "sequence": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "studio: wall permutation 1",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "area",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area = width * height\nout_dimensions = {\n    dbg area\n    area\n}",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "width = 5\nheight = 3",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15.0",
+        "15.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_dimensions",
+          "message": "15.0",
+          "cell": 1,
+          "sequence": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "studio: wall permutation 2",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "width = 5\nheight = 3",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area = width * height\nout_dimensions = {\n    dbg area\n    area\n}",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15.0",
+        "15.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_dimensions",
+          "message": "15.0",
+          "cell": 2,
+          "sequence": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "studio: wall permutation 3",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "width = 5\nheight = 3",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area = width * height\nout_dimensions = {\n    dbg area\n    area\n}",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15.0",
+        "15.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_dimensions",
+          "message": "15.0",
+          "cell": 1,
+          "sequence": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "studio: wall permutation 4",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "area = width * height\nout_dimensions = {\n    dbg area\n    area\n}",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "width = 5\nheight = 3",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15.0",
+        "15.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_dimensions",
+          "message": "15.0",
+          "cell": 0,
+          "sequence": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "studio: wall permutation 5",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "area = width * height\nout_dimensions = {\n    dbg area\n    area\n}",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "width = 5\nheight = 3",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15.0",
+        "15.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_dimensions",
+          "message": "15.0",
+          "cell": 0,
+          "sequence": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "studio: selected cell checks whole module",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "selectedCell": 2,
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "area",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "width = 5\nheight = 3",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area = width * height\nout_dimensions = {\n    dbg area\n    area\n}",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_dimensions",
+          "message": "15.0",
+          "cell": 2
+        }
+      ]
+    }
+  },
+  {
+    "name": "studio: definition-only selection produces no result",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "selectedCell": 1,
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "area",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "width = 5\nheight = 3",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area = width * height\nout_dimensions = {\n    dbg area\n    area\n}",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [],
+      "events": []
+    }
+  },
+  {
+    "name": "studio: deleted name cannot expose old values",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = area"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": [],
+      "events": []
+    }
+  },
+  {
+    "name": "studio: nested debug keeps order and root",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\ntrace = |x| {\n dbg x\n dbg x + 1\n x * 2\n}\n# %%\ntrace(5)"
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "10.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_1",
+          "message": "5.0",
+          "cell": 1,
+          "sequence": 0
+        },
+        {
+          "kind": "dbg",
+          "root": "out_1",
+          "message": "6.0",
+          "cell": 1,
+          "sequence": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "studio: compile-time failure retains debug without designated values",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_good = {\n dbg \"good\"\n 42\n}\n# %%\nout_bad = {\n dbg \"before failure\"\n crash \"boom\"\n 0\n}"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "studio: comment-only code retains its kind",
+    "request": {
+      "operation": "document",
+      "action": "compose",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "# A code comment",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "markdown",
+            "source": "# A heading",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "code",
+        "markdown"
+      ],
+      "contains": [
+        "# %% code\n# A code comment",
+        "# %%\n# # A heading"
+      ],
+      "draft_roundtrip": true
+    }
+  },
+  {
+    "name": "studio: unfinished cell does not swallow later cells",
+    "request": {
+      "operation": "document",
+      "action": "compose",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = (",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "out_two = 2",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "diagnostic",
+      "kinds": [
+        "code",
+        "code"
+      ],
+      "contains": [
+        "out_1 = (",
+        "# %%\nout_two = 2"
+      ]
+    }
+  },
+  {
+    "name": "studio: literal Markdown marker survives draft",
+    "request": {
+      "operation": "document",
+      "action": "compose",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "markdown",
+            "source": "<!-- %% -->\n\nLiteral boundary comment.",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "kinds": [
+        "markdown"
+      ],
+      "draft_roundtrip": true
+    }
+  },
+  {
+    "name": "studio: inline snapshots do not duplicate in draft",
+    "request": {
+      "operation": "document",
+      "action": "parse",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2 # => two"
+    },
+    "expect": {
+      "status": "ok",
+      "draft_roundtrip": true
+    }
+  },
+  {
+    "name": "studio: Markdown snapshots do not duplicate in draft",
+    "request": {
+      "operation": "document",
+      "action": "parse",
+      "format": "markdown",
+      "target": "markdown",
+      "source": "```roc\nout_1 = 2 # => two\n```"
+    },
+    "expect": {
+      "status": "ok",
+      "draft_roundtrip": true
+    }
+  },
+  {
+    "name": "studio: generated conflict blocks reactive evaluation",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\nout_1 = 2\n# %% generated\nmain! = |_args| {\n echo!(\"custom\")\n Ok({})\n}"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "generated-conflict",
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "M5: rich Markdown",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "import Display\n# %%\nDisplay.markdown(\"# Hello **world**\")"
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        "markdown"
+      ],
+      "evaluated_values": [
+        "# Hello **world**"
+      ]
+    }
+  },
+  {
+    "name": "M5: rich table preserves exact numbers",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "import Display\n# %%\nDisplay.table([\"Value\"], [[\"9007199254740993\"]])"
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        "table"
+      ],
+      "evaluated_values": [
+        "1 rows × 1 columns\nValue\n9007199254740993"
+      ]
+    }
+  },
+  {
+    "name": "M5: rich image has plain alternative",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "import Display\n# %%\nDisplay.image(\"Swatch\", \"image/png\", \"iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGOwrw2hKWIYtWDUglELRi0YtWDUglELRi0YtWDUglELhooFADqrQD2nQXpjAAAAAElFTkSuQmCC\")"
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        "image"
+      ],
+      "evaluated_values": [
+        "Swatch"
+      ]
+    }
+  },
+  {
+    "name": "M5: display-shaped string remains text",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "# %%\n\"{\\\"version\\\":1,\\\"kind\\\":\\\"markdown\\\",\\\"text\\\":\\\"Hello\\\"}\""
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        null
+      ]
+    }
+  },
+  {
+    "name": "M5: local Display type remains ordinary",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "# %%\nDisplay := { text : Str }\nDisplay.({text: \"local\"})"
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        null
+      ]
+    }
+  },
+  {
+    "name": "M5: rich result evaluates dbg once",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "import Display\n# %%\n{\n    dbg \"once\"\n    Display.markdown(\"Hello\")\n}"
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        "markdown"
+      ],
+      "evaluated_values": [
+        "Hello"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "message": "\"once\"",
+          "root": "out_1"
+        }
+      ]
+    }
+  },
+  {
+    "name": "M5: malformed rich table retains text",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "import Display\n# %%\nDisplay.table([\"A\", \"B\"], [[\"only one\"]])"
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        "table"
+      ],
+      "evaluated_values": [
+        "1 rows × 2 columns\nA | B\nonly one"
+      ]
+    }
+  },
+  {
+    "name": "M5: oversized image keeps a readable result",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "import Display\ngrow = |s, n| if n == 0 { s } else { grow(Str.concat(s, s), n - 1) }\n# %%\nDisplay.image(\"Too big\", \"image/png\", grow(\"AAAA\", 18))"
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        "text"
+      ],
+      "evaluated_values": [
+        "Too big\nImage preview omitted: encoded images are limited to 128 KiB."
+      ]
+    }
+  },
+  {
+    "name": "M5: table has an aggregate preview budget",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "import Display\nc = \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"\nr = [c,c,c,c,c,c,c,c,c,c,c,c,c,c,c,c]\n# %%\nDisplay.table([\"C0\",\"C1\",\"C2\",\"C3\",\"C4\",\"C5\",\"C6\",\"C7\",\"C8\",\"C9\",\"C10\",\"C11\",\"C12\",\"C13\",\"C14\",\"C15\"], [r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r,r])"
+    },
+    "expect": {
+      "status": "ok",
+      "display_kinds": [
+        "table"
+      ],
+      "preview_rows": [
+        4
+      ]
+    }
+  },
+  {
+    "name": "math Markdown is preserved through format conversion",
+    "request": {
+      "operation": "document",
+      "action": "convert",
+      "format": "roc",
+      "target": "markdown",
+      "source": "# %%\n# Inline $x^2$ and `\\$literal`.\n#\n# $$\\frac{1}{2}$$\n",
+      "render": true
+    },
+    "expect": {
+      "status": "ok",
+      "roundtrip": true
+    }
+  }
+]
