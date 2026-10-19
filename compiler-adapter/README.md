@@ -43,6 +43,22 @@ revision tokens, diagnostics, graphs, and presentation data. Raw file contents,
 package archives, and compiler cache artifacts have separate byte-oriented WASM
 operations; they are not encoded as JSON arrays or base64.
 
+## One compilation per revision
+
+The notebook declares callable output entrypoints before compilation. A retained
+`BuildEnv` checks the module graph once; compiler-produced exported procedure
+roots then declare one runtime consumer before finalization. `takeRuntime` runs
+once and produces an immutable LIR image containing the output entrypoints.
+Metadata queries and later output selections reuse that graph and image. A source,
+module, file, or configuration change replaces the retained revision.
+
+Each selected output gets a fresh interpreter and temporary allocation arena.
+Rich outputs also have a checked value entrypoint and a concrete serializer for
+the bundled nominal `Display` type. No evaluated Roc value is retained between
+responses. `workspaceCache.frontend_builds`, `lowerings`, `executions`, and
+`prepared_hits` expose the actual work so tests can verify reuse independently of
+wall-clock timing.
+
 ## Persistent workspace and packages
 
 A browser session keeps one worker and WASM instance across completed requests.
@@ -84,6 +100,8 @@ output snapshots: restoring an output does not count as a compiler-cache hit.
 `web/workspace-conformance.mjs` verifies that importing actual emitted artifacts
 into a fresh WASM instance reduces misses, alongside module invalidation,
 corruption recovery, and offline verified-package restoration.
+The live virtual compiler-artifact store has its own 24 MiB / 512-entry LRU
+budget; editable files and package inputs are not evicted as compiler artifacts.
 
 The compiler retains its previous dependency graph. The transport omits an
 unchanged confirmed graph on subsequent requests; explicit alternate baselines
@@ -132,12 +150,16 @@ spans, rendered with locally pinned KaTeX assets.
 Observations are buffered and attributed to the selected evaluation root. Detailed
 checked provenance lets the engine exclude unrelated compile-time debug events
 without matching message text. Shared dependencies can produce observations for
-each selected root. Per-root runtime failures remain isolated when requested;
-parse/type errors and compiler-required compile-time failures remain module-wide.
+each selected root. Per-root runtime failures remain isolated when requested.
+For a crashing constant, the compiler's typed failure summary permits the
+declared runtime consumer to read its retained crash value and run independent
+roots. All compiler diagnostics remain visible. Parse/type errors, rejected
+conversions, exhaustiveness failures, and other compile-time errors remain
+module-wide. Ordinary non-isolating requests retain their diagnostic behavior.
 All supplied application definitions are checked, including unused definitions.
 
 Document sources are bounded to 256 KiB and 500 cells. The snapshot source limit
-is 1 MiB including generated code. Each root retains at most 1,000 observations,
+is 1 MiB of user source, with generated notebook code bounded separately. Each root retains at most 1,000 observations,
 256 KiB of observations, and 64 KiB per text message/result; rich payloads have a
 separate 512 KiB bound. Arbitrary platform effects and external foreign functions
 are outside this embedding's supported scope.
