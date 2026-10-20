@@ -39,7 +39,7 @@ jobs:
             .toolchain
             .zig-cache
             ~/.cache/zig
-          key: roclet-linux-v1-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'tools/**', 'compiler-adapter/**', 'core/**', 'package/**', 'vendor/**') }}
+          key: roclet-linux-v1-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'tools/**', 'compiler-adapter/**', 'package/**', 'vendor/**') }}
       - name: Prepare pinned compiler dependency
         shell: bash
         run: |

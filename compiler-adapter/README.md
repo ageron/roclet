@@ -4,8 +4,7 @@ Roclet embeds the pinned Roc compiler as a Zig package dependency. Run
 `sh tools/prepare-compiler.sh /path/to/roc` before building. The script archives the
 commit in `compiler.lock.json`, applies `embedding.patch`, and prepares
 `.toolchain/roc` without modifying the supplied checkout. `build.zig.zon` imports
-that dependency's compiler modules directly. The historical `overlay.json` is not
-part of the build.
+that dependency's compiler modules directly.
 
 `bridge.zig`, `engine.zig`, `workspace.zig`, and `snapshot.zig` are shared by native
 and WASM hosts. User programs execute through Roc's checked lowering and
@@ -19,10 +18,8 @@ included in `ROC-LICENSE`.
 
 `document_frontend.zig` implements document segmentation, expression lowering,
 source maps, export policy, and reactive planning directly in Zig.
-`document.zig` coordinates the frontend and compiler. The former interpreted
-`core/Document.roc` implementation remains as a reference; it is not executed on
-the editing path. Typed source preparation replaces the former interpreted JSON
-calls between document stages.
+`document.zig` coordinates the frontend and compiler. Typed source preparation
+replaces the former interpreted JSON calls between document stages.
 
 Notebook code cells produce one UTF-8 application source. Supporting modules
 remain ordinary files, resolved by Roc's normal import rules. The document API

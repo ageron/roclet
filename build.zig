@@ -182,7 +182,6 @@ fn adapter(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.Resolved
     exe.root_module.addIncludePath(b.path("vendor/md4c"));
     exe.root_module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("package/Display.roc") });
     exe.root_module.addAnonymousImport("display-package-url.txt", .{ .root_source_file = b.path("package/display-package-url.txt") });
-    exe.root_module.addAnonymousImport("Document.roc", .{ .root_source_file = b.path("core/Document.roc") });
     return exe;
 }
 
