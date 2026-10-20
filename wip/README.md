@@ -27,6 +27,7 @@ relying on them, since the branch moves.
 | 04 Engine state struct (done) | Module-level globals become an explicit `Engine` struct with a request-scoped observer. | Single-tenant engine, nesting-dependent event attribution, no in-process parallel tests, header parsed through a workspace side channel. |
 | 05 Image buffer vs revision arena (done) | Only what the LIR image requires lives in a flat buffer; everything else in a growable arena; the flat buffer is sized adaptively. | A fixed 512 MiB reservation per revision sets both the memory floor and a hard ceiling that the Debug engine already hits. |
 | [06 Retire legacy paths](06-retire-legacy-paths.md) | One worker protocol, one bridge dispatch, one source of truth for protocol types; dead build wiring removed. | Three dispatch paths, two session/worker protocols, an unused Roc core import and a drifting `protocol.d.ts`. |
+| [07 Side-by-side notebooks](07-side-by-side-notebooks.md) | Two notebook panels on one page, each with its own worker and engine; the title moves to the top of each panel and the status bar to a fixed bar at its bottom. | Exercises plans 01, 02, 04, 05 and 06 with two engines alive at once (attribution, per-engine baselines, memory, shared caches, package prompts) in the real UI. Implement after 02. |
 
 ## Sequencing
 
