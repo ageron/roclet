@@ -519,6 +519,53 @@ try {
   } finally {store.list=list;}
   report('Recent notebooks marks the current draft, restores focus, switches content and explains empty, missing and unavailable drafts');
 
+  // Keep the browser presentation real while holding the save/worker boundary.
+  // This makes every toolbar phase observable without relying on a slow machine.
+  notebook.change(s=>{s.cells=[makeCell('code','out_toolbar = 42')];});
+  const toolbarResult=await notebook.run();await notebook.persist();
+  const originalSession=notebook.session,originalSave=store.save.bind(store),originalTimeout=notebook.timeout;
+  let pending,releaseSave;
+  const saveGate=new Promise(resolve=>{releaseSave=resolve;});
+  notebook.session={
+    invalidate(){},stop(){pending?.reject(new DOMException('Stopped','AbortError'));},
+    request(request,callbacks){
+      let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});
+      pending={request,callbacks,resolve,reject};return promise;
+    },
+  };
+  const bounds=node=>{const r=node.getBoundingClientRect();return [r.left,r.top,r.width,r.height];};
+  const sameBounds=(actual,expected)=>actual.forEach((value,index)=>assert(Math.abs(value-expected[index])<.5,`Toolbar moved: ${actual} instead of ${expected}`));
+  try {
+    store.save=async record=>{await saveGate;return originalSave(record);};
+    window.scrollTo(0,0);await measure();
+    const runBounds=bounds($('run')),titleBounds=bounds($('title')),autoBounds=bounds($('auto').closest('label'));
+    $('run').focus();$('run').click();
+    assert(notebook.busy);assert($('run').hidden);assert(!$('stop').hidden);assert(document.activeElement===$('stop'));
+    sameBounds(bounds($('stop')),runBounds);sameBounds(bounds($('title')),titleBounds);sameBounds(bounds($('auto').closest('label')),autoBounds);
+    assert.match(notebook.status,/Saving before/);
+    releaseSave();await until(()=>pending);
+    pending.callbacks.onPackageWaiting(true);assert.match(notebook.status,/Waiting for package/);assert(!$('stop').hidden);assert($('run').hidden);
+    sameBounds(bounds($('stop')),runBounds);sameBounds(bounds($('title')),titleBounds);
+    pending.callbacks.onPackageWaiting(false);sameBounds(bounds($('stop')),runBounds);
+    $('stop').click();assert(!notebook.busy);assert(!$('run').hidden);assert($('stop').hidden);assert(document.activeElement===$('run'));
+    sameBounds(bounds($('run')),runBounds);await notebook.persist();
+    report('Run and Stop share stable bounds during saving, execution, package waiting and cancellation, transferring focus between the same toolbar slot');
+
+    pending=null;$('run').focus();$('run').click();await until(()=>pending);
+    pending.resolve(structuredClone(toolbarResult));await until(()=>!notebook.busy);
+    assert(!$('run').hidden);assert($('stop').hidden);assert(document.activeElement===$('run'));sameBounds(bounds($('run')),runBounds);
+    pending=null;inputs()[0].focus();const focusedEditor=document.activeElement;$('run').click();await until(()=>pending);
+    assert(document.activeElement===focusedEditor);
+    pending.reject(new Error('Toolbar test compiler failure'));await until(()=>!notebook.busy && notebook.status.startsWith('Run failed:'));
+    assert(document.activeElement===focusedEditor);assert(!$('run').hidden);sameBounds(bounds($('run')),runBounds);
+    pending=null;notebook.timeout=30;$('run').focus();$('run').click();await until(()=>pending);await until(()=>!notebook.busy);
+    assert.match(notebook.status,/Stopped after/);assert(document.activeElement===$('run'));sameBounds(bounds($('run')),runBounds);
+    report('completion, compiler errors and timeouts restore Run without moving the toolbar or stealing editor focus');
+  } finally {
+    releaseSave();pending?.reject(new DOMException('Test finished','AbortError'));
+    notebook.session=originalSession;store.save=originalSave;notebook.timeout=originalTimeout;notebook.cancelPending();
+  }
+
   await notebook.persist(); notebook.dispose(); store.close();
   await new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name); request.onsuccess=resolve;request.onerror=()=>reject(request.error);});
   parent.postMessage({rocletUiTest:true,status:`PASS — ${count} Roclet UI contracts`,log,result:'pass'},new URL(document.baseURI).origin);

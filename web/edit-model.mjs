@@ -43,6 +43,13 @@ export class Notebook {
     this.state = null; this.result = null; this.history = []; this.future = []; this.views = new Map();
     this.diagnosticsDeferred = false; this.lastChecked = null; this.baselineId = null; this.resetBaseline = false;
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
+    this.activeOperation = null;
+  }
+  get busy() { return this.activeOperation === this.runId; }
+  finishOperation(token) {
+    if (this.activeOperation !== token) return;
+    this.activeOperation = null;
+    this.emit();
   }
   emit(reason = 'status') { this.onChange(reason); }
   async initialize({id = null, fresh = false} = {}) {
@@ -73,7 +80,7 @@ export class Notebook {
     }
   }
   cancelPending() {
-    clearTimeout(this.timer); this.timer = null; this.runId++; this.session.invalidate();
+    clearTimeout(this.timer); this.timer = null; this.runId++; this.activeOperation = null; this.session.invalidate();
   }
   invalidate() {
     this.cancelPending();
@@ -172,16 +179,17 @@ export class Notebook {
   async run(selectedCell, { automatic = false } = {}) {
     if (!automatic) this.diagnosticsDeferred = false;
     this.cancelPending(); const runId = this.runId, revision = this.state.revision, id = this.state.id;
-    const request = this.reactiveRequest('evaluate', selectedCell, !automatic && selectedCell == null);
-    this.status = 'Saving before evaluation…'; this.emit();
-    await this.persist();
-    if (runId !== this.runId) return null;
-    this.status = 'Running…'; this.emit();
-    const started = performance.now();
+    this.activeOperation = runId;
     let timeout;
     const armTimeout=()=>{timeout=setTimeout(() => { if (runId === this.runId) this.stop('Stopped after 15 seconds · automatic execution paused'); }, this.timeout);};
-    armTimeout();
     try {
+      const request = this.reactiveRequest('evaluate', selectedCell, !automatic && selectedCell == null);
+      this.status = 'Saving before evaluation…'; this.emit();
+      await this.persist();
+      if (runId !== this.runId) return null;
+      this.status = 'Running…'; this.emit();
+      const started = performance.now();
+      armTimeout();
       const result = await this.request(request,{onPackageWaiting:waiting=>{clearTimeout(timeout);if(!waiting)armTimeout();}});
       if (runId !== this.runId || revision !== this.state.revision || id !== this.state.id) return null;
       this.publish(result);
@@ -194,7 +202,7 @@ export class Notebook {
     } catch (error) {
       if (runId === this.runId && error.name !== 'AbortError') { this.result = null; this.status = `Run failed: ${error.message}`; this.emit('result'); }
       return null;
-    } finally { clearTimeout(timeout); }
+    } finally { clearTimeout(timeout); this.finishOperation(runId); }
   }
   async rename(cell, position, name) {
     const result = await this.inspect('analyze', this.state.format, {draft:true});
@@ -223,15 +231,21 @@ export class Notebook {
   async inspect(action = 'parse', target = this.state.format, { draft = false } = {}) {
     clearTimeout(this.timer); this.timer = null;
     const revision = this.state.revision, id = this.state.id, token = ++this.runId;
+    this.activeOperation = token;
     this.session.invalidate();
     this.status = 'Preparing document…'; this.emit();
     // Structural edits need spans for the editable cells, not imported source
     // that may still contain markers or saved-output comments.
-    const result = await this.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target));
-    if (token !== this.runId || revision !== this.state.revision || id !== this.state.id) throw new DOMException('Document changed', 'AbortError');
-    if (!result.model) throw new Error(result.failure ?? 'The document engine could not read this draft.');
-    this.status = result.status === 'ok' ? (this.result?.evaluation?.status === 'ok' && Array.isArray(this.result.evaluation.values) ? 'Current' : 'Ready') : 'Needs attention'; this.emit();
-    return result;
+    try {
+      const result = await this.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target));
+      if (token !== this.runId || revision !== this.state.revision || id !== this.state.id) throw new DOMException('Document changed', 'AbortError');
+      if (!result.model) throw new Error(result.failure ?? 'The document engine could not read this draft.');
+      this.status = result.status === 'ok' ? (this.result?.evaluation?.status === 'ok' && Array.isArray(this.result.evaluation.values) ? 'Current' : 'Ready') : 'Needs attention'; this.emit();
+      return result;
+    } catch (error) {
+      if (token === this.runId && error.name !== 'AbortError') { this.status = `Preparation failed: ${error.message}`; this.emit(); }
+      throw error;
+    } finally { this.finishOperation(token); }
   }
   async mode(mode) {
     if (mode === this.state.mode) return;
@@ -292,5 +306,5 @@ export class Notebook {
     await this.replace(record);
     await this.mode('notebook');
   }
-  dispose() { clearTimeout(this.timer); this.runId++; this.session.stop(); }
+  dispose() { clearTimeout(this.timer); this.runId++; this.activeOperation = null; this.session.stop(); }
 }

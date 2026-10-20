@@ -470,8 +470,10 @@ function reflect(reason) {
   document.title = `Roclet: ${s.title || 'Untitled'}`;
   $('auto').checked = s.autoRun;
   for (const button of $('format').querySelectorAll('[data-format]')) button.setAttribute('aria-pressed', button.dataset.format === s.format);
-  $('stop').hidden = !/Running|Saving before|Preparing document/.test(notebook.status);
-  if ($('stop').hidden && document.activeElement === $('stop')) $('run').focus({preventScroll:true});
+  const focused = document.activeElement, busy = notebook.busy;
+  $('run').hidden = busy; $('stop').hidden = !busy;
+  if (busy && focused === $('run')) $('stop').focus({preventScroll:true});
+  else if (!busy && focused === $('stop')) $('run').focus({preventScroll:true});
   const status = notebook.diagnosticsDeferred && /^(Needs attention|Run failed · no current results)/.test(notebook.status) ? 'Editing · results pending' : notebook.status;
   $('status').textContent = status; $('status').className = /failed|attention|conflict/i.test(status) ? 'error' : '';
   $('save-status').textContent = notebook.saveStatus; $('save-status').title = notebook.saveStatus; $('save-status').className = /^Not saved|unavailable/.test(notebook.saveStatus) ? 'error' : '';
