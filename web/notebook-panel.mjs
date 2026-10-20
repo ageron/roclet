@@ -1,4 +1,4 @@
-import { Notebook, newDraft, makeCell } from './edit-model.mjs';
+import { Notebook, makeCell } from './edit-model.mjs';
 import { CellEditor, editorFor } from './cell-editor.mjs';
 import { symbolAt, completionOptions } from './compiler-tools.mjs';
 import { renderMarkdown } from './markdown-view.mjs';
@@ -46,7 +46,12 @@ export class NotebookPanel {
     const cards = this.cards = new Map();
     const selection = this.selection = new CellSelection();
     let documentId, selectionActive = false, composing = false, headerDocumentId;
-    const notice = this.notice = message => { part('notice').textContent = message; part('notice').hidden = !message; };
+    // A notice may offer actions, for example when a draft is already open in
+    // the other panel.
+    const notice = this.notice = (message, actions = []) => {
+      const node = part('notice'); node.textContent = message; node.hidden = !message;
+      for (const [label, action] of actions) { const choice = button(label, action); choice.className = 'notice-action'; node.append(' ', choice); }
+    };
     const perform = this.perform = async work => {
       notice('');
       try { await work(); } catch (error) { if (error.name !== 'AbortError') notice(error.message); }
@@ -576,10 +581,19 @@ export class NotebookPanel {
       await notebook.mode(mode);
       if (mode === 'source') sourceEditor.focus(); else if (notebook.state.mode === 'notebook') focusCell(selection.focus);
     });
-    this.newDocument = () => perform(async () => { await notebook.replace(newDraft()); editCell(selection.focus); });
     this.disposeEditors = () => { sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) view.editor.destroy(); };
   }
   get title() { return this.notebook.state?.title || 'Untitled'; }
-  focus() { this.focusSelection(); }
+  // Labels and live regions set by the workbench. Background panels do not
+  // announce their status; the active one does.
+  present({ label, titleLabel, active, two, mode }) {
+    const root = this.root;
+    root.setAttribute('aria-label', label); root.dataset.active = String(active); root.dataset.selected = String(!two || active);
+    if (mode === 'tabs') root.setAttribute('role', 'tabpanel'); else root.removeAttribute('role');
+    this.part('title-label').textContent = titleLabel;
+    this.part('close-panel').hidden = !two;
+    for (const name of ['status', 'save-status', 'selection-status']) this.part(name).setAttribute('aria-live', active || !two ? 'polite' : 'off');
+  }
+  focus() { if (this.notebook.state) this.focusSelection(); else this.part('title').focus(); }
   dispose() { this.disposeEditors(); Notebook.prototype.dispose.call(this.notebook); }
 }

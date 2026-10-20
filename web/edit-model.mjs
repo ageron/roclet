@@ -15,6 +15,20 @@ export function newDraft(title = 'Untitled', demo = false) {
   return { schema: 1, id: key(), title, format: 'roc', preamble: 'app [main!] {}', metadata: '', cells,
     source: '', sourceCurrent: false, files: [], mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
 }
+// A new draft with the same content as another: new id, fresh cell keys, so it
+// can be open and saved beside the original without sharing anything.
+export function independentCopy(record) {
+  const copy = clone(record);
+  delete copy._storageVersion;
+  return { ...copy, id: key(), title: `${(record.title || 'Untitled').slice(0, 113)} (copy)`, cells: copy.cells.map(cell => ({ ...cell, key: key() })), revision: 1, updatedAt: Date.now() };
+}
+// The draft that opening a Roc or Markdown file creates; it starts in source
+// mode until the document engine has split it into cells.
+export function openedDraft(source, filename) {
+  const record = newDraft(filename.replace(/\.(roc|md)$/i, ''));
+  record.source = source; record.sourceCurrent = true; record.format = filename.toLowerCase().endsWith('.md') ? 'markdown' : 'roc'; record.mode = 'source';
+  return record;
+}
 export function validDraft(record) {
   try { projectFiles(record?.files); } catch { return false; }
   return record?.schema === 1 && typeof record.id === 'string' && typeof record.title === 'string'
@@ -44,13 +58,17 @@ export class Notebook {
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
   }
   emit(reason = 'status') { this.onChange(reason); }
-  async initialize({id = null, fresh = false} = {}) {
-    let record;
-    try { record = id ? await this.store.get(id) : fresh ? null : (await this.store.list()).find(validDraft); }
-    catch (error) { this.saveStatus = `Browser storage unavailable: ${error.message}`; }
+  // A given record (a new draft, never one already saved) opens as is; without
+  // an id, fresh or record the most recent draft is recovered.
+  async initialize({id = null, fresh = false, record: given = null} = {}) {
+    let record = given;
+    if (!given) {
+      try { record = id ? await this.store.get(id) : fresh ? null : (await this.store.list()).find(validDraft); }
+      catch (error) { this.saveStatus = `Browser storage unavailable: ${error.message}`; }
+    }
     if (id && !validDraft(record)) throw new Error('This notebook is unavailable in this browser. Return home to choose another.');
     this.state = record ? clone(record) : fresh ? newDraft() : newDraft('Wall area', true);
-    this.status = record ? 'Recovered draft · results must be recomputed' : 'Ready';
+    this.status = record && !given ? 'Recovered draft · results must be recomputed' : 'Ready';
     this.emit('document');
     await this.persist();
     this.schedule();
@@ -284,9 +302,7 @@ export class Notebook {
     this.emit('document'); await this.persist(); this.schedule();
   }
   async open(source, filename) {
-    const record = newDraft(filename.replace(/\.(roc|md)$/i, ''));
-    record.source = source; record.sourceCurrent = true; record.format = filename.toLowerCase().endsWith('.md') ? 'markdown' : 'roc'; record.mode = 'source';
-    await this.replace(record);
+    await this.replace(openedDraft(source, filename));
     await this.mode('notebook');
   }
   dispose() { clearTimeout(this.timer); this.runId++; this.session.stop(); }

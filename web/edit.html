@@ -53,6 +53,10 @@ html,body { height:100%; } body { height:100dvh; display:grid; grid-template-row
 .workbench[data-panels="2"] .notebook-panel[data-active=true] .panel-title { border-top-color:var(--accent); }
 .panel-title .title-input { flex:1 1 auto; min-width:0; max-width:540px; color:var(--text); font-size:1.05rem; padding:.2rem .45rem; background:transparent; border:1px solid transparent; border-radius:5px; text-overflow:ellipsis; } .panel-title .title-input:hover { border-color:var(--line); } .panel-title .title-input:focus { border-color:var(--focus); }
 .status-bar { flex:none; display:flex; justify-content:space-between; align-items:center; gap:.3rem 1rem; flex-wrap:wrap; min-height:30px; padding:.2rem 1.3rem; border-top:1px solid var(--line); background:var(--bar); color:var(--muted); font-size:.75rem; }
+.document-bar { grid-row:1; } .panel-tabs { grid-row:2; } .workbench { grid-row:3; }
+.menu-panel p.menu-target { margin:.2rem .7rem .4rem; font-weight:600; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.close-panel { color:var(--muted); font-size:1.1rem; line-height:1; } .notice-action { margin:.4rem .4rem 0 0; border-color:var(--line); background:var(--page); font-size:.85rem; padding:.3rem .6rem; }
+.side-choices { display:grid; gap:.2rem; } .side-choices h3 { font-size:.8rem; color:var(--muted); margin:.9rem 0 .2rem; font-weight:600; } .side-choices button { text-align:left; overflow-wrap:anywhere; }
 .status-bar > div { display:flex; align-items:center; gap:.3rem 1rem; flex-wrap:wrap; min-width:0; } .status-bar button { padding:.15rem .45rem; } .engine-status { font-variant-numeric:tabular-nums; white-space:nowrap; }
 .run-actions { margin-left:auto; display:flex; align-items:center; justify-content:flex-end; gap:.6rem; white-space:nowrap; } .run-button { color:var(--accent); } .auto-label { font-size:.8rem; color:var(--muted); display:flex; align-items:center; gap:.35rem; } input[type=checkbox] { accent-color:var(--accent); } .stop { color:var(--error); border-color:var(--error); }
 .popover { position:relative; } summary { list-style:none; font-size:.87rem; white-space:nowrap; } summary::-webkit-details-marker { display:none; } .menu-panel { position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:254px; padding:.45rem; background:var(--page); border:1px solid var(--line); border-radius:9px; box-shadow:0 8px 30px #3520431c; font-size:.85rem; } .menu-panel button,.menu-panel a,.menu-panel .file-label { display:flex; width:100%; text-align:left; justify-content:space-between; align-items:center; padding:.6rem .7rem; text-decoration:none; } .menu-panel label { display:block; padding:.6rem .7rem; color:var(--muted); } .menu-panel select { margin-top:.4rem; width:100%; max-width:100%; } select { background:var(--page); color:inherit; border:1px solid var(--line); border-radius:5px; padding:.4rem; } .menu-panel p { color:var(--muted); line-height:1.55; font-size:.78rem; margin:.6rem .7rem; } .menu-divider { border-top:1px solid var(--line); margin:.3rem; } .file-label { position:relative; cursor:pointer; } .file-label:focus-within { outline:2px solid var(--focus); } .file-label input { position:absolute; width:1px; height:1px; opacity:0; } button[aria-pressed=true] { color:var(--accent); background:var(--hover); }
@@ -108,7 +112,7 @@ dialog { background:var(--page); }
   <a class="logo" href="../" aria-label="Roclet home"><img src="./assets/roclet-logo.png" width="127" height="128" alt=""></a>
   <a class="brand" href="../">Roclet</a>
   <nav class="header-menus" aria-label="Notebook menus">
-  <details class="popover" id="document-menu"><summary aria-label="File menu">File</summary><div class="menu-panel">
+  <details class="popover" id="document-menu"><summary aria-label="File menu">File</summary><div class="menu-panel"><p class="menu-target" hidden></p>
     <button id="recovery-copy" hidden>Save a recovery copy</button><button id="new">New notebook</button><button id="rich-example">Rich outputs example</button>
     <label class="file-label">Open…<input id="open" type="file" accept=".roc,.md,.roclet.zip,.zip,text/plain,text/markdown,application/zip" aria-label="Open Roclet notebook"></label>
     <button id="download">Download a copy <kbd>⌘ / Ctrl S</kbd></button>
@@ -118,17 +122,18 @@ dialog { background:var(--page); }
     <label>Recent documents<select id="recent" aria-label="Recent documents"></select></label>
     <p>Drafts are saved in this browser. Downloads are separate copies.</p>
   </div></details>
-  <details class="popover" id="edit-menu"><summary aria-label="Edit menu">Edit</summary><div class="menu-panel">
+  <details class="popover" id="edit-menu"><summary aria-label="Edit menu">Edit</summary><div class="menu-panel"><p class="menu-target" hidden></p>
     <button id="undo" disabled>Undo <kbd>⌘ / Ctrl Z</kbd></button><button id="redo" disabled>Redo <kbd>⇧ ⌘ / Ctrl Z</kbd></button>
     <div class="menu-divider"></div><button id="find">Find in notebook <kbd>⇧ ⌘ / Ctrl F</kbd></button>
   </div></details>
-  <details class="popover" id="view-menu"><summary aria-label="View menu">View</summary><div class="menu-panel">
+  <details class="popover" id="view-menu"><summary aria-label="View menu">View</summary><div class="menu-panel"><p class="menu-target" hidden></p>
     <button id="notebook-view" aria-pressed="true">Notebook view</button><button id="source-view" aria-pressed="false">Source view</button>
     <button id="preview">View runnable Roc</button>
-    <div class="menu-divider"></div><button id="engine-details" aria-pressed="false">Show engine details</button>
+    <div class="menu-divider"></div><button id="open-side">Open side by side…</button><button id="close-side" hidden>Close side panel</button>
+    <button id="engine-details" aria-pressed="false">Show engine details</button>
     <div class="menu-divider"></div><label>Theme<select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
   </div></details>
-  <details class="popover" id="help-menu"><summary aria-label="Help menu">Help</summary><div class="menu-panel">
+  <details class="popover" id="help-menu"><summary aria-label="Help menu">Help</summary><div class="menu-panel"><p class="menu-target" hidden></p>
     <button id="shortcuts">Keyboard shortcuts <kbd>?</kbd></button>
     <a href="./formats.html">Format playground ↗</a>
   </div></details>
@@ -138,7 +143,7 @@ dialog { background:var(--page); }
 <template id="notebook-panel-template"><section class="notebook-panel" data-panel="left" aria-label="Notebook"><div class="panel-scroll" data-part="panel-scroll">
   <div class="panel-title" data-part="title-bar">
   <label class="sr-only" data-part="title-label" data-for="title">Document title</label><input data-part="title" class="title-input" maxlength="120">
-  <div class="run-actions"><label class="auto-label" title="Recompute after editing"><input data-part="auto" type="checkbox" checked>Auto-run</label><button data-part="run" class="run-button" title="Run all cells">▷ Run all</button><button data-part="stop" class="stop" hidden>Stop</button></div>
+  <div class="run-actions"><label class="auto-label" title="Recompute after editing"><input data-part="auto" type="checkbox" checked>Auto-run</label><button data-part="run" class="run-button" title="Run all cells">▷ Run all</button><button data-part="stop" class="stop" hidden>Stop</button><button data-part="close-panel" class="close-panel" title="Close this notebook panel" aria-label="Close this notebook panel" hidden>×</button></div>
   </div>
   <div class="shell">
   <div data-part="notice" class="notice" role="alert" hidden></div><div data-part="document-diagnostics" class="document-diagnostics" aria-live="polite"></div>
@@ -184,6 +189,8 @@ dialog { background:var(--page); }
 <button data-close>Cancel</button><p id="package-status" role="status" aria-live="polite"></p>
 <details><summary>Download details</summary><pre id="package-error" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
 </dialog>
+<dialog id="side-dialog" aria-labelledby="side-title"><div class="dialog-title"><h2 id="side-title">Open side by side</h2><button data-close aria-label="Close side by side">×</button></div>
+<p>Choose a notebook for the right panel. Each panel has its own compiler worker, undo history and status.</p><div id="side-choices" class="side-choices"></div></dialog>
 <dialog id="dependencies-dialog" aria-labelledby="dependencies-title"><div class="dialog-title"><h2 id="dependencies-title">Dependencies & timing</h2><button data-close aria-label="Close dependencies">×</button></div><div id="dependencies-content"></div></dialog>
 <dialog id="rename-dialog" aria-labelledby="rename-title"><div class="dialog-title"><h2 id="rename-title">Rename binding</h2><button data-close aria-label="Close rename">×</button></div><p>Update this definition and its resolved references across the notebook.</p><input id="rename-name" aria-label="New binding name" autocomplete="off"><button id="rename-apply">Rename</button><p id="rename-error" role="status"></p></dialog>
 <dialog id="generated-dialog" aria-labelledby="generated-title"><div class="dialog-title"><h2 id="generated-title">Runnable Roc</h2><button data-close aria-label="Close runnable Roc">×</button></div><pre id="generated"></pre></dialog>

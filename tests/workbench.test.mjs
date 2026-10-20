@@ -1,10 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {assignPanelIds,partId,engineDetails,engineStats,engineDetailsKey,readPreference,writePreference} from '../web/workbench.mjs';
+import {assignPanelIds,partId,engineDetails,engineStats,engineDetailsKey,readPreference,writePreference,parseLayout,parseSlot,layoutUrl,openDecision,documentTitle,statusDot,Workbench} from '../web/workbench.mjs';
 import {PackagePrompts} from '../web/package-dialog.mjs';
 import {BrowserPackages} from '../web/packages.mjs';
 import {encodeCacheStream} from '../web/build-cache.mjs';
-import {Notebook,newDraft} from '../web/edit-model.mjs';
+import {Notebook,newDraft,independentCopy,validDraft} from '../web/edit-model.mjs';
 
 // A dialog driver that records prompts; each prompt is answered by the test.
 function fakeDriver() {
@@ -104,6 +104,113 @@ test('two notebooks keep their own workers: stop and document switches stay in t
   await left.replace(newDraft('Other'));await left.run();await right.run();
   assert.deepEqual(sessions[0].sent.at(-1).reactivity,{reset:true});assert.deepEqual(sessions[1].sent.at(-1).reactivity,{});
   left.dispose();right.dispose();
+});
+
+test('layout URLs name the right slot and leave one-panel URLs alone',()=>{
+  const base='https://roclet.test/web/edit.html';
+  assert.deepEqual(parseLayout(`${base}?notebook=A&right=B`),{left:{id:'A',fresh:false,example:null,publication:null},right:{id:'B'}});
+  assert.deepEqual(parseLayout(`${base}?example=reactivity&right=example:weather`).right,{example:'weather'});
+  assert.equal(parseLayout(`${base}?example=reactivity&right=example:weather`).left.example,'reactivity');
+  assert.deepEqual(parseSlot('new'),{fresh:true});
+  assert.match(parseSlot('example:https://evil.invalid/x.roc').error,/Unknown example/);
+  assert.equal(parseSlot(''),null);assert.equal(parseLayout(`${base}?notebook=A`).right,null);
+  assert.equal(layoutUrl(`${base}?example=reactivity&right=new#top`,{left:'A',right:'B'}),'/web/edit.html?notebook=A&right=B#top');
+  assert.equal(layoutUrl(`${base}?notebook=A&right=B`,{}),'/web/edit.html');
+  // Round trip: the written URL restores the same two drafts.
+  const written=layoutUrl(base,{left:'id 1',right:'id/2'}),restored=parseLayout(new URL(written,base).href);
+  assert.deepEqual([restored.left.id,restored.right.id],['id 1','id/2']);
+});
+
+test('a draft can be open in only one panel',()=>{
+  assert.deepEqual(openDecision({left:'A',right:'B'},'right','A'),{action:'refuse',other:'left'});
+  assert.deepEqual(openDecision({left:'A',right:'B'},'left','B'),{action:'refuse',other:'right'});
+  assert.deepEqual(openDecision({left:'A',right:'B'},'right','B'),{action:'noop'});
+  assert.deepEqual(openDecision({left:'A',right:null},'right','C'),{action:'open'});
+  assert.deepEqual(openDecision({left:'A',right:null},'left','B'),{action:'open'});
+  assert.deepEqual(openDecision({left:'A',right:'B'},'right',null),{action:'open'});
+});
+
+test('titles and tab status dots describe each panel',()=>{
+  assert.equal(documentTitle(['Wall area']),'Wall area — Roclet');
+  assert.equal(documentTitle(['Left','']),'Left | Untitled — Roclet');
+  assert.equal(documentTitle([]),'Roclet');
+  assert.equal(statusDot({status:'Running…',saveStatus:'Saved in this browser'}).state,'running');
+  assert.equal(statusDot({status:'Needs attention · 1 failed test',saveStatus:'Saved in this browser'}).state,'attention');
+  assert.equal(statusDot({status:'Running…',saveStatus:'Not saved: quota. Download a copy.'}).state,'unsaved');
+  assert.equal(statusDot({status:'Current · 2 results',saveStatus:'Saved in this browser'}).state,'idle');
+});
+
+test('an independent copy has a new id, fresh cell keys and the same content',()=>{
+  const original={...newDraft('Notes',true),files:[{path:'Geometry.roc',source:'module [area]\narea = 15'}],_storageVersion:'v1'};
+  const copy=independentCopy(original);
+  assert(validDraft(copy));assert.notEqual(copy.id,original.id);assert.equal(copy.title,'Notes (copy)');
+  assert.equal(copy._storageVersion,undefined);assert.equal(copy.revision,1);
+  assert.deepEqual(copy.cells.map(c=>c.source),original.cells.map(c=>c.source));
+  assert(copy.cells.every((cell,i)=>cell.key!==original.cells[i].key));
+  assert.deepEqual(copy.files,original.files);assert.notEqual(copy.files,original.files);
+  assert(independentCopy({...original,title:'x'.repeat(200)}).title.length<=120);
+});
+
+// Panels made of a real Notebook with a fake session and an in-memory store.
+function memoryStore(records=new Map()) {
+  return {records,closed:false,
+    async get(id){const r=records.get(id);return r&&structuredClone(r);},
+    async save(record){records.set(record.id,structuredClone(record));},
+    async list(){return [...records.values()].map(r=>structuredClone(r));},
+    async fork(){return memoryStore(records);},close(){this.closed=true;}};
+}
+function fakeWorkbench(records) {
+  const store=memoryStore(records),history={urls:[],replaceState(_,__,url){this.urls.push(url);}};
+  const created=[];
+  const bench=new Workbench({store,history,location:{href:'https://roclet.test/web/edit.html'},document:{title:''},
+    createPanel:({slot,store,onChange})=>{
+      const session={stop(){},invalidate(){},request:async()=>({status:'ok',graph:{},model:{cells:[],diagnostics:[]},evaluation:{status:'ok',values:[],events:[]}})};
+      const panel={slot,store,notices:[],disposed:false,focused:0,
+        notebook:new Notebook(null,store,{session,debounce:60000,onChange:reason=>onChange(panel,reason)}),
+        get title(){return this.notebook.state?.title||'Untitled';},
+        notice(message,actions=[]){this.notices.push({message,actions});},focus(){this.focused++;},
+        dispose(){this.disposed=true;this.notebook.dispose();}};
+      created.push(panel);return panel;
+    }});
+  return {bench,store,history,created,page:bench.page};
+}
+
+test('the workbench opens a second draft, refuses a duplicate and offers a copy',async()=>{
+  const a=newDraft('Alpha'),b=newDraft('Beta');a.autoRun=b.autoRun=false;
+  const {bench,history,created,page}=fakeWorkbench(new Map([[a.id,a],[b.id,b]]));
+  const left=await bench.addPanel('left');await left.notebook.initialize({id:a.id});
+  const right=await bench.open('right',{id:b.id});
+  assert.equal(bench.panels.length,2);assert.equal(right.notebook.state.id,b.id);assert.notEqual(right.store,left.store);
+  assert.equal(history.urls.at(-1),`/web/edit.html?notebook=${a.id}&right=${b.id}`);
+  assert.equal(page.title,'Alpha | Beta — Roclet');assert.equal(bench.active,right);
+  // Choosing the left draft in the right panel leaves the right panel as it was.
+  await bench.open('right',{id:a.id});
+  assert.equal(right.notebook.state.id,b.id);
+  const refusal=right.notices.at(-1);assert.match(refusal.message,/already open in the left panel/);
+  const [goTo,copy]=refusal.actions;assert.equal(goTo[0],'Go to it');assert.equal(copy[0],'Open an independent copy here');
+  goTo[1]();assert.equal(bench.active,left);assert.equal(left.focused,1);
+  await copy[1]();
+  assert.notEqual(right.notebook.state.id,a.id);assert.equal(right.notebook.state.title,'Alpha (copy)');
+  assert.equal(right.notebook.saveStatus,'Saved in this browser');assert.equal(left.notebook.saveStatus,'Saved in this browser');
+  assert.equal(created.length,2);bench.dispose();
+});
+
+test('closing the left panel moves the right document into the left slot',async()=>{
+  const a=newDraft('Alpha'),b=newDraft('Beta');a.autoRun=b.autoRun=false;
+  const {bench,history}=fakeWorkbench(new Map([[a.id,a],[b.id,b]]));
+  const left=await bench.addPanel('left');await left.notebook.initialize({id:a.id});
+  const right=await bench.open('right',{id:b.id});
+  right.notebook.change(s=>{s.title='Beta edited';});
+  await bench.close('left');
+  assert.equal(bench.panels.length,1);assert(right.disposed);assert(right.store.closed);
+  assert.equal(left.notebook.state.id,b.id);assert.equal(left.notebook.state.title,'Beta edited');
+  assert.equal(left.notebook.resetBaseline,true,'the next request resets the engine baseline');
+  assert.equal(left.notebook.saveStatus,'Saved in this browser');
+  assert.equal(history.urls.at(-1),'/web/edit.html');
+  // A refused URL right=left opens an empty right panel with the notice.
+  const refused=await bench.open('right',{id:b.id},{focus:false});
+  assert.equal(refused.notebook.state,null);assert.match(refused.notices.at(-1).message,/already open/);
+  await bench.close('right');assert.equal(bench.panels.length,1);bench.dispose();
 });
 
 test('the engine details preference defaults off and survives unavailable storage',()=>{
