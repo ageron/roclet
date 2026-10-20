@@ -118,7 +118,6 @@ pub fn build(b: *std.Build) void {
     documents.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     documents.step.dependOn(&cli.step);
     documents.has_side_effects = true;
-    b.step("test-documents", "Test document formats and generate WASM parity cases").dependOn(&documents.step);
     test_step.dependOn(&documents.step);
     const m4 = b.addExecutable(.{ .name = "roclet-m4-tests", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/m4.zig"),
@@ -132,6 +131,17 @@ pub fn build(b: *std.Build) void {
     m4_tests.has_side_effects = true;
     b.step("test-m4", "Check selective evaluation against full recomputation").dependOn(&m4_tests.step);
     test_step.dependOn(&m4_tests.step);
+    // The wire shape pin covers every request and result both suites record.
+    const protocol_shape = b.addRunArtifact(document_tests);
+    protocol_shape.addArgs(&.{ root, "--protocol-shape" });
+    if (b.option(bool, "update-protocol-shape", "Rewrite tests/protocol-shape.json from the recorded document and M4 cases") orelse false) protocol_shape.addArg("--update");
+    protocol_shape.step.dependOn(&documents.step);
+    protocol_shape.step.dependOn(&m4_tests.step);
+    protocol_shape.has_side_effects = true;
+    test_step.dependOn(&protocol_shape.step);
+    const documents_step = b.step("test-documents", "Test document formats, generate WASM parity cases and check the pinned wire shape");
+    documents_step.dependOn(&documents.step);
+    documents_step.dependOn(&protocol_shape.step);
     const engine_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = b.createModule(.{
         .root_source_file = b.path("tests/engine.zig"),
         .target = b.graph.host,

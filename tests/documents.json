@@ -3887,5 +3887,31 @@
         }
       ]
     }
+  },
+  {
+    "name": "syntax: Roc facts and Markdown blocks",
+    "request": {
+      "operation": "syntax",
+      "source": "# Title\n\n```roc\nwidth = 5\n```\n"
+    },
+    "expect": {
+      "response_keys": [
+        "facts",
+        "blocks"
+      ]
+    }
+  },
+  {
+    "name": "markdown: rendering events",
+    "request": {
+      "operation": "markdown",
+      "source": "# Heading\n\n**Bold** and [safe](https://example.com).\n\n| a | b |\n| - | - |\n| 1 | 2 |\n"
+    },
+    "expect": {
+      "response_keys": [
+        "status",
+        "events"
+      ]
+    }
   }
 ]

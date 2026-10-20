@@ -79,6 +79,15 @@ pub const Suite = struct {
             try request.object.put(self.a, "modules", .{ .array = modules });
         }
         const wanted = field(fixture, "expect");
+        if (wanted.object.get("response_keys")) |keys| {
+            // `operation: "syntax"` and `"markdown"` answer with facts or
+            // rendering events rather than a document; only their members are checked.
+            const result = try self.call(name, request);
+            errdefer std.debug.print("FAIL {s}\n{s}\n", .{ name, json(self.a, result) catch "" });
+            for (keys.array.items) |key| try expect(result.object.get(key.string) != null);
+            std.debug.print("PASS {s}: {s}\n", .{ str(request, "operation"), name });
+            return;
+        }
         if (wanted.object.get("program_events")) |events| {
             // `operation: "program"` answers with the script response: no document
             // model, and the host's observations are its top-level `events`.
@@ -300,10 +309,99 @@ pub const Suite = struct {
         std.debug.print("PASS document: {s}\n", .{name});
     }
 };
+/// JSON types as the wire sees them, in the order a pin line lists them.
+const json_types = [_][]const u8{ "array", "boolean", "null", "number", "object", "string" };
+fn typeIndex(v: V) u3 {
+    return switch (v) {
+        .array => 0,
+        .bool => 1,
+        .null => 2,
+        .integer, .float, .number_string => 3,
+        .object => 4,
+        .string => 5,
+    };
+}
+/// Record the type of `v` at `path` and of everything below it; `[]` marks array elements.
+fn observe(a: A, shape: *std.StringArrayHashMapUnmanaged(u8), path: []const u8, v: V) !void {
+    const entry = try shape.getOrPut(a, path);
+    if (!entry.found_existing) entry.value_ptr.* = 0;
+    entry.value_ptr.* |= @as(u8, 1) << typeIndex(v);
+    switch (v) {
+        .object => |object| {
+            var fields = object.iterator();
+            while (fields.next()) |f| try observe(a, shape, try std.mem.concat(a, u8, &.{ path, ".", f.key_ptr.* }), f.value_ptr.*);
+        },
+        .array => |array| {
+            const element = try std.mem.concat(a, u8, &.{ path, "[]" });
+            for (array.items) |item| try observe(a, shape, element, item);
+        },
+        else => {},
+    }
+}
+fn lessThan(_: void, l: []const u8, r: []const u8) bool {
+    return std.mem.order(u8, l, r) == .lt;
+}
+fn contains(lines: []const []const u8, line: []const u8) bool {
+    for (lines) |other| if (eq(other, line)) return true;
+    return false;
+}
+/// The wire shape pin: every `"<operation>.<request|result>.<key.path> <type|type>"`
+/// line observed across the recorded requests and results of the document and
+/// M4 suites, compared with `tests/protocol-shape.json`, or written to it with
+/// `--update`.
+fn protocolShape(a: A, io: std.Io, root: []const u8, update: bool) !void {
+    var shape: std.StringArrayHashMapUnmanaged(u8) = .empty;
+    for ([_][]const u8{ "artifacts/document-conformance.json", "artifacts/m4-conformance.json" }) |file| {
+        const recorded = try parse(a, try std.Io.Dir.cwd().readFileAlloc(io, try std.fs.path.join(a, &.{ root, file }), a, .limited(256 * 1024 * 1024)));
+        for (field(recorded, "cases").array.items) |case| {
+            // Each operation answers with its own response type, so paths are
+            // rooted at the operation: `markdown.result.events[].kind` and
+            // `program.result.events[].kind` are different fields.
+            const request = field(case, "request");
+            const operation = if (request.object.get("operation")) |o| if (o == .string) o.string else "invalid" else "invalid";
+            try observe(a, &shape, try std.mem.concat(a, u8, &.{ operation, ".request" }), request);
+            try observe(a, &shape, try std.mem.concat(a, u8, &.{ operation, ".result" }), field(case, "result"));
+        }
+    }
+    var observed: std.ArrayList([]const u8) = .empty;
+    var paths = shape.iterator();
+    while (paths.next()) |entry| {
+        var types: std.ArrayList([]const u8) = .empty;
+        for (json_types, 0..) |name, i| if (entry.value_ptr.* & (@as(u8, 1) << @intCast(i)) != 0) try types.append(a, name);
+        try observed.append(a, try std.mem.concat(a, u8, &.{ entry.key_ptr.*, " ", try std.mem.join(a, "|", types.items) }));
+    }
+    std.mem.sort([]const u8, observed.items, {}, lessThan);
+    const pin = try std.fs.path.join(a, &.{ root, "tests/protocol-shape.json" });
+    if (update) {
+        var w: std.Io.Writer.Allocating = .init(a);
+        try std.json.Stringify.value(observed.items, .{ .whitespace = .indent_2 }, &w.writer);
+        try w.writer.writeByte('\n');
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = pin, .data = w.written() });
+        std.debug.print("WROTE tests/protocol-shape.json: {d} key paths\n", .{observed.items.len});
+        return;
+    }
+    const pinned = try std.json.parseFromSliceLeaky([]const []const u8, a, try std.Io.Dir.cwd().readFileAlloc(io, pin, a, .limited(1024 * 1024)), .{});
+    var mismatches: usize = 0;
+    for (observed.items) |line| if (!contains(pinned, line)) {
+        std.debug.print("+ {s}\n", .{line});
+        mismatches += 1;
+    };
+    for (pinned) |line| if (!contains(observed.items, line)) {
+        std.debug.print("- {s}\n", .{line});
+        mismatches += 1;
+    };
+    if (mismatches > 0) {
+        std.debug.print("FAIL protocol shape: {d} lines differ from tests/protocol-shape.json (+ observed, - pinned).\nIf the change is intended, run `zig build test-documents -Dupdate-protocol-shape` and commit the diff.\n", .{mismatches});
+        return error.ProtocolShapeChanged;
+    }
+    std.debug.print("PASS protocol shape: {d} key paths match tests/protocol-shape.json\n", .{observed.items.len});
+}
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
     const args = try init.minimal.args.toSlice(a);
     const root = args[1];
+    // `<root> --protocol-shape [--update]` runs after both suites have recorded their cases.
+    if (args.len > 2 and eq(args[2], "--protocol-shape")) return protocolShape(a, init.io, root, args.len > 3 and eq(args[3], "--update"));
     const temp = try std.fs.path.join(a, &.{ root, "artifacts/document-request.tmp.json" });
     defer std.Io.Dir.cwd().deleteFile(init.io, temp) catch {};
     var suite: Suite = .{ .a = a, .io = init.io, .executable = args[2], .temp = temp };
