@@ -40,7 +40,7 @@
 .logo { grid-column:1; grid-row:1 / 3; align-self:center; width:70px; height:54px; }
 .logo img { width:100%; height:100%; object-fit:contain; display:block; }
 .document-name { grid-column:2; grid-row:1; display:flex; align-items:center; min-width:0; gap:.6rem; padding-left:calc(.5rem + 1px); }
-.brand { font-size:1.05rem; font-weight:750; letter-spacing:-.04em; color:var(--brand); white-space:nowrap; }
+.brand { text-decoration:none; font-size:1.05rem; font-weight:750; letter-spacing:-.04em; color:var(--brand); white-space:nowrap; }
 #title { min-width:0; width:100%; max-width:540px; color:var(--text); font-size:1.05rem; padding:.2rem .45rem; background:transparent; border:1px solid transparent; border-radius:5px; text-overflow:ellipsis; } #title:hover { border-color:var(--line); } #title:focus { border-color:var(--focus); }
 .header-menus { grid-column:2 / 4; grid-row:2; display:flex; align-items:center; gap:.1rem; min-width:0; }
 .header-menus > .popover > summary { padding:.2rem .5rem; font-size:.82rem; }
@@ -64,7 +64,7 @@ footer { display:flex; justify-content:space-between; align-items:center; gap:1r
 @keyframes output-spin { to { transform:rotate(360deg); } }
 dialog select { max-width:100%; } #find-results { grid-template-columns:minmax(0,1fr); } #find-results button { text-align:left; overflow-wrap:anywhere; min-width:0; }
 @media(hover:none) { .cell-tools { opacity:1; pointer-events:auto; } .insertion button { opacity:1; } }
-@media(max-width:680px) { .document-bar { padding:.4rem .6rem; column-gap:.4rem; } .logo { width:65px; height:50px; } .brand { font-size:.85rem; } .document-name { gap:.25rem; } #title { font-size:.9rem; padding-inline:.25rem; } .run-actions { gap:.15rem; font-size:.8rem; } .run-actions button { padding:.35rem; } .auto-label { font-size:.7rem; gap:.15rem; } .header-menus .popover { position:static; } .header-menus .menu-panel { left:.6rem; right:auto; top:calc(100% + 5px); width:min(300px,calc(100vw - 24px)); }
+@media(max-width:680px) { .document-bar { padding:.4rem .6rem; column-gap:.4rem; } .logo { width:65px; height:50px; } .brand { text-decoration:none; font-size:.85rem; } .document-name { gap:.25rem; } #title { font-size:.9rem; padding-inline:.25rem; } .run-actions { gap:.15rem; font-size:.8rem; } .run-actions button { padding:.35rem; } .auto-label { font-size:.7rem; gap:.15rem; } .header-menus .popover { position:static; } .header-menus .menu-panel { left:.6rem; right:auto; top:calc(100% + 5px); width:min(300px,calc(100vw - 24px)); }
 .shell { padding:1rem 2.8rem 3rem .4rem; } .cell { --cell-gap:6px; grid-template-columns:24px minmax(0,1fr) 30px; } .document-status { padding-left:30px; font-size:.7rem; flex-wrap:wrap; gap:.25rem; } .insertion,footer,#document-diagnostics,#notice { margin-left:30px; } textarea { padding:.85rem .8rem; font-size:13px; } .cell-preview,.result-block { padding:.6rem .8rem; } footer { flex-wrap:wrap; }  .shortcuts { grid-template-columns:120px 1fr; } }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important; } .output-spinner { animation:none !important; } }
 
@@ -89,8 +89,8 @@ dialog { background:var(--page); }
 </head>
 <body>
 <header class="document-bar">
-  <div class="logo" aria-hidden="true"><img src="./assets/roclet-logo.png" width="127" height="128" alt=""></div>
-  <div class="document-name"><span class="brand">Roclet</span>
+  <a class="logo" href="../" aria-label="Roclet home"><img src="./assets/roclet-logo.png" width="127" height="128" alt=""></a>
+  <div class="document-name"><a class="brand" href="../">Roclet</a>
   <label class="sr-only" for="title">Document title</label><input id="title" value="Wall area" maxlength="120"></div>
   <div class="run-actions"><label class="auto-label" title="Recompute after editing"><input id="auto" type="checkbox" checked>Auto-run</label><button id="run" title="Run all cells">▷ Run all</button><button id="stop" class="stop" hidden>Stop</button></div>
   <nav class="header-menus" aria-label="Notebook menus">

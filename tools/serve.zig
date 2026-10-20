@@ -16,12 +16,12 @@ fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
         if (c < 32 or c == 127 or c == '\\') return error.InvalidPath;
         try decoded.append(gpa, c);
     }
-    if (std.mem.eql(u8, decoded.items, "/")) return gpa.dupe(u8, "web/index.html");
+    if (std.mem.eql(u8, decoded.items, "/")) return gpa.dupe(u8, "index.html");
     if (decoded.items.len == 0 or decoded.items[0] != '/') return error.InvalidPath;
     const relative = decoded.items[1..];
     var segments = std.mem.splitScalar(u8, relative, '/');
     while (segments.next()) |segment| if (segment.len == 0 or segment[0] == '.') return error.InvalidPath;
-    if (std.mem.eql(u8, relative, "LICENSE") or std.mem.eql(u8, relative, "THIRD_PARTY_NOTICES.md")) return gpa.dupe(u8, relative);
+    if (std.mem.eql(u8, relative, "index.html") or std.mem.eql(u8, relative, "LICENSE") or std.mem.eql(u8, relative, "THIRD_PARTY_NOTICES.md")) return gpa.dupe(u8, relative);
     for ([_][]const u8{ "demos/", "web/", "compiler-adapter/", "core/", "package/", "fixtures/", "tests/", "artifacts/" }) |prefix| {
         if (std.mem.startsWith(u8, relative, prefix)) return gpa.dupe(u8, relative);
     }

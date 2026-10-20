@@ -73,15 +73,18 @@ pub fn main(init: std.process.Init) !void {
     try write(a, io, root, "web/vendor/md4c.LICENSE.md", try read(a, io, root, "vendor/md4c/LICENSE.md"));
     var paths: std.ArrayList([]const u8) = .empty;
     for ([_][]const u8{
-        "LICENSE",                    "THIRD_PARTY_NOTICES.md",      "demos/01-reactivity.roc",             "demos/02-a-little-data.roc",   "demos/03-circle.roc",
-        "web/assets/roclet-logo.png", "web/edit.html",               "web/edit.mjs",                        "web/edit-model.mjs",           "web/compiler-tools.mjs",
-        "web/edit-store.mjs",         "web/edit-cells.mjs",          "web/cell-editor.mjs",                 "web/editor-navigation.mjs",    "web/roc-highlighting.mjs",
-        "web/document-session.mjs",   "web/format-worker.mjs",       "web/markdown-view.mjs",               "web/archive.mjs",              "web/sharing.mjs",
-        "web/offline.mjs",            "web/offline-cache.mjs",       "web/offline-runtime.mjs",             "web/formats.html",             "web/formats.mjs",
-        "compiler-adapter/wasm.mjs",  "artifacts/roclet.wasm",       "artifacts/manifest.json",             "compiler-adapter/ROC-LICENSE", "web/vendor/md4c.LICENSE.md",
-        "web/math-view.mjs",          "web/vendor/katex/katex.mjs",  "web/vendor/katex/katex.css",          "web/vendor/katex/LICENSE",     "web/vendor/katex/README.md",
-        "web/vendor/katex/lock.json", "web/vendor/editor/lock.json", "web/vendor/editor/README.md",         "web/display-view.mjs",         "package/Display.roc",
-        "package/README.md",          "package/main.roc",            "fixtures/documents/rich-outputs.roc",
+        "index.html",                   "web/home.mjs",                "web/home.css",                        "web/assets/roclet-logo-large.png",
+        "LICENSE",                      "THIRD_PARTY_NOTICES.md",      "demos/01-reactivity.roc",             "demos/02-a-little-data.roc",
+        "demos/03-circle.roc",          "web/assets/roclet-logo.png",  "web/edit.html",                       "web/edit.mjs",
+        "web/edit-model.mjs",           "web/compiler-tools.mjs",      "web/edit-store.mjs",                  "web/edit-cells.mjs",
+        "web/cell-editor.mjs",          "web/editor-navigation.mjs",   "web/roc-highlighting.mjs",            "web/document-session.mjs",
+        "web/format-worker.mjs",        "web/markdown-view.mjs",       "web/archive.mjs",                     "web/sharing.mjs",
+        "web/offline.mjs",              "web/offline-cache.mjs",       "web/offline-runtime.mjs",             "web/formats.html",
+        "web/formats.mjs",              "compiler-adapter/wasm.mjs",   "artifacts/roclet.wasm",               "artifacts/manifest.json",
+        "compiler-adapter/ROC-LICENSE", "web/vendor/md4c.LICENSE.md",  "web/math-view.mjs",                   "web/vendor/katex/katex.mjs",
+        "web/vendor/katex/katex.css",   "web/vendor/katex/LICENSE",    "web/vendor/katex/README.md",          "web/vendor/katex/lock.json",
+        "web/vendor/editor/lock.json",  "web/vendor/editor/README.md", "web/display-view.mjs",                "package/Display.roc",
+        "package/README.md",            "package/main.roc",            "fixtures/documents/rich-outputs.roc",
     }) |path| try paths.append(a, path);
     const lock = try std.json.parseFromSliceLeaky(std.json.Value, a, try read(a, io, root, "web/vendor/editor/lock.json"), .{});
     for (lock.object.get("packages").?.array.items) |package| {
@@ -108,7 +111,6 @@ pub fn main(init: std.process.Init) !void {
         var site: std.ArrayList(File) = .empty;
         for (files.items) |file| if (!std.mem.eql(u8, file.path, "roclet-serve")) try site.append(a, file);
         try site.append(a, .{ .path = ".nojekyll", .data = "" });
-        try site.append(a, .{ .path = "index.html", .data = "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Roclet</title><meta http-equiv=\"refresh\" content=\"0;url=web/edit.html\"><p><a href=\"web/edit.html\">Open Roclet</a></p><script>location.replace('web/edit.html'+location.search+location.hash)</script></html>" });
         try write(a, io, root, "zig-out/roclet-pages.zip", try archive(a, site.items));
         const distribution = try archive(a, files.items);
         try write(a, io, root, "zig-out/roclet.zip", distribution);

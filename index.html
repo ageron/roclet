@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Reactive Roc notebooks, right in your browser. Start an idea, pick up a notebook, or explore a demo.">
+<title>Roclet — Ideas, meet Roc.</title>
+<script>
+(()=>{const system=matchMedia('(prefers-color-scheme: dark)');let preference='system';try{preference=localStorage.getItem('roclet.theme')||'system';}catch{}const apply=()=>document.documentElement.dataset.theme=preference==='dark'||(preference==='system'&&system.matches)?'dark':'light';apply();system.addEventListener('change',apply);addEventListener('storage',e=>{if(e.key==='roclet.theme'||e.key===null){preference=e.newValue||'system';apply();}});})();
+</script>
+<link rel="icon" href="web/assets/roclet-logo.png">
+<link rel="stylesheet" href="web/home.css">
+<script type="module" src="web/home.mjs"></script>
+</head>
+<body>
+<div class="page">
+<header><a class="wordmark" href="./" aria-label="Roclet home">Roclet</a><a class="repo" href="https://github.com/ageron/roclet">GitHub <span aria-hidden="true">↗</span></a></header>
+<main>
+<section class="hero" aria-labelledby="welcome">
+  <div class="intro"><p class="eyebrow">Reactive notebooks in Roc</p><h1 id="welcome">Ideas, meet Roc.</h1><p class="description">Runs in your browser, even offline.<br>Change a value, see what follows.</p><a class="primary" href="web/edit.html?new=1"><span aria-hidden="true">＋</span> New notebook</a><p class="quiet">No installation or account needed, and your work stays with you.</p></div>
+  <img class="hero-logo" src="web/assets/roclet-logo-large.png" width="640" height="640" alt="Roclet’s purple and turquoise origami hummingbird" fetchpriority="high">
+</section>
+<div class="workspace">
+<section aria-labelledby="recent-heading"><div class="section-heading"><h2 id="recent-heading">Pick up where you left off</h2><span class="local-note">In this browser</span></div><p id="recent-status" class="empty" role="status">Loading recent notebooks…</p><ul id="recents" class="recent-list"></ul><button id="show-all" class="text-button" hidden>Show all notebooks</button></section>
+<section aria-labelledby="demos-heading"><div class="section-heading"><h2 id="demos-heading">Try a little something</h2></div><ul class="demo-list">
+<li><a href="web/edit.html?example=reactivity"><span class="demo-number" aria-hidden="true">01</span><span><strong>Everything is connected</strong><span class="detail">Change one value and watch the rest follow.</span></span><span class="arrow" aria-hidden="true">↗</span></a></li>
+<li><a href="web/edit.html?example=weather"><span class="demo-number" aria-hidden="true">02</span><span><strong>A little data, a clearer picture</strong><span class="detail">Turn three days of weather into a live table.</span></span><span class="arrow" aria-hidden="true">↗</span></a></li>
+<li><a href="web/edit.html?example=circle"><span class="demo-number" aria-hidden="true">03</span><span><strong>Go around in circles</strong><span class="detail">Mix equations, explanations, and calculations.</span></span><span class="arrow" aria-hidden="true">↗</span></a></li>
+<li><a href="web/edit.html?example=rich-outputs"><span class="demo-number" aria-hidden="true">04</span><span><strong>More than a number</strong><span class="detail">Markdown, tables, and images as live results.</span></span><span class="arrow" aria-hidden="true">↗</span></a></li>
+</ul></section>
+</div>
+</main>
+<footer><span>Made for curiosity, built with <a href="https://www.roc-lang.org/">Roc</a>.</span><a href="https://github.com/ageron/roclet/issues">Feedback & ideas <span aria-hidden="true">↗</span></a></footer>
+</div>
+</body>
+</html>
