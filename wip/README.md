@@ -2,7 +2,7 @@
 
 **Temporary.** Everything in `wip/` is a handoff plan for work that has not
 started. Delete each plan when its feature lands; delete this directory when
-all six are done. Nothing here is user documentation or a design record.
+all seven are done. Nothing here is user documentation or a design record.
 
 These plans came out of an architecture review of the core compiler
 integration and notebook management on 2026-10-20, on branch
@@ -131,6 +131,7 @@ deferred to one final validation pass when the PR is ready.
 | 06 step E (single `operation` dispatch) | Merged (`plan/06e-retire-legacy-dispatch`) |
 | 03 checked dependency graph | In progress |
 | 06 step F (pin the wire shape) | Not started (after 03) |
+| 07 side-by-side notebooks | Planned; implement after 03 and 06 step F |
 
 ### Deferred final validation (LLVM)
 
