@@ -199,6 +199,41 @@ the native Debug engine since checking and lowering moved out of the fixed
 512 MiB revision buffer into growable arenas; only its 461 KiB LIR image is
 flat (`compiler-adapter/README.md`).
 
+## Two notebooks side by side
+
+The editor can show two notebooks at once (`web/workbench.mjs`,
+`web/notebook-panel.mjs`). Each panel owns a `Notebook`, so it has its own
+notebook worker and therefore its own `Engine`, retained revision, reactive
+baseline and workspace files; it also saves through its own `DraftStore`
+instance. The panels share the syntax highlighter worker, one `PackagePrompts`
+coordinator for the page's package dialog, and the compiler `ArrayBuffer`, so
+every worker starts from one compiled `WebAssembly.Module`. The compiler
+artifact and package caches in IndexedDB are shared by design: a panel opened
+after another has run starts warm, and a worker that misses a package re-reads
+the persistent cache before downloading or prompting. Requests are unchanged;
+the side-by-side layout adds no protocol fields.
+
+`web/dual-conformance.html` exercises the engine changes with two engines alive:
+concurrent evaluation equal to each document alone, per-engine `workspaceCache`
+counters and retained revisions, reuse that ignores the other panel (including a
+comment edit and a type declaration), `reset` on a document switch, `dbg` and
+`expect` attribution, per-panel Stop, one shared package prompt, one module
+compilation, per-worker `memoryBytes` within 256 MiB each and 512 MiB together,
+per-panel project files, focus routing, concurrent saves, the one-panel-per-draft
+rule and closing either panel. `tools/browser-dual-package-probe.mjs` repeats
+the package flow with the real file picker.
+
+```sh
+node tools/browser-check.mjs --page web/dual-conformance.html
+node tools/browser-check.mjs --page 'web/dual-conformance.html?medium'
+node tools/browser-check.mjs --page 'web/dual-conformance.html?compact'
+node tools/browser-check.mjs --page 'web/edit.html?example=meeting-windows&right=example:meeting-windows' \
+  --script tools/browser-dual-package-probe.mjs --upload-plan plan.json
+```
+
+The upload plan selects the roc-time 0.2.0 bundle once; add `--viewport 390x960`
+for the tabs layout.
+
 ## Package hosting
 
 Package downloads are direct by default. When CORS restrictions or network errors

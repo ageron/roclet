@@ -94,6 +94,8 @@ builds additionally need an assembly workaround in the prepared compiler and are
 not supported yet.
 
 Browser checks run separately: open `/web/edit-ui-conformance.html`,
+`/web/dual-conformance.html` (side-by-side notebooks; add `?medium` or
+`?compact` for the 1000px and 390px layouts),
 `/web/document-conformance.html`, `/web/m5-conformance.html`, and
 `/web/math-conformance.html` on your local server. `zig build test` does not launch Chrome.
 Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
