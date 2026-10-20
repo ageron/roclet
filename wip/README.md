@@ -23,7 +23,7 @@ relying on them, since the branch moves.
 | --- | --- | --- |
 | 01 Typed engine pipeline (done) | `document.zig` calls the retained revision through typed Zig functions instead of re-entering the public JSON entry point once per root. JSON exists only at the WASM/native boundary. | Per-root JSON re-parse, re-hash and a repeated O(definitions × CIR nodes) analysis scale with cells × roots. Also shares one app-header synthesiser between the notebook and script pipelines; the check/run/export script path keeps its own pipeline but loses its JSON hop. |
 | 02 Engine-owned baseline (done) | The engine retains the last successful presentation per root and returns complete value sets with `reused` flags. JS stops carrying the previous graph and merging old results. | The previous graph lives in four places with duplicated elision logic; reuse is decided in Zig but performed in JS. |
-| [03 Checked dependency graph](03-checked-dependency-graph.md) | Definition fingerprints come from checked CIR, not source text; type declarations and annotations become graph nodes and edges; the module-scope fallback shrinks. | A comment edit between cells invalidates every root today, and any nominal type declaration disables selective evaluation entirely. |
+| 03 Checked dependency graph (done) | Definition fingerprints come from checked CIR, not source text; type declarations and annotations become graph nodes and edges; the module-scope fallback shrinks. | A comment edit between cells invalidates every root today, and any nominal type declaration disables selective evaluation entirely. |
 | 04 Engine state struct (done) | Module-level globals become an explicit `Engine` struct with a request-scoped observer. | Single-tenant engine, nesting-dependent event attribution, no in-process parallel tests, header parsed through a workspace side channel. |
 | 05 Image buffer vs revision arena (done) | Only what the LIR image requires lives in a flat buffer; everything else in a growable arena; the flat buffer is sized adaptively. | A fixed 512 MiB reservation per revision sets both the memory floor and a hard ceiling that the Debug engine already hits. |
 | [06 Retire legacy paths](06-retire-legacy-paths.md) | One worker protocol, one bridge dispatch, one source of truth for protocol types; dead build wiring removed. | Three dispatch paths, two session/worker protocols, an unused Roc core import and a drifting `protocol.d.ts`. |
@@ -129,9 +129,9 @@ deferred to one final validation pass when the PR is ready.
 | 05 image buffer | Merged (`plan/05-image-buffer`; step 6 landed with plan 01) |
 | 02 engine-owned baseline | Merged (`plan/02-engine-baseline`) |
 | 06 step E (single `operation` dispatch) | Merged (`plan/06e-retire-legacy-dispatch`) |
-| 03 checked dependency graph | In progress |
-| 06 step F (pin the wire shape) | Not started (after 03) |
-| 07 side-by-side notebooks | Planned; implement after 03 and 06 step F |
+| 03 checked dependency graph | Merged (`plan/03-checked-graph`) |
+| 06 step F (pin the wire shape) | In progress |
+| 07 side-by-side notebooks | In progress |
 
 ### Deferred final validation (LLVM)
 
@@ -170,3 +170,7 @@ deferred to one final validation pass when the PR is ready.
   `session.stop()`; edit-ui (desktop and 600x900) lines ~401-404;
   `tools/browser-expect-probe.mjs`; workspace-benchmark counters still 1/1/2
   with `analyses == 1`, and `requestBytes` should drop (no graph in requests).
+- Plan 03: m4-conformance replays 84 responses; native vs WASM determinism of
+  graph v2 fingerprints (module identity hashes, type strings); edit-ui
+  dependency dialog with type nodes, changed scope note, F2 rename; benchmark
+  worker ms (each analysis adds one parser pass over the user program).
