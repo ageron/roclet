@@ -57,6 +57,29 @@ use byte-oriented WASM entry points. Compact notebook responses omit unused
 intermediate syntax, duplicate source, and export encodings. Subsequent requests
 also omit the worker's already confirmed dependency graph.
 
+Inside the engine there is no JSON at all. The request is parsed once at the
+boundary and the response serialised once; the document layer reaches the
+retained revision through typed calls (`notebook.checkDocument` and
+`Checked.evaluate`) rather than re-entering the public entry point once for the
+check and once per output root, and the check/run/export script path calls
+`script.run` directly. The dependency analysis is computed once per revision
+and cached on it (`workspaceCache.analyses`); previously it ran N+2 times for N
+evaluated roots, each copy round-tripped through JSON.
+
+`tests/pipeline-benchmark.mjs` times one native `--bridge` document `evaluate`
+of generated notebooks (`a = 1`, one `out_i = a + i` per cell, a `dbg` in every
+tenth cell, one `expect`). Median of five runs, Zig self-hosted backend
+(`-Dllvm=false`, several times slower than release builds), same machine:
+
+| Code cells (roots) | Before | After |
+| --- | ---: | ---: |
+| 10 (9) | 51.0 ms | 56.0 ms |
+| 30 (29) | 134.2 ms | 92.4 ms |
+| 60 (59) | 377.1 ms | 179.7 ms |
+
+Every run is one frontend build, one lowering and one analysis. Small notebooks
+are dominated by fixed costs; the gap grows with the number of roots.
+
 Each worker owns one compiler engine instance. All mutable adapter state (the
 virtual filesystem, live compiler cache, retained revision, confirmed graph and
 request counters) belongs to that engine rather than to module globals, and

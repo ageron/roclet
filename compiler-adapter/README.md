@@ -25,9 +25,20 @@ the synthetic or native source paths, and the `workspaceCache` counters.
 native host may construct several engines in one process (`tests/engine.zig`
 does); the WASM export layer owns exactly one per worker instance.
 
-The response under construction belongs to a request-scoped `ResponseBuilder`
-in `bridge.zig`. Compiler callbacks reach it through `Diagnostics.ctx`, an
-`Analyzer {ctx, call}` pair, and a `platform.Observer`. The observer carries
+JSON exists only at that boundary. `bridge.process` parses the request once,
+dispatches on `operation`, and serialises one typed response with
+`workspaceCache` and `packagesRequired` appended; everything between is typed
+Zig. Document requests become a `document.Request` and leave as a
+`document.Response`; notebook evaluation is `notebook.checkDocument`, which
+prepares or reuses the retained revision and returns a `Checked` handle whose
+`evaluate(roots)` runs the selected roots against the same image; whole
+programs (`check`, `run`, `export` verification, `operation: "program"`) run
+through `script.run`. Nothing inside the engine re-enters `bridge.process`.
+
+Request-scoped sinks collect what compiler callbacks report: an
+`engine.DiagnosticList` (rendered reports and the failure message) behind
+`Diagnostics.ctx`, and a per-root `platform.EventBuffer` behind a
+`platform.Observer`. The observer carries
 the root it stamps on every `value`, `dbg`, `expect_failed`, `crashed` and
 `test_*` event; it travels in the interpreter's `EchoEnv`, so RocOps callbacks
 read it from `ops.env`, and the notebook pipeline derives one observer per
@@ -62,6 +73,11 @@ actions include `parse`, `convert`, `normalize`, `view`, `export`, `compose`,
 `analyze`, `evaluate`, `check`, and `run`. Formats are `roc` and `markdown`.
 `operation: "syntax"` returns version-pinned Roc/Markdown syntax facts;
 `operation: "markdown"` returns Markdown rendering events.
+`operation: "program"` with `{protocol: 1, source, user_bytes, args?,
+check_only?, app_header?, modules?, root?, files?}` checks and runs one whole
+headerless program on the echo platform and returns the protocol-1 program
+response; the same request without `operation` is accepted until the M0
+`cells` adapter is retired.
 
 `compact: true` on `analyze` or `evaluate` omits export encodings, duplicate draft
 and source strings, and internal parser facts. Editor cells, mappings,
@@ -98,10 +114,22 @@ force doubling. Each selected output gets a fresh interpreter and temporary
 allocation arena that views the image in place.
 Rich outputs also have a checked value entrypoint and a concrete serializer for
 the bundled nominal `Display` type. No evaluated Roc value is retained between
-responses. `workspaceCache.frontend_builds`, `lowerings`, `executions`, and
-`prepared_hits` expose the actual work so tests can verify reuse independently of
-wall-clock timing. `image_bytes` is the size of the image the request built (0
-when it reused a revision) and `image_retries` the buffer doublings it took.
+responses. `workspaceCache.frontend_builds`, `lowerings`, `executions`,
+`prepared_hits` and `analyses` expose the actual work so tests can verify reuse
+independently of wall-clock timing. `prepared_hits` is 1 when the request was
+served by the retained revision and 0 when it prepared one. `analyses` counts
+dependency analyses (`analysis.zig`): one per new revision, cached on the
+revision for every later request and root, plus one per script run. The input
+key is hashed once per request. `image_bytes` is the size of the image the
+request built (0 when it reused a revision) and `image_retries` the buffer
+doublings it took.
+
+Script runs (`check`, `run`, `export` verification) deliberately bypass the
+revision: they compile the exact runnable `execution` text users run with
+ordinary `roc`, in a fresh pipeline (`engine.runEcho`) whose scratch is an
+ordinary arena and whose image comes from the same adaptive `image.build`.
+Scripts and revisions share one app header synthesiser,
+`engine.synthesizeAppHeader`.
 
 ## Notebook assertions
 
@@ -191,7 +219,8 @@ remain supported. Changes to workspace files participate in reactive invalidatio
 Requests are synchronous within an instance and must not overlap.
 
 - `roclet_alloc(n)` / `roclet_free(ptr,n)` own input memory.
-- `roclet_process(ptr,n)` returns a JSON response.
+- `roclet_process(ptr,n)` returns a JSON response. The request is parsed once
+  and the response serialised once; no nested JSON requests are issued.
 - `roclet_file_put(pathPtr,pathLen,ptr,len)` mounts raw UTF-8 bytes;
   `roclet_file_drop(ptr,len)` removes a path.
 - `roclet_cache_identity()` returns the compiler cache namespace.

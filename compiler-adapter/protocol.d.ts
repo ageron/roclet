@@ -83,7 +83,11 @@ export interface CompilerCacheStats {
   frontend_builds?: number;
   lowerings?: number;
   executions?: number;
+  /** 1 when the request was served by the retained revision, else 0. */
   prepared_hits?: number;
+  /** Dependency analyses computed: 1 for a new revision (cached for later
+   *  requests and roots), 0 when reused, 1 per script run. */
+  analyses?: number;
   /** Bytes of the flat LIR image built by this request (0 when a retained
    *  revision was reused) and the image buffer doublings it took. */
   image_bytes?: number;
