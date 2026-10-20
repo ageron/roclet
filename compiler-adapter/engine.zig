@@ -100,10 +100,23 @@ pub const Paths = struct {
 pub fn isEmbeddedDisplayPackage(shorthand: []const u8, spec: []const u8) bool {
     return std.mem.eql(u8, shorthand, "roclet") and std.mem.eql(u8, spec, std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n"));
 }
+/// Receives the checked application module once per request so the bridge can
+/// report definitions and dependencies into the response it is building.
+pub const Analyzer = struct {
+    ctx: *anyopaque,
+    call: *const fn (ctx: *anyopaque, env: *can.ModuleEnv, prefix: u32) void,
+
+    pub fn run(self: Analyzer, env: *can.ModuleEnv, prefix: u32) void {
+        self.call(self.ctx, env, prefix);
+    }
+};
+
 pub const RunOptions = struct {
     app_header: []const u8 = "",
     root_name: ?[]const u8 = null,
-    analyze: ?*const fn (*@import("can").ModuleEnv, u32) void = null,
+    analyze: Analyzer,
+    /// Receives every observation of this run; null writes to stdout/stderr.
+    observer: ?echo_platform.Observer = null,
     check_only: bool = false,
     args: []const []const u8 = &.{},
     /// Work counters of the engine serving this request.
@@ -245,11 +258,9 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         return error.CompilationFailed;
     };
 
-    if (opts.analyze) |analyze| {
-        if (build_env.getAppSemanticData()) |app| analyze(app.env, @intCast(header_str.len));
-    }
+    if (build_env.getAppSemanticData()) |app| opts.analyze.run(app.env, @intCast(header_str.len));
     if (opts.check_only) return 0;
-    try event_context.replay(&build_env, opts.root_name orelse "main!");
+    try event_context.replay(&build_env, opts.root_name orelse "main!", opts.observer);
 
     const import_views = build_env.collectImportedArtifactViews(allocator, root_artifact) catch |err| {
         diag.step("collectImportedArtifactViews", err);
@@ -319,7 +330,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     defer view.deinit();
 
     opts.stats.executions += 1;
-    return runEchoView(allocator, &view, diag, opts.std_io, opts.args) catch |err| {
+    return runEchoView(allocator, &view, diag, opts.std_io, opts.observer, opts.args) catch |err| {
         diag.step("runEchoView", err);
         return err;
     };
@@ -330,6 +341,7 @@ fn runEchoView(
     view: *const lir.LirImage.ProgramView,
     diag: Diagnostics,
     std_io: std.Io,
+    observer: ?echo_platform.Observer,
     args: []const []const u8,
 ) RunEchoError!u8 {
     // HostedFn array order matters: the interpreter calls
@@ -339,9 +351,10 @@ fn runEchoView(
     // correct—but additions must follow that section's order or the wrong
     // function will be called silently. See README "Host functions".
     var hosted_fn_array = [_]HostedFn{echo_platform.echoLineHostedFn()};
-    var echo_env: echo_platform.EchoEnv = .{ .std_io = std_io };
+    var echo_env: echo_platform.EchoEnv = .{ .std_io = std_io, .observer = observer };
     var roc_ops = echo_platform.makeDefaultRocOps(&echo_env, &hosted_fn_array);
-    echo_platform.g_roc_ops = &roc_ops;
+    echo_platform.enterRocOps(&roc_ops);
+    defer echo_platform.leaveRocOps(&roc_ops);
     var cli_args_list = try echo_platform.buildCliArgs(args, &roc_ops);
     var result_buf: [16]u8 align(16) = undefined;
 
@@ -372,7 +385,7 @@ fn runEchoView(
             return error.EvaluationFailed;
         },
         error.Crash => {
-            if (echo_platform.observer) |emit| emit("crashed", interpreter.getCrashMessage());
+            if (observer) |sink| sink.observe("crashed", interpreter.getCrashMessage());
             return error.EvaluationFailed;
         },
         error.ComptimeExhaustiveness => {
@@ -618,13 +631,13 @@ pub const DebugCapture = struct {
         };
     }
     const Item = struct { env: *can.ModuleEnv, def: ?can.CIR.Def.Idx = null, expr: can.CIR.Expr.Idx };
-    pub fn replay(self: *@This(), build_env: *BuildEnv, root_name: []const u8) !void {
-        try self.replayFrom(build_env, .{ .name = root_name });
+    pub fn replay(self: *@This(), build_env: *BuildEnv, root_name: []const u8, observer: ?echo_platform.Observer) !void {
+        try self.replayFrom(build_env, .{ .name = root_name }, observer);
     }
-    pub fn replayExpression(self: *@This(), build_env: *BuildEnv, expression: can.CIR.Expr.Idx) !void {
-        try self.replayFrom(build_env, .{ .expression = expression });
+    pub fn replayExpression(self: *@This(), build_env: *BuildEnv, expression: can.CIR.Expr.Idx, observer: ?echo_platform.Observer) !void {
+        try self.replayFrom(build_env, .{ .expression = expression }, observer);
     }
-    fn replayFrom(self: *@This(), build_env: *BuildEnv, root: union(enum) { name: []const u8, expression: can.CIR.Expr.Idx }) !void {
+    fn replayFrom(self: *@This(), build_env: *BuildEnv, root: union(enum) { name: []const u8, expression: can.CIR.Expr.Idx }, observer: ?echo_platform.Observer) !void {
         if (self.failed) return error.OutOfMemory;
         if (self.events.items.len == 0) return;
         var temporary = std.heap.ArenaAllocator.init(if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator);
@@ -712,7 +725,7 @@ pub const DebugCapture = struct {
                         }
                     }
                 }
-                if (include) if (echo_platform.observer) |emit| emit("dbg", event.message);
+                if (include) if (observer) |sink| sink.observe("dbg", event.message);
                 break;
             }
         }

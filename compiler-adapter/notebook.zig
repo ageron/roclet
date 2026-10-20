@@ -27,7 +27,9 @@ pub const Options = struct {
     target_usize: base.target.TargetUsize,
     roc_target: @import("roc_target").RocTarget,
     diagnostics: engine.Diagnostics,
-    analyze: *const fn (*can.ModuleEnv, u32) void,
+    analyze: engine.Analyzer,
+    /// The request observer; `run` attributes each execution to its root.
+    observer: host.Observer,
 };
 const Label = struct { root: []const u8, text: []const u8, value: []const u8, rich: bool = false };
 /// A retained revision, owned by `Engine.revision`.
@@ -246,7 +248,7 @@ pub const State = struct {
         for (self.entry_names, 0..) |actual, i| if (std.mem.eql(u8, actual, name)) return @intCast(i);
         return error.EntrypointNotFound;
     }
-    fn execute(self: *State, std_io: std.Io, opts: Options) !u8 {
+    fn execute(self: *State, std_io: std.Io, opts: Options, observer: host.Observer) !u8 {
         const root = opts.root.?;
         var label: ?Label = null;
         for (self.labels) |candidate| if (std.mem.eql(u8, candidate.root, root)) {
@@ -259,18 +261,18 @@ pub const State = struct {
             break;
         };
         if (label == null and expectation == null) return error.EntrypointNotFound;
-        if (label != null) try self.capture.replay(self.build.?, root);
-        if (expectation) |expression| try self.capture.replayExpression(self.build.?, expression);
+        if (label != null) try self.capture.replay(self.build.?, root, observer);
+        if (expectation) |expression| try self.capture.replayExpression(self.build.?, expression, observer);
         var scratch = std.heap.ArenaAllocator.init(gpa);
         defer scratch.deinit();
         const a = scratch.allocator();
         var view = try lir.LirImage.viewMappedImageWithAllocator(self.header.?, self.buffer.ptr, @intCast(self.header.?.image_size), opts.target_usize, a);
         defer view.deinit();
         var hosted_fns = [_]host.host_abi.HostedFn{host.echoLineHostedFn()};
-        var environment: host.EchoEnv = .{ .std_io = std_io };
+        var environment: host.EchoEnv = .{ .std_io = std_io, .observer = observer };
         var ops = host.makeDefaultRocOps(&environment, &hosted_fns);
-        host.g_roc_ops = &ops;
-        defer host.g_roc_ops = null;
+        host.enterRocOps(&ops);
+        defer host.leaveRocOps(&ops);
         var static_data = try eval.InterpreterStaticData.init(a, view.static_data, view.static_data_value_count);
         defer static_data.deinit();
         var strings = try eval.LirInterpreter.buildStaticStrings(a, &view.store);
@@ -282,7 +284,7 @@ pub const State = struct {
         if (expectation != null) {
             var passed: u8 = 0;
             _ = interpreter.runEntrypoint(&view, try self.ordinal(root), null, @ptrCast(&passed)) catch |err| {
-                if (host.observer) |emit| emit("test_failed", switch (err) {
+                observer.observe("test_failed", switch (err) {
                     error.Crash => interpreter.getCrashMessage(),
                     error.ExpectErr => "An error propagated from the expect block",
                     else => interpreter.getRuntimeErrorMessage() orelse @errorName(err),
@@ -290,24 +292,24 @@ pub const State = struct {
                 return 1;
             };
             const ok = passed != 0 and !environment.inline_expect_failed;
-            if (host.observer) |emit| emit(if (ok) "test_passed" else "test_failed", if (ok) "Expectation passed" else "Expectation evaluated to False");
+            observer.observe(if (ok) "test_passed" else "test_failed", if (ok) "Expectation passed" else "Expectation evaluated to False");
             return if (ok) 0 else 1;
         }
         const selected = label.?;
         var text: host.RocStr = undefined;
-        _ = interpreter.runEntrypoint(&view, try self.ordinal(selected.text), null, @ptrCast(&text)) catch |err| return reportRuntime(&interpreter, opts.diagnostics, err);
+        _ = interpreter.runEntrypoint(&view, try self.ordinal(selected.text), null, @ptrCast(&text)) catch |err| return reportRuntime(&interpreter, opts.diagnostics, observer, err);
         defer text.decref(&ops);
-        if (host.observer) |emit| emit("value", text.asSlice());
+        observer.observe("value", text.asSlice());
         if (selected.rich) {
             const value_ordinal = try self.ordinal(selected.value);
             const proc = view.store.getProcSpec(view.platform_entrypoints[value_ordinal].root_proc);
             const size = view.layouts.layoutSize(view.layouts.getLayout(proc.ret_layout));
             const value = try a.alignedAlloc(u8, .@"16", @max(size, 16));
-            _ = interpreter.runEntrypoint(&view, value_ordinal, null, value.ptr) catch |err| return reportRuntime(&interpreter, opts.diagnostics, err);
+            _ = interpreter.runEntrypoint(&view, value_ordinal, null, value.ptr) catch |err| return reportRuntime(&interpreter, opts.diagnostics, observer, err);
             var wire: host.RocStr = undefined;
-            _ = interpreter.runEntrypoint(&view, try self.ordinal(self.wire_name.?), value.ptr, @ptrCast(&wire)) catch |err| return reportRuntime(&interpreter, opts.diagnostics, err);
+            _ = interpreter.runEntrypoint(&view, try self.ordinal(self.wire_name.?), value.ptr, @ptrCast(&wire)) catch |err| return reportRuntime(&interpreter, opts.diagnostics, observer, err);
             defer wire.decref(&ops);
-            if (host.observer) |emit| emit("value", wire.asSlice());
+            observer.observe("value", wire.asSlice());
         }
         return if (environment.inline_expect_failed) 1 else 0;
     }
@@ -339,19 +341,13 @@ pub fn run(eng: *Engine, opts: Options) !u8 {
     defer state.reportCache(&eng.stats);
     state.emitReports(opts.diagnostics);
     if (state.failed or (state.constant_failures and !opts.metadata.isolate_errors)) {
-        for (opts.metadata.runtime_roots) |root| {
-            host.observation_root = root;
-            defer host.observation_root = null;
-            try state.capture.replay(state.build.?, root);
-        }
+        for (opts.metadata.runtime_roots) |root| try state.capture.replay(state.build.?, root, opts.observer.forRoot(root));
         return error.CompilationFailed;
     }
-    opts.analyze(state.build.?.getAppSemanticData().?.env, state.prefix);
+    opts.analyze.run(state.build.?.getAppSemanticData().?.env, state.prefix);
     if (opts.root == null) return 0;
-    host.observation_root = opts.root;
-    defer host.observation_root = null;
     eng.stats.executions += 1;
-    return state.execute(eng.workspace.std_io, opts);
+    return state.execute(eng.workspace.std_io, opts, opts.observer.forRoot(opts.root));
 }
 fn appendRoot(a: A, env: *can.ModuleEnv, exported: []const check.CheckedArtifact.RootRequest, name: []const u8, roots: *std.ArrayList(check.CheckedArtifact.RootRequest), names: *std.ArrayList([]const u8)) !void {
     for (exported) |request| {
@@ -365,9 +361,9 @@ fn appendRoot(a: A, env: *can.ModuleEnv, exported: []const check.CheckedArtifact
     }
     return error.EntrypointNotFound;
 }
-fn reportRuntime(interpreter: *eval.LirInterpreter, diagnostics: engine.Diagnostics, err: (eval.LirInterpreter.Error || error{EntrypointNotFound})) error{EvaluationFailed} {
+fn reportRuntime(interpreter: *eval.LirInterpreter, diagnostics: engine.Diagnostics, observer: host.Observer, err: (eval.LirInterpreter.Error || error{EntrypointNotFound})) error{EvaluationFailed} {
     switch (err) {
-        error.Crash => if (host.observer) |emit| emit("crashed", interpreter.getCrashMessage()),
+        error.Crash => observer.observe("crashed", interpreter.getCrashMessage()),
         else => if (interpreter.getRuntimeErrorMessage()) |message| diagnostics.write(message),
     }
     return error.EvaluationFailed;
