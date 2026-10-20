@@ -11,6 +11,7 @@ const can = @import("can");
 const engine = @import("engine.zig");
 const host = @import("platform.zig");
 const workspace = @import("workspace.zig");
+const image = @import("image.zig");
 const Engine = @import("engine_state.zig").Engine;
 const A = std.mem.Allocator;
 const gpa = if (builtin.cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator;
@@ -50,11 +51,12 @@ pub const State = struct {
     requests: []check.CheckedArtifact.RootRequest = &.{},
     request_names: []const []const u8 = &.{},
     lowered: ?lir.CheckedPipeline.LoweredProgram = null,
-    header: ?*lir.LirImage.Header = null,
+    image: ?image.Image = null,
     entry_names: []const []const u8 = &.{},
     cache_reported: compile.CacheStats = .{},
 
     fn deinit(self: *State) void {
+        if (self.image) |*flat| flat.deinit(gpa);
         if (self.lowered) |*lowered| lowered.deinit();
         if (self.build) |build| {
             if (self.reports.len != 0) build.freeDrainedReports(self.reports);
@@ -239,10 +241,12 @@ pub const State = struct {
             };
             if (!found) return error.EntrypointNotFound;
         }
-        const image_header = try a.create(lir.LirImage.Header);
-        const copied = try lir.LirImage.referenceProgramWithStaticDataInBuffer(a, self.buffer.ptr, self.buffer.len, &lowered.lir_result, entrypoints, data);
-        try copied.fillHeader(image_header, self.fba.end_index);
-        self.header = image_header;
+        // The protocol reports an image over its cap as it always reported
+        // an exhausted revision buffer.
+        self.image = image.build(gpa, &lowered.lir_result, entrypoints, data, image.default_limits) catch |err| return switch (err) {
+            error.ImageTooLarge => error.OutOfMemory,
+            else => |other| other,
+        };
     }
     fn ordinal(self: *State, name: []const u8) !u32 {
         for (self.entry_names, 0..) |actual, i| if (std.mem.eql(u8, actual, name)) return @intCast(i);
@@ -266,7 +270,7 @@ pub const State = struct {
         var scratch = std.heap.ArenaAllocator.init(gpa);
         defer scratch.deinit();
         const a = scratch.allocator();
-        var view = try lir.LirImage.viewMappedImageWithAllocator(self.header.?, self.buffer.ptr, @intCast(self.header.?.image_size), opts.target_usize, a);
+        var view = try self.image.?.view(opts.target_usize, a);
         defer view.deinit();
         var hosted_fns = [_]host.host_abi.HostedFn{host.echoLineHostedFn()};
         var environment: host.EchoEnv = .{ .std_io = std_io, .observer = observer };
