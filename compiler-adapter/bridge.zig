@@ -5,6 +5,7 @@ pub const runner = @import("engine.zig");
 pub const platform = @import("platform.zig");
 pub const notebook = @import("notebook.zig");
 pub const script = @import("script.zig");
+const document = @import("document.zig");
 const analysis = @import("analysis.zig");
 const Workspace = @import("workspace.zig");
 pub const Engine = @import("engine_state.zig").Engine;
@@ -98,7 +99,7 @@ pub fn process(engine: *Engine, bytes: []const u8) ![]u8 {
     if (probe.value == .object) try mountFiles(engine, probe.value, gpa);
     if (probe.value == .object) if (probe.value.object.get("operation")) |operation| {
         if (operation == .string and std.mem.eql(u8, operation.string, "program")) return processSource(engine, bytes);
-        return processDocument(engine, bytes);
+        return processDocument(engine, probe.value);
     };
     if (probe.value == .object and probe.value.object.contains("cells")) {
         return withRequiredPackages(engine, try @import("snapshot.zig").evaluate(gpa, bytes, Compiler{ .engine = engine }));
@@ -244,30 +245,38 @@ export fn roclet_package_install(url_ptr: u32, url_len: u32, ptr: u32, len: u32)
     return 1;
 }
 
-fn processDocument(engine: *Engine, bytes: []const u8) ![]u8 {
+/// One document request: the parsed request object in, one serialised
+/// response out (with `workspaceCache` and `packagesRequired` appended).
+fn processDocument(engine: *Engine, value: std.json.Value) ![]u8 {
     var storage = std.heap.ArenaAllocator.init(gpa);
     defer storage.deinit();
     const a = storage.allocator();
-    var request = try std.json.parseFromSliceLeaky(std.json.Value, a, bytes, .{});
-    try request.object.put(a, "workspaceFingerprint", .{ .string = try engine.workspace.contentIdentity(a) });
-    if (request.object.getPtr("reactivity")) |reactivity| if (reactivity.* == .object and reactivity.object.get("previous") == null) {
-        if (engine.previous_graph) |graph| try reactivity.object.put(a, "previous", try std.json.parseFromSliceLeaky(std.json.Value, a, graph, .{}));
+    const request = try document.Request.fromValue(a, value, engine.previous_graph, try engine.workspace.contentIdentity(a));
+    const response = try document.process(engine, a, request);
+    if (response == .document) if (response.document.graph) |graph| {
+        var writer: std.Io.Writer.Allocating = .init(engine.gpa);
+        errdefer writer.deinit();
+        try std.json.Stringify.value(graph, .{}, &writer.writer);
+        const owned = try writer.toOwnedSlice();
+        if (engine.previous_graph) |old| engine.gpa.free(old);
+        engine.previous_graph = owned;
     };
-    const input_bytes = try @import("snapshot.zig").json(a, request);
-    const result = try @import("document.zig").process(gpa, input_bytes, Compiler{ .engine = engine });
-    defer gpa.free(result);
-    var parsed = try std.json.parseFromSliceLeaky(std.json.Value, a, result, .{});
-    if (parsed == .object) {
-        if (parsed.object.get("graph")) |graph| {
-            const owned = try @import("snapshot.zig").json(engine.gpa, graph);
-            if (engine.previous_graph) |old| engine.gpa.free(old);
-            engine.previous_graph = owned;
-        }
-        try parsed.object.put(a, "workspaceCache", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, engine.stats), .{}));
-        try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, engine.workspace.required.items), .{}));
-    }
-    return @import("snapshot.zig").json(gpa, parsed);
+    return encode(Envelope{ .response = response, .stats = engine.stats, .required = engine.workspace.required.items });
 }
+const Envelope = struct {
+    response: document.Response,
+    stats: runner.RequestStats,
+    required: []const Workspace.RequiredPackage,
+    pub fn jsonStringify(self: Envelope, w: anytype) !void {
+        try w.beginObject();
+        try self.response.writeFields(w);
+        try w.objectField("workspaceCache");
+        try w.write(self.stats);
+        try w.objectField("packagesRequired");
+        try w.write(self.required);
+        try w.endObject();
+    }
+};
 
 fn mountFiles(engine: *Engine, request: std.json.Value, a: std.mem.Allocator) !void {
     if (request.object.get("files")) |files| if (files == .array) for (files.array.items) |file| {
