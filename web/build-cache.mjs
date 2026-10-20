@@ -3,6 +3,9 @@
 const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {fatal:true});
 const LIMIT = 32 * 1024 * 1024, MAX_ENTRIES = 512;
 const warm = new Map();
+// Keep verified source archives when disposable compiler artifacts churn.
+// Each family has its own bounded budget across compiler versions/namespaces.
+const family = namespace => namespace.endsWith(':packages') ? 'packages' : 'compiler';
 const bytesOf = value => value instanceof Uint8Array ? value : new Uint8Array(value);
 const checksum = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
 const validPath = path => typeof path === 'string' && path.startsWith('/cache/') && !path.split('/').includes('..');
@@ -83,14 +86,20 @@ export class BuildCache {
     const entries=decodeCacheStream(stream),touched=Date.now();
     if(!entries.length) return;
     for(const {path,bytes} of entries) if(bytes.length<=this.maxBytes) warm.set(this.key(path),{key:this.key(path),namespace:this.namespace,path,bytes,size:bytes.length,touched,checksum:await checksum(bytes)});
-    for(const record of prune([...warm.values()],this.maxBytes,this.maxEntries)) warm.delete(record.key);
+    for(const record of prune([...warm.values()].filter(record=>family(record.namespace)===family(this.namespace)),this.maxBytes,this.maxEntries)) warm.delete(record.key);
     const database=await this.database;if(!database) return;
     try {
       await transaction(database,'readwrite',store=>{
         for(const {path} of entries) {const record=warm.get(this.key(path));if(record) store.put(record);}
         // Read index keys, not every artifact's bytes, on each edit.
         let size=0,count=0;const cursor=store.index('recency').openKeyCursor(null,'prev');
-        cursor.onsuccess=()=>{const entry=cursor.result;if(entry){size+=entry.key[1];if(++count>this.maxEntries || size>this.maxBytes) store.delete(entry.primaryKey);entry.continue();}};
+        cursor.onsuccess=()=>{const entry=cursor.result;if(entry){
+          const namespace=String(entry.primaryKey).split('\0',1)[0];
+          if(family(namespace)===family(this.namespace)) {
+            size+=entry.key[1];if(++count>this.maxEntries || size>this.maxBytes) store.delete(entry.primaryKey);
+          }
+          entry.continue();
+        }};
       });
     } catch { /* Quota/private browsing failures do not discard the live workspace. */ }
   }

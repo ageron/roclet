@@ -77,6 +77,24 @@ test('cache bounds evict old artifacts and reject malformed paths and truncated 
   await cache.clear();
 });
 
+test('compiler cache churn preserves packages while each cache family stays bounded',async()=>{
+  const options={indexedDB:null,maxBytes:4,maxEntries:1};
+  const compiler=new BuildCache('family-test',options),packages=new BuildCache('family-test:packages',options);
+  await compiler.clear();await packages.clear();
+  const entry=path=>encodeCacheStream([{path,bytes:new Uint8Array([1,2,3])}]);
+  await packages.save(entry('/cache/package/first'));
+  await compiler.save(entry('/cache/checked/first'));
+  await new Promise(resolve=>setTimeout(resolve,2));
+  await compiler.save(entry('/cache/checked/second'));
+  assert.deepEqual(decodeCacheStream(await compiler.load()).map(e=>e.path),['/cache/checked/second']);
+  assert.deepEqual(decodeCacheStream(await packages.load()).map(e=>e.path),['/cache/package/first']);
+  await new Promise(resolve=>setTimeout(resolve,2));
+  await packages.save(entry('/cache/package/second'));
+  assert.deepEqual(decodeCacheStream(await packages.load()).map(e=>e.path),['/cache/package/second']);
+  assert.deepEqual(decodeCacheStream(await compiler.load()).map(e=>e.path),['/cache/checked/second']);
+  await compiler.clear();await packages.clear();
+});
+
 test('packages use compiler resolver URLs and persist only compiler-verified archives',async()=>{
   const cache=new BuildCache('package-test',{indexedDB:null});await cache.clear();
   const url='https://packages.invalid/example.tar.zst',archive=new Uint8Array([9,8,7]);let downloads=0,mounted=false;
