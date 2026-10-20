@@ -510,3 +510,35 @@ test "a caller-held baseline is rejected and leaves the engine baseline alone" {
     try std.testing.expectEqual(graph, engine.baseline.graph.?);
     try std.testing.expectEqual(@as(usize, 2), engine.baseline.entries.count());
 }
+
+const Module = struct { name: []const u8, content: []const u8 };
+/// The graph node called `name` in the response's `kind` list.
+fn node(response: Response, kind: []const u8, name: []const u8) ?V {
+    for (response.field("graph").object.get(kind).?.array.items) |item| {
+        if (std.mem.eql(u8, item.object.get("name").?.string, name)) return item;
+    }
+    return null;
+}
+fn expectDependencies(response: Response, kind: []const u8, name: []const u8, expected: []const []const u8) !void {
+    const items = (node(response, kind, name) orelse return error.MissingNode).object.get("dependencies").?.array.items;
+    try std.testing.expectEqual(expected.len, items.len);
+    for (expected, items) |dependency, item| try std.testing.expectEqualStrings(dependency, item.string);
+}
+
+test "the checked graph has type, associated item and module nodes" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    const source = "# %%\nimport Fresh\nMeters : Dec\nPoint := { x : Meters, y : Meters }.{ origin = Point.{ x: 0, y: 0 } }\nwidth : Meters\nwidth = 5\nout_point = Point.{ x: width, y: Fresh.value }\n# %%\nout_origin = Point.origin\n";
+    var response = try send(&engine, .{ .operation = "document", .action = "analyze", .format = "roc", .source = source, .modules = &[_]Module{.{ .name = "Fresh", .content = "Fresh := [].{ value = 7 }" }} });
+    defer response.deinit();
+    try std.testing.expectEqualStrings("ok", response.field("status").string);
+    try std.testing.expectEqual(@as(i64, 2), response.field("graph").object.get("version").?.integer);
+    try expectDependencies(response, "definitions", "width", &.{"Meters"});
+    try expectDependencies(response, "definitions", "out_point", &.{ "width", "Point", "module:Fresh" });
+    try expectDependencies(response, "definitions", "out_origin", &.{"Point.origin"});
+    try expectDependencies(response, "definitions", "Point.origin", &.{"Point"});
+    try expectDependencies(response, "types", "Meters", &.{});
+    try expectDependencies(response, "types", "Point", &.{ "Meters", "Point.origin" });
+    try expectDependencies(response, "modules", "module:Fresh", &.{});
+    try std.testing.expectEqual(@as(usize, 64), node(response, "modules", "module:Fresh").?.object.get("fingerprint").?.string.len);
+}

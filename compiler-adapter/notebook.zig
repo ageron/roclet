@@ -17,6 +17,7 @@ const dependency = @import("analysis.zig");
 const A = std.mem.Allocator;
 const gpa = if (builtin.cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator;
 pub const Expectation = dependency.Expectation;
+pub const Analysis = dependency.Analysis;
 pub const Module = engine.ExtraFile;
 /// Everything that determines the retained revision. Hashed once per request.
 pub const Inputs = struct {
@@ -451,6 +452,8 @@ pub const Checked = struct {
     state: ?*State,
     rich_support: bool = false,
     target_usize: base.target.TargetUsize = engine.host_target_usize,
+    /// The revision's dependency analysis; set when checking succeeded.
+    analysis: ?*const dependency.Analysis = null,
     evaluation: Evaluation,
     values: std.ArrayList(Value) = .empty,
     failures: std.ArrayList(RootError) = .empty,
@@ -636,6 +639,7 @@ pub fn checkDocument(eng: *Engine, arena: A, request: Request) !Checked {
             break;
         };
     }
+    checked.analysis = analyzed;
     result.definitions = definitions;
     result.dependency_scope = @tagName(analyzed.dependency_scope);
     result.binders = analyzed.binders;

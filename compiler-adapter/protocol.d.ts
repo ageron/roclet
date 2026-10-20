@@ -162,10 +162,31 @@ export interface DocumentCell extends ByteSpan {
   first_block?: unknown;
   marker_lines?: number[];
 }
+/** One dependency graph node. `dependencies` name other nodes (or a binder
+ *  of one): value definitions, local types, and `module:<name>` nodes. */
+export interface DependencyNode {
+  name: string;
+  /** Every name the definition binds (`[name]` for a plain binding); empty
+   *  for type and module nodes. */
+  binders: string[];
+  fingerprint: string;
+  dependencies: string[];
+}
+/** Graph version 2: checked value, type and module nodes. A baseline of
+ *  another version invalidates every root ("Graph format changed"). */
 export interface DependencyGraph {
+  version: 2;
+  /** Everything outside the nodes that can change a result. */
   context: string;
+  /** `module`: the graph could not be fully resolved; any change re-evaluates every root. */
   scope: 'definitions' | 'module';
-  definitions: {name: string; fingerprint: string; dependencies: string[]}[];
+  /** Value definitions (associated items as `Type.item`) and expectation roots. */
+  definitions: DependencyNode[];
+  /** Local type declarations; each depends on its associated items. */
+  types: DependencyNode[];
+  /** Imported modules a node refers to; the fingerprint is the module's deep
+   *  content identity. */
+  modules: DependencyNode[];
 }
 export interface RecomputePlan {
   changed: string[];

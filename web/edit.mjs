@@ -315,7 +315,8 @@ function showDependencies(index) {
     for(const item of items) {
       const label=item.root===cell.output?'Output':`Test ${cell.expectations.indexOf(item.root)+1}`;
       const reason=document.createElement('p'); reason.textContent=`${label}: ${item.reason}`;
-      const deps=document.createElement('pre'); deps.textContent=item.dependencies.map(name=>`${name}: ${(result.graph.definitions.find(d=>d.name===name)?.dependencies ?? []).join(', ') || 'no notebook dependencies'}`).join('\n');
+      const nodes=[...result.graph.definitions,...(result.graph.types ?? [])];
+      const deps=document.createElement('pre'); deps.textContent=item.dependencies.map(name=>`${name}: ${(nodes.find(d=>d.name===name)?.dependencies ?? []).join(', ') || 'no notebook dependencies'}`).join('\n');
       content.append(reason,deps);
     }
     const time=document.createElement('p');

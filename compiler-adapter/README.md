@@ -250,6 +250,19 @@ last successful evaluation in this engine. Requests never carry graphs.
 - A restarted worker (Stop, timeout, trap, cancelled package load) has a fresh
   engine and no baseline, so its first run evaluates every root once.
 
+The `graph` member of a checked document response is graph version 2
+(`version: 2`, `protocol.d.ts` `DependencyGraph`), built by `analysis.zig` once
+per revision from the checked module. `definitions` holds the value
+definitions (associated items as `Type.item`) and expectation roots,
+`types` the local type declarations, and `modules` the imported modules nodes
+refer to (`module:<name>`, fingerprinted by the module's deep content
+identity). Every node has `name`, `binders`, `fingerprint` and `dependencies`;
+a dependency names another node. Edges come from checked CIR: compiler name
+references, type references in annotations, constructions and patterns,
+external lookups, and from each type to its associated items. A definition
+node covers its annotation. A baseline of another graph version invalidates
+every root.
+
 `roclet --bridge a.json b.json ...` serves a sequence with one engine, one
 response per line; `tests/m4.zig` records before/selective/full sequences so the
 browser replay sees the same engine state. Changes to workspace files

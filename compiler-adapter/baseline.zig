@@ -229,13 +229,29 @@ fn successful(fresh: Outcomes, root: S) ?Presentation {
 }
 
 fn copyGraph(a: A, graph: frontend.Graph) !frontend.Graph {
-    const definitions = try a.alloc(frontend.Definition, graph.definitions.len);
-    for (definitions, graph.definitions) |*out, definition| {
-        const dependencies = try a.alloc(S, definition.dependencies.len);
-        for (dependencies, definition.dependencies) |*dependency, name| dependency.* = try a.dupe(u8, name);
-        out.* = .{ .name = try a.dupe(u8, definition.name), .fingerprint = try a.dupe(u8, definition.fingerprint), .dependencies = dependencies };
-    }
-    return .{ .context = try a.dupe(u8, graph.context), .scope = try a.dupe(u8, graph.scope), .definitions = definitions };
+    return .{
+        .version = graph.version,
+        .context = try a.dupe(u8, graph.context),
+        .scope = try a.dupe(u8, graph.scope),
+        .definitions = try copyNodes(a, graph.definitions),
+        .types = try copyNodes(a, graph.types),
+        .modules = try copyNodes(a, graph.modules),
+    };
+}
+fn copyNodes(a: A, nodes: []const frontend.Node) ![]const frontend.Node {
+    const copy = try a.alloc(frontend.Node, nodes.len);
+    for (copy, nodes) |*out, node| out.* = .{
+        .name = try a.dupe(u8, node.name),
+        .binders = try copyStrings(a, node.binders),
+        .fingerprint = try a.dupe(u8, node.fingerprint),
+        .dependencies = try copyStrings(a, node.dependencies),
+    };
+    return copy;
+}
+fn copyStrings(a: A, strings: []const S) ![]const S {
+    const copy = try a.alloc(S, strings.len);
+    for (copy, strings) |*out, string| out.* = try a.dupe(u8, string);
+    return copy;
 }
 
 fn stringify(a: A, value: anytype) ![]u8 {
@@ -254,11 +270,17 @@ fn contains(items: []const S, item: S) bool {
 
 // --- Tests: pure, no compiler ---
 
-const graph_v1: frontend.Graph = .{ .context = "c", .scope = "definitions", .definitions = &.{
-    .{ .name = "out_a", .fingerprint = "a1" },
-    .{ .name = "out_b", .fingerprint = "b1" },
-    .{ .name = "roclet_expect_1", .fingerprint = "t1" },
-} };
+const first_graph: frontend.Graph = .{
+    .context = "c",
+    .scope = "definitions",
+    .definitions = &.{
+        .{ .name = "out_a", .binders = &.{"out_a"}, .fingerprint = "a1", .dependencies = &.{"Point"} },
+        .{ .name = "out_b", .fingerprint = "b1", .dependencies = &.{"module:Geometry"} },
+        .{ .name = "roclet_expect_1", .fingerprint = "t1" },
+    },
+    .types = &.{.{ .name = "Point", .fingerprint = "p1" }},
+    .modules = &.{.{ .name = "module:Geometry", .fingerprint = "g1" }},
+};
 
 fn freshOutcomes(a: A, tag: S) !Outcomes {
     return .{
@@ -284,11 +306,13 @@ test "merged outcomes follow root order and mix retained with fresh presentation
     var baseline: Baseline = .init(std.testing.allocator);
     defer baseline.deinit();
     const first = try freshOutcomes(a, "old");
-    try baseline.commit(graph_v1, all_roots, &.{}, first);
+    try baseline.commit(first_graph, all_roots, &.{}, first);
     try std.testing.expectEqual(@as(usize, 3), baseline.entries.count());
 
-    const input = try baseline.planInput(a, graph_v1, all_roots, &.{"out_a"});
+    const input = try baseline.planInput(a, first_graph, all_roots, &.{"out_a"});
     try std.testing.expect(input.known);
+    // The retained graph is a complete copy: every node list and binder.
+    try std.testing.expectEqualStrings(try stringify(a, first_graph), try stringify(a, input.previous));
     try std.testing.expectEqual(@as(usize, 3), input.available.len);
     const plan = try frontend.plan(a, input);
     try std.testing.expectEqualStrings("out_a", plan.evaluate[0]);
@@ -316,24 +340,24 @@ test "commit drops failed, unevaluated and removed roots and keeps reused ones" 
     const a = arena.allocator();
     var baseline: Baseline = .init(std.testing.allocator);
     defer baseline.deinit();
-    try baseline.commit(graph_v1, all_roots, &.{}, try freshOutcomes(a, "old"));
+    try baseline.commit(first_graph, all_roots, &.{}, try freshOutcomes(a, "old"));
     const kept = baseline.entries.get("out_b").?;
 
     // out_a failed (no value), the test failed, out_b was reused.
-    try baseline.commit(graph_v1, all_roots, &.{"out_b"}, .{
+    try baseline.commit(first_graph, all_roots, &.{"out_b"}, .{
         .tests = try a.dupe(notebook.TestResult, &.{.{ .root = "roclet_expect_1", .passed = false, .message = "boom" }}),
     });
     try std.testing.expectEqual(@as(usize, 1), baseline.entries.count());
     try std.testing.expectEqual(kept, baseline.entries.get("out_b").?);
 
     // An analyze lists out_b in evaluate but runs nothing: dropped.
-    try baseline.commit(graph_v1, all_roots, &.{}, .{});
+    try baseline.commit(first_graph, all_roots, &.{}, .{});
     try std.testing.expectEqual(@as(usize, 0), baseline.entries.count());
     try std.testing.expectEqual(@as(usize, 0), baseline.bytes);
 
     // Roots no longer in the document are dropped too.
-    try baseline.commit(graph_v1, all_roots, &.{}, try freshOutcomes(a, "new"));
-    try baseline.commit(graph_v1, &.{"out_a"}, &.{"out_a"}, .{});
+    try baseline.commit(first_graph, all_roots, &.{}, try freshOutcomes(a, "new"));
+    try baseline.commit(first_graph, &.{"out_a"}, &.{"out_a"}, .{});
     try std.testing.expectEqual(@as(usize, 1), baseline.entries.count());
     try std.testing.expect(baseline.entries.get("out_a") != null);
 }
@@ -346,14 +370,14 @@ test "a failed root is planned again and the reset baseline knows nothing" {
     defer baseline.deinit();
     var outcomes = try freshOutcomes(a, "old");
     outcomes.values = outcomes.values[1..];
-    try baseline.commit(graph_v1, all_roots, &.{}, outcomes);
-    const plan = try frontend.plan(a, try baseline.planInput(a, graph_v1, all_roots, &.{}));
+    try baseline.commit(first_graph, all_roots, &.{}, outcomes);
+    const plan = try frontend.plan(a, try baseline.planInput(a, first_graph, all_roots, &.{}));
     try std.testing.expectEqualStrings("out_a", plan.evaluate[0]);
     try std.testing.expectEqualStrings("No successful result", plan.explanations[0].reason);
 
     baseline.clear();
     try std.testing.expect(baseline.graph == null);
-    const input = try baseline.planInput(a, graph_v1, all_roots, &.{});
+    const input = try baseline.planInput(a, first_graph, all_roots, &.{});
     try std.testing.expect(!input.known);
     const fresh_plan = try frontend.plan(a, input);
     try std.testing.expectEqual(@as(usize, 0), fresh_plan.reused.len);
@@ -368,14 +392,14 @@ test "retained bytes above the limit evict the least recently stored entries fir
     defer baseline.deinit();
     const big = try a.alloc(u8, 1000);
     @memset(big, 'x');
-    try baseline.commit(graph_v1, all_roots, &.{}, .{ .values = try a.dupe(notebook.Value, &.{.{ .root = "out_a", .text = big }}) });
+    try baseline.commit(first_graph, all_roots, &.{}, .{ .values = try a.dupe(notebook.Value, &.{.{ .root = "out_a", .text = big }}) });
     // out_a is reused while out_b is stored after it.
-    try baseline.commit(graph_v1, all_roots, &.{"out_a"}, .{ .values = try a.dupe(notebook.Value, &.{.{ .root = "out_b", .text = big }}) });
+    try baseline.commit(first_graph, all_roots, &.{"out_a"}, .{ .values = try a.dupe(notebook.Value, &.{.{ .root = "out_b", .text = big }}) });
     try std.testing.expectEqual(@as(usize, 2 * (1000 + 5)), baseline.bytes);
     // Within the limit nothing is evicted.
-    try std.testing.expectEqual(@as(usize, 2), (try baseline.planInput(a, graph_v1, all_roots, &.{})).available.len);
+    try std.testing.expectEqual(@as(usize, 2), (try baseline.planInput(a, first_graph, all_roots, &.{})).available.len);
     baseline.limit = 1500;
-    const input = try baseline.planInput(a, graph_v1, all_roots, &.{});
+    const input = try baseline.planInput(a, first_graph, all_roots, &.{});
     try std.testing.expectEqual(@as(usize, 1), input.available.len);
     try std.testing.expectEqualStrings("out_b", input.available[0]);
     try std.testing.expectEqual(@as(usize, 1005), baseline.bytes);

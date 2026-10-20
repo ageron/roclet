@@ -159,7 +159,7 @@ pub const Document = struct {
     diagnostics: []ModelDiagnostic = &.{},
     /// The checked dependency graph; a participating request commits it to
     /// the engine baseline.
-    graph: ?Graph = null,
+    graph: ?frontend.Graph = null,
     evaluation: ?Evaluation = null,
     rendering: []const Rendering = &.{},
 
@@ -241,15 +241,6 @@ const ModelView = struct {
         try w.objectField("diagnostics");
         try w.write(self.diagnostics);
         try w.endObject();
-    }
-};
-/// The dependency graph: per-definition fingerprints plus the module context.
-const Graph = struct {
-    definitions: []const frontend.Definition,
-    scope: []const u8,
-    context: []const u8,
-    fn planned(self: Graph) frontend.Graph {
-        return .{ .context = self.context, .scope = self.scope, .definitions = self.definitions };
     }
 };
 const Rendering = struct { cell: usize, events: []const syntax.MarkdownEvent };
@@ -527,10 +518,9 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
             .isolate_errors = request.isolate_errors,
         });
         if (eql(checked.evaluation.status, "ok")) {
-            const graph = try dependencyGraph(a, program, checked.evaluation, request.modules.json, request.workspace_fingerprint);
-            document.graph = graph;
+            const current = try dependencyGraph(a, checked.analysis.?, request.modules.json, request.workspace_fingerprint);
+            document.graph = current;
             try document.put(a, .graph);
-            const current = graph.planned();
             var reactivity: frontend.PlanInput = switch (request.reactivity) {
                 .absent, .legacy => .{},
                 .malformed => return error.MalformedReactivity,
@@ -553,7 +543,7 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
         if (merging) {
             const reused = result.plan.reused;
             outcomes = try engine.baseline.merge(a, result.roots, reused, outcomes);
-            try engine.baseline.commit(document.graph.?.planned(), result.roots, reused, .{ .values = evaluation.values, .tests = evaluation.tests, .events = evaluation.events });
+            try engine.baseline.commit(document.graph.?, result.roots, reused, .{ .values = evaluation.values, .tests = evaluation.tests, .events = evaluation.events });
         }
         var reused_roots: std.StringHashMapUnmanaged(void) = .empty;
         if (merging) for (result.plan.reused) |root| try reused_roots.put(a, root, {});
@@ -728,33 +718,26 @@ fn cellRoots(a: A, cell: frontend.Cell) ![]const []const u8 {
     return roots.items;
 }
 
-// The fingerprint covers exact definition source and its inferred type. Anything
-// outside these regions (annotations, imports, type declarations, preamble) is
-// module context. Imported module contents are part of that context as well.
+// Node fingerprints come from the checked analysis. The context covers the
+// program outside every node, supplied module contents and the workspace.
 fn digest(a: A, bytes: []const u8) ![]const u8 {
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(bytes, &hash, .{});
     return a.dupe(u8, &std.fmt.bytesToHex(hash, .lower));
 }
-fn dependencyGraph(a: A, program: []const u8, evaluation: notebook.Evaluation, modules_json: []const u8, workspace_fingerprint: []const u8) !Graph {
-    const definitions = try a.alloc(frontend.Definition, evaluation.definitions.len);
-    const covered = try a.alloc(bool, program.len);
-    @memset(covered, false);
-    for (definitions, evaluation.definitions) |*out, definition| {
-        const start = @min(program.len, definition.region.start);
-        const end = @max(start, @min(program.len, definition.region.end));
-        @memset(covered[start..end], true);
-        out.* = .{
-            .name = definition.name,
-            .fingerprint = try digest(a, try json(a, .{ program[start..end], definition.type })),
-            .dependencies = definition.dependencies,
-        };
-    }
+fn dependencyGraph(a: A, analysis: *const notebook.Analysis, modules_json: []const u8, workspace_fingerprint: []const u8) !frontend.Graph {
+    const graph = analysis.graph;
     var context: std.Io.Writer.Allocating = .init(a);
-    for (program, covered) |byte, skip| if (!skip) try context.writer.writeByte(byte);
+    try context.writer.writeAll(graph.context);
     try context.writer.writeAll(modules_json);
     try context.writer.writeAll(workspace_fingerprint);
-    return .{ .definitions = definitions, .scope = evaluation.dependency_scope, .context = try digest(a, context.written()) };
+    return .{
+        .context = try digest(a, context.written()),
+        .scope = @tagName(analysis.dependency_scope),
+        .definitions = graph.definitions,
+        .types = graph.types,
+        .modules = graph.modules,
+    };
 }
 
 test {
