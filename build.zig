@@ -96,6 +96,8 @@ pub fn build(b: *std.Build) void {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
     }
+    const image_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, b.graph.host, optimize, "compiler-adapter/image.zig") });
+    unit_step.dependOn(&b.addRunArtifact(image_tests).step);
     const test_exe = b.addExecutable(.{ .name = "roclet-conformance", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/native.zig"),
         .target = b.graph.host,
