@@ -83,14 +83,25 @@ once and produces an immutable LIR image containing the output entrypoints.
 Metadata queries and later output selections reuse that graph and image. A source,
 module, file, or configuration change replaces the retained revision.
 
-The retained checked/lowered revision reserves a 512 MiB arena, including space
-for dependency packages such as roc-time. Each selected output gets a fresh
-interpreter and temporary allocation arena.
+A retained revision has three allocation lifetimes. Its inputs, `BuildEnv` and
+checked modules (including dependency packages such as roc-time), cache manager,
+debug events and root names live in a growable revision arena. Lowering output
+(`takeRuntime`, artifact views, static data, entrypoints) lives in a temporary
+arena that is freed as soon as `image.zig` has copied it into the flat LIR image.
+Only the image must be one contiguous buffer: it is copied in the compiler's copy
+mode (`ByteContract.mapped`), header first, into a buffer that starts at 1 MiB on
+WASM and 64 MiB natively and doubles when exhausted, up to an image-only cap of
+512 MiB on WASM and 2 GiB natively. An image over the cap is reported as
+`OutOfMemory`, the failure a full revision buffer produced before.
+`zig build -Dimage-initial-bytes=N` overrides the first buffer size so tests can
+force doubling. Each selected output gets a fresh interpreter and temporary
+allocation arena that views the image in place.
 Rich outputs also have a checked value entrypoint and a concrete serializer for
 the bundled nominal `Display` type. No evaluated Roc value is retained between
 responses. `workspaceCache.frontend_builds`, `lowerings`, `executions`, and
 `prepared_hits` expose the actual work so tests can verify reuse independently of
-wall-clock timing.
+wall-clock timing. `image_bytes` is the size of the image the request built (0
+when it reused a revision) and `image_retries` the buffer doublings it took.
 
 ## Notebook assertions
 

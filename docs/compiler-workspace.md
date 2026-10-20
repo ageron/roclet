@@ -162,9 +162,10 @@ The performance table above describes its explicitly identified earlier artifact
 those timings were not remeasured after the package/assertion changes.
 
 Workspace correctness tests use ReleaseSafe. The document suite also passes
-against the Debug engine. The expanded formatted roc-time notebook currently
-reports `OutOfMemory` with the Debug engine; native and browser ReleaseFast
-execution pass within the 512 MiB retained-revision arena.
+against the Debug engine. The expanded formatted roc-time notebook passes with
+the native Debug engine since checking and lowering moved out of the fixed
+512 MiB revision buffer into growable arenas; only its 461 KiB LIR image is
+flat (`compiler-adapter/README.md`).
 
 ## Package hosting
 

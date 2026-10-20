@@ -182,6 +182,10 @@ Earlier scheduling and typed CSV cases also passed Debug checks; the expanded
 formatted notebook reports `OutOfMemory` with the Debug engine.
 The current formatted notebook passes native and WASM ReleaseFast validation.
 This is separate from the browser's package-download restriction.
+This record predates the change that keeps only the LIR image in a flat,
+adaptively sized buffer and the rest of a revision in growable arenas; the
+formatted notebook now also passes with the native Debug engine (see
+`compiler-adapter/README.md`).
 
 ```sh
 ./zig-out/bin/roclet run demos/04-meeting-windows.roc

@@ -10,6 +10,30 @@
 | Sequencing | Independent of the other `wip/` plans. Best done after `wip/01-typed-engine-pipeline.md` so there is one prepare path, but it can be done first on `compiler-adapter/notebook.zig` (and `engine.zig`) alone. Coordinate with `wip/04-engine-state-struct.md`, which moves the same code into an `Engine` struct. |
 | Reader | An implementing agent with no other context. Everything needed is in this file or in the cited sources. Line numbers were verified at the commit this plan was written on; re-verify with `grep -n` before editing. Compiler paths are relative to `.toolchain/roc` (the prepared pinned checkout produced by `sh tools/prepare-compiler.sh`). |
 
+## 1a. Implementation status (branch `plan/05-image-buffer`)
+
+Steps 1–5, 7 and 8 are done for `notebook.zig`. **Step 6 (`runEcho`, the
+`bridge.zig` 256 MiB / `cold_core` buffers and `RunOptions.runtime_fba`) remains**
+and is scheduled after plan 01; when it lands, also update `docs/m4.md:33-35` and
+`docs/m1.md:199-202` (runEcho budgets), then delete this file.
+
+Baseline and results, same machine and session, native, **self-hosted backend
+(`-Dllvm=false`)**, maximum RSS from `/usr/bin/time -v`:
+
+| Run | Before | After |
+| --- | --- | --- |
+| Debug, `demos/04-meeting-windows.roc` | `runtime_error`, `failure: "OutOfMemory"`, 700 MB | `ok`, six values, two passing tests, 693 MB |
+| Debug, `demos/01-reactivity.roc` | 647 MB | 137 MB |
+| ReleaseFast, calendar notebook (median of 7) | 490 MB | 491 MB |
+| ReleaseFast, `demos/01-reactivity.roc` (median of 7) | 76 MB | 76 MB |
+
+`image_bytes`: Wall Area (benchmark draft via `--bridge`) 5,312; calendar notebook
+471,660; `demos/01-reactivity.roc` 3,704. Defaults chosen from these: WASM first
+buffer 1 MiB, native 64 MiB; zero retries for all of them. Forced runs
+`-Dimage-initial-bytes=65536` (calendar: 3 retries) and `=1024` (calendar 9, Wall
+Area 2) pass every native suite with parity files unchanged. Browser
+`memoryBytes` measurements are still to be recorded with an LLVM build.
+
 ## 2. Problem statement
 
 Every retained notebook revision reserves one fixed 512 MiB flat buffer and allocates
