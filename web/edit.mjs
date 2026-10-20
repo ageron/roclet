@@ -6,6 +6,7 @@ import { CompilerHighlighter } from './roc-highlighting.mjs';
 import { DraftStore } from './edit-store.mjs';
 import { loadPackageBundle } from './package-dialog.mjs';
 import { NotebookPanel, closeMenus, showHelp } from './notebook-panel.mjs';
+import { clonePanel } from './workbench.mjs';
 const $ = id => document.getElementById(id);
 let compilerManifest, libraryToken = 0, panel;
 // Header commands act on the active panel.
@@ -117,13 +118,16 @@ function bind() {
   window.addEventListener('beforeunload', event => { if (active().notebook.saveStatus !== 'Saved in this browser') { event.preventDefault(); event.stopPropagation(); event.returnValue = ''; } });
 }
 export async function startNotebook(drafts = new DraftStore()) {
+// The panel markup exists before the compiler loads so its status is visible.
+const root = clonePanel($('notebook-panel-template'), '');
+$('workbench').append(root);
 try {
   const [binary, manifest] = await Promise.all([fetch('../artifacts/roclet.wasm').then(r => { if (!r.ok) throw new Error('Build the compiler adapter first.'); return r.arrayBuffer(); }), fetch('../artifacts/manifest.json').then(r => r.json())]);
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', binary))].map(v => v.toString(16).padStart(2,'0')).join('');
   if (hash !== manifest.artifacts['roclet.wasm'].sha256) throw new Error('Compiler artifact does not match its manifest. Rebuild or refresh Roclet.');
   compilerManifest=manifest;
   const highlighter=new CompilerHighlighter(binary);
-  panel = new NotebookPanel({root:document.querySelector('main.shell'), bytes:binary, highlighter, store:drafts, loadPackage:loadPackageBundle, onChange:(_,reason)=>reflectHeader(reason)});
+  panel = new NotebookPanel({root, bytes:binary, highlighter, store:drafts, loadPackage:loadPackageBundle, onChange:(_,reason)=>reflectHeader(reason)});
   const notebook = panel.notebook;
   notebook.dispose=()=>{highlighter.dispose();panel.dispose();};
   bind();

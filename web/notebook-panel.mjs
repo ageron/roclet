@@ -35,7 +35,13 @@ function clearObservations(view, render) {
 export class NotebookPanel {
   constructor({ root, prefix = '', bytes, highlighter, store, loadPackage, onActivate = () => {}, onChange = () => {} }) {
     this.root = root; this.prefix = prefix; this.store = store; this.highlighter = highlighter;
-    const part = this.part = name => document.getElementById(prefix + name);
+    // The title and run controls are still in the page header.
+    const parts = new Map();
+    const part = this.part = name => {
+      let node = parts.get(name);
+      if (!node) parts.set(name, node = root.querySelector(`[data-part="${name}"]`) ?? document.getElementById(prefix + name));
+      return node;
+    };
     const panel = this;
     const cards = this.cards = new Map();
     const selection = this.selection = new CellSelection();

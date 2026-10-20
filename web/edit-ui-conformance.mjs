@@ -43,6 +43,11 @@ try {
   $('auto').checked=false; $('auto').dispatchEvent(new Event('change'));
   assertCellNumbers(); assert.match(cards()[1].querySelector('.cell-label').textContent,/^Cell 2 · id=1$/);
   report('cell menus show visible one-based positions and label inferred output IDs separately');
+  const ids=[...document.querySelectorAll('[id]')].map(node=>node.id);
+  assert.equal(new Set(ids).size,ids.length,`Duplicated ids: ${ids.filter((id,i)=>ids.indexOf(id)!==i).join(', ')}`);
+  for(const id of ['title','auto','run','stop','status','save-status','selection-status','help','notice','document-diagnostics','app-header','app-header-source','notebook','cells','source-pane','source']) assert($(id),`Missing legacy id ${id}`);
+  assert(cards().every(card=>card.querySelector(`#result-${CSS.escape(card.dataset.key)}`)),'Result ids lost their cell keys');
+  report('U3: no element id is duplicated and the primary panel keeps the legacy ids');
   assert.equal(document.querySelectorAll('.cell-head').length,0); assert.equal(document.querySelectorAll('.insertion').length,5); assert(isHidden(inputs()[0]));
   const values=notebook.result.evaluation.values.map(v=>v.text);
   cards()[0].querySelector('.cell-preview').click(); assert(document.activeElement===inputs()[0]); assert(!isHidden(inputs()[0])); key('Enter',{metaKey:true});

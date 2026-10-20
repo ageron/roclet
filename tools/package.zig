@@ -85,6 +85,7 @@ pub fn main(init: std.process.Init) !void {
         "web/edit.html",
         "web/edit.mjs",
         "web/notebook-panel.mjs",
+        "web/workbench.mjs",
         "web/edit-model.mjs",
         "web/compiler-tools.mjs",
         "web/edit-store.mjs",
