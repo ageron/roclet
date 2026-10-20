@@ -65,7 +65,12 @@ retained revision through typed calls (`notebook.checkDocument` and
 check and once per output root, and the check/run/export script path calls
 `script.run` directly. The dependency analysis is computed once per revision
 and cached on it (`workspaceCache.analyses`); previously it ran N+2 times for N
-evaluated roots, each copy round-tripped through JSON.
+evaluated roots, each copy round-tripped through JSON. It builds the dependency
+graph (version 2) from checked data: parser-token fingerprints, value edges
+from the compiler's strict-demand relation united with name references, and
+nodes for local types and imported modules, so comments, annotations, type
+declarations and supplied-module edits invalidate only the roots that depend
+on them instead of every root.
 
 `tests/pipeline-benchmark.mjs` times one native `--bridge` document `evaluate`
 of generated notebooks (`a = 1`, one `out_i = a + i` per cell, a `dbg` in every

@@ -38,7 +38,8 @@ export interface Definition {
   cell: string | null;
   region: { start: number; end: number };
   name_region: ByteSpan | null;
-  /** Resolved compiler name references, including lambda bodies and recursion. */
+  /** Resolved compiler name references, including lambda bodies and recursion.
+   *  The document `graph` (`DependencyGraph`) holds the complete edges. */
   dependencies: string[];
   references: ByteSpan[];
   rename_safe: boolean;

@@ -225,9 +225,9 @@ last successful evaluation in this engine. Requests never carry graphs.
 
 - `reactivity` present (even `{}`): the request participates. The planner
   (`document_frontend.plan`) compares the current graph with the baseline graph:
-  a root is reused when the module context and scope are unchanged, every
-  definition in its dependency closure has the same fingerprint and
-  dependencies, it is not forced (`force`, `forceAll`, `selectedCell`) and the
+  a root is reused when the graph version, context and scope are unchanged,
+  every node (definition, type or module) in its dependency closure has the
+  same fingerprint, binders and dependencies, it is not forced (`force`, `forceAll`, `selectedCell`) and the
   baseline holds a successful presentation for it. The response is complete:
   `evaluation.values`, `tests` and `events` list every current root in root
   order, the retained presentation for `plan.reused` roots and the fresh one
@@ -264,17 +264,30 @@ a dependency names another node. Edges come from checked CIR: the compiler's
 strict-demand relation (`ModuleEnv.topLevelDemandDependencies`, which includes
 associated items and resolved local dispatch targets) united with compiler
 name references, type references in annotations, constructions and patterns,
-external lookups, and from each type to its associated items. The union is
-permanent: strict demand does not follow a lambda passed to a builtin
-(`List.map(xs, f)` demands `f`, not what `f` reads), and
+external lookups, method dispatch on a local nominal receiver (a
+type-variable receiver depends on every local type), and from each type to
+its associated items and the definitions its declaration reads (field
+defaults). The union is permanent: strict demand does not follow a lambda
+passed to a builtin (`List.map(xs, f)` demands `f`, not what `f` reads), and
 `workspaceCache.demand_union_fallbacks` counts the definitions a non-function
-definition reaches only through name references. A definition node covers
-its annotation. A baseline of another graph version invalidates every root.
+definition reaches only through name references.
+
+A definition or type fingerprint is SHA-256 over the parser tokens the node
+owns (tag and text, length-prefixed, never offsets; each token belongs to the
+innermost node span, and a definition's span starts at its annotation) plus,
+for values and expectations, the inferred type. Comments, whitespace and
+reordering change nothing. The `context` covers the compiler identity, the app
+header's tokens, the program tokens outside every node (imports, statements
+without a binder), the rich Display flag and the workspace fingerprint;
+supplied module contents enter only through module nodes. `scope` is
+`module` only defensively (the compiler's demand relation is missing or a
+reference never settled import resolution); then any change re-evaluates
+every root. A baseline of another graph version invalidates every root.
 
 `roclet --bridge a.json b.json ...` serves a sequence with one engine, one
 response per line; `tests/m4.zig` records before/selective/full sequences so the
 browser replay sees the same engine state. Changes to workspace files
-participate in reactive invalidation through the graph's module context.
+participate in reactive invalidation through the graph's context.
 
 ## WASM byte operations
 
