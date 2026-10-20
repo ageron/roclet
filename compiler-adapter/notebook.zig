@@ -50,14 +50,12 @@ pub const State = struct {
     wire_name: ?[]const u8 = null,
     requests: []check.CheckedArtifact.RootRequest = &.{},
     request_names: []const []const u8 = &.{},
-    lowered: ?lir.CheckedPipeline.LoweredProgram = null,
     image: ?image.Image = null,
     entry_names: []const []const u8 = &.{},
     cache_reported: compile.CacheStats = .{},
 
     fn deinit(self: *State) void {
         if (self.image) |*flat| flat.deinit(gpa);
-        if (self.lowered) |*lowered| lowered.deinit();
         if (self.build) |build| {
             if (self.reports.len != 0) build.freeDrainedReports(self.reports);
             build.deinit();
@@ -224,12 +222,17 @@ pub const State = struct {
         }
         if (self.requests.len == 0) return;
         eng.stats.lowerings += 1;
-        self.lowered = try build.runtimeProgramSession().?.takeRuntime(a, request_set, runtime_target);
-        const lowered = &self.lowered.?;
-        const imports = try build.collectImportedArtifactViews(a, artifact);
-        const relations = try build.collectRelationArtifactViews(a, artifact);
-        const data = try eval.buildStaticDataForWidth(a, .{ .root = check.CheckedArtifact.loweringViewWithRelations(artifact, relations), .imports = imports }, lowered, lowered.target_usize, .{});
-        const entrypoints = try a.alloc(lir.LirImage.PlatformEntrypoint, lowered.lir_result.root_procs.items.len);
+        // Lowering output is scratch once copied into the image; only the
+        // entry names (read by execute) stay on the revision allocator.
+        var lowering = std.heap.ArenaAllocator.init(gpa);
+        defer lowering.deinit();
+        const la = lowering.allocator();
+        var program = try build.runtimeProgramSession().?.takeRuntime(la, request_set, runtime_target);
+        const lowered = &program;
+        const imports = try build.collectImportedArtifactViews(la, artifact);
+        const relations = try build.collectRelationArtifactViews(la, artifact);
+        const data = try eval.buildStaticDataForWidth(la, .{ .root = check.CheckedArtifact.loweringViewWithRelations(artifact, relations), .imports = imports }, lowered, lowered.target_usize, .{});
+        const entrypoints = try la.alloc(lir.LirImage.PlatformEntrypoint, lowered.lir_result.root_procs.items.len);
         self.entry_names = try a.alloc([]const u8, entrypoints.len);
         for (entrypoints, lowered.lir_result.root_procs.items, lowered.lir_result.root_metadata.items, 0..) |*entry, proc, metadata, i| {
             entry.* = .{ .ordinal = @intCast(i), .root_proc = proc };
