@@ -4,7 +4,7 @@ import { validDraft } from './edit-model.mjs';
 import { editorFor } from './cell-editor.mjs';
 import { CompilerHighlighter } from './roc-highlighting.mjs';
 import { DraftStore } from './edit-store.mjs';
-import { loadPackageBundle } from './package-dialog.mjs';
+import { PackagePrompts } from './package-dialog.mjs';
 import { NotebookPanel, closeMenus, showHelp } from './notebook-panel.mjs';
 import { clonePanel, engineDetailsKey, readPreference, writePreference } from './workbench.mjs';
 const $ = id => document.getElementById(id);
@@ -135,7 +135,8 @@ try {
   if (hash !== manifest.artifacts['roclet.wasm'].sha256) throw new Error('Compiler artifact does not match its manifest. Rebuild or refresh Roclet.');
   compilerManifest=manifest;
   const highlighter=new CompilerHighlighter(binary);
-  panel = new NotebookPanel({root, bytes:binary, highlighter, store:drafts, loadPackage:loadPackageBundle, preferences, onChange:(_,reason)=>reflectHeader(reason)});
+  const prompts=new PackagePrompts();
+  panel = new NotebookPanel({root, bytes:binary, highlighter, store:drafts, loadPackage:details=>prompts.request({...details,requester:panel.title}), preferences, onChange:(_,reason)=>reflectHeader(reason)});
   const notebook = panel.notebook;
   notebook.dispose=()=>{highlighter.dispose();panel.dispose();};
   bind();

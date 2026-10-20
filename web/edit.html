@@ -178,7 +178,7 @@ dialog { background:var(--page); }
 <dialog id="package-dialog" aria-labelledby="package-title"><div class="dialog-title"><h2 id="package-title">Load package bundle</h2><button data-close aria-label="Cancel package loading">×</button></div>
 <p>This package couldn't be downloaded automatically. Its host may block browser access, or the network may be unavailable.</p>
 <p><a id="package-download" target="_blank" rel="noopener noreferrer">Download bundle ↗</a></p>
-<p id="package-url" class="quiet" style="overflow-wrap:anywhere"></p>
+<p id="package-url" class="quiet" style="overflow-wrap:anywhere"></p><p id="package-needed" class="quiet" hidden></p>
 <p>Download the <code>.tar.zst</code> file, then load it below. Roclet verifies the package hash before using it and caches verified bundles in this browser. Additional dependencies may ask for their own bundle.</p>
 <button id="package-load">Load bundle…</button><input id="package-file" type="file" accept=".tar.zst" aria-label="Load downloaded package bundle" hidden>
 <button data-close>Cancel</button><p id="package-status" role="status" aria-live="polite"></p>
