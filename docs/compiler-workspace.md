@@ -157,9 +157,9 @@ module/package test suites are not selected. See the
 
 The merged ReleaseFast native/WASM pair passes:
 
-- 167 native document contracts, 36 compiler cases, and 30 complete selective/full
-  evaluation responses.
-- 261 complete native/WASM document comparisons and 115 fresh-worker runs,
+- 168 native document contracts (one an `operation: "program"` run) and 30
+  complete selective/full evaluation responses.
+- 262 complete native/WASM document comparisons and 115 fresh-worker runs,
   including Unicode mappings, failure isolation, missing-module diagnostics,
   checked runnable exports, and the upstream pinned Display package.
 - 46 Edit UI contracts at each desktop/compact width, 21 lifecycle contracts,

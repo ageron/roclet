@@ -6,8 +6,9 @@ commit in `compiler.lock.json`, applies `embedding.patch`, and prepares
 `.toolchain/roc` without modifying the supplied checkout. `build.zig.zon` imports
 that dependency's compiler modules directly.
 
-`bridge.zig`, `engine.zig`, `workspace.zig`, and `snapshot.zig` are shared by native
-and WASM hosts. User programs execute through Roc's checked lowering and
+`bridge.zig` and everything it imports (`document.zig`, `notebook.zig`,
+`script.zig`, `engine.zig`, `workspace.zig`, ...) are shared by native and WASM
+hosts. User programs execute through Roc's checked lowering and
 interpreter. Generating WebAssembly for user programs is outside this interface.
 Compiler embedding additions expose notebook parsing and structured compile-time
 observations with their checked module/root provenance. Normal Roc parsing and
@@ -26,9 +27,11 @@ native host may construct several engines in one process (`tests/engine.zig`
 does); the WASM export layer owns exactly one per worker instance.
 
 JSON exists only at that boundary. `bridge.process` parses the request once,
-dispatches on `operation`, and serialises one typed response with
-`workspaceCache` and `packagesRequired` appended; everything between is typed
-Zig. Document requests become a `document.Request` and leave as a
+dispatches on its `operation` alone (`document`, `syntax` and `markdown` go to
+`document.zig`, `program` to `script.zig`; anything else, including the retired
+M0 `cells` snapshot, is a `protocol_error` response), and serialises one typed
+response with `workspaceCache` and `packagesRequired` appended; everything
+between is typed Zig. Document requests become a `document.Request` and leave as a
 `document.Response`; notebook evaluation is `notebook.checkDocument`, which
 prepares or reuses the retained revision and returns a `Checked` handle whose
 `evaluate(roots)` runs the selected roots against the same image; whole
@@ -76,8 +79,8 @@ actions include `parse`, `convert`, `normalize`, `view`, `export`, `compose`,
 `operation: "program"` with `{protocol: 1, source, user_bytes, args?,
 check_only?, app_header?, modules?, root?, files?}` checks and runs one whole
 headerless program on the echo platform and returns the protocol-1 program
-response; the same request without `operation` is accepted until the M0
-`cells` adapter is retired.
+response. A request without one of these four operations is answered with
+`status: "protocol_error"`.
 
 `compact: true` on `analyze` or `evaluate` omits export encodings, duplicate draft
 and source strings, and internal parser facts. Editor cells, mappings,
@@ -266,8 +269,9 @@ conversions, exhaustiveness failures, and other compile-time errors remain
 module-wide. Ordinary non-isolating requests retain their diagnostic behavior.
 All supplied application definitions are checked, including unused definitions.
 
-Document sources are bounded to 256 KiB and 500 cells. The snapshot source limit
-is 1 MiB of user source, with generated notebook code bounded separately. Each root retains at most 1,000 observations,
+Document sources are bounded to 256 KiB and 500 cells. The whole-program source limit
+is 1 MiB of user source, with generated notebook code bounded separately. Each
+root retains at most 1,000 observations,
 256 KiB of observations, and 64 KiB per text message/result; rich payloads have a
 separate 512 KiB bound. Arbitrary platform effects and external foreign functions
 are outside this embedding's supported scope.
