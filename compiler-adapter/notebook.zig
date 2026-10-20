@@ -36,8 +36,9 @@ const Label = struct { root: []const u8, text: []const u8, value: []const u8, ri
 /// A retained revision, owned by `Engine.revision`.
 pub const State = struct {
     key: [32]u8,
-    buffer: []align(16) u8,
-    fba: std.heap.FixedBufferAllocator,
+    /// Everything retained for the revision except the image: inputs,
+    /// BuildEnv and checked modules, cache manager, debug events, names.
+    revision_arena: std.heap.ArenaAllocator,
     build: ?*compile.BuildEnv = null,
     capture: engine.DebugCapture,
     reports: []const compile.BuildEnv.DrainedModuleReports = &.{},
@@ -60,7 +61,7 @@ pub const State = struct {
             if (self.reports.len != 0) build.freeDrainedReports(self.reports);
             build.deinit();
         }
-        gpa.free(self.buffer);
+        self.revision_arena.deinit();
     }
     pub fn destroy(self: *State) void {
         self.deinit();
@@ -77,7 +78,7 @@ pub const State = struct {
         for (self.reports) |module| for (module.reports) |*report| diag.emitReport(scratch.allocator(), report);
     }
     fn prepare(self: *State, eng: *Engine, opts: Options) !void {
-        const a = self.fba.allocator();
+        const a = self.revision_arena.allocator();
         const expectations = try a.dupe(Expectation, opts.metadata.expectations);
         for (expectations) |*expectation| expectation.root = try a.dupe(u8, expectation.root);
         self.expectations = expectations;
@@ -331,16 +332,12 @@ pub fn run(eng: *Engine, opts: Options) !u8 {
     }
     if (eng.revision != null) eng.stats.prepared_hits += 1;
     if (eng.revision == null) {
-        const buffer = try gpa.alignedAlloc(u8, .@"16", 512 * 1024 * 1024);
-        errdefer gpa.free(buffer);
         const state = try gpa.create(State);
         errdefer gpa.destroy(state);
-        state.* = .{ .key = key, .buffer = buffer, .fba = std.heap.FixedBufferAllocator.init(buffer), .capture = .{ .allocator = undefined } };
-        state.capture.allocator = state.fba.allocator();
-        state.prepare(eng, opts) catch |err| {
-            if (state.build) |build| build.deinit();
-            return err;
-        };
+        state.* = .{ .key = key, .revision_arena = .init(gpa), .capture = .{ .allocator = undefined } };
+        state.capture.allocator = state.revision_arena.allocator();
+        errdefer state.deinit();
+        try state.prepare(eng, opts);
         state.key = try inputKey(eng, opts);
         eng.revision = state;
     }
