@@ -26,7 +26,7 @@ relying on them, since the branch moves.
 | 03 Checked dependency graph (done) | Definition fingerprints come from checked CIR, not source text; type declarations and annotations become graph nodes and edges; the module-scope fallback shrinks. | A comment edit between cells invalidates every root today, and any nominal type declaration disables selective evaluation entirely. |
 | 04 Engine state struct (done) | Module-level globals become an explicit `Engine` struct with a request-scoped observer. | Single-tenant engine, nesting-dependent event attribution, no in-process parallel tests, header parsed through a workspace side channel. |
 | 05 Image buffer vs revision arena (done) | Only what the LIR image requires lives in a flat buffer; everything else in a growable arena; the flat buffer is sized adaptively. | A fixed 512 MiB reservation per revision sets both the memory floor and a hard ceiling that the Debug engine already hits. |
-| [06 Retire legacy paths](06-retire-legacy-paths.md) | One worker protocol, one bridge dispatch, one source of truth for protocol types; dead build wiring removed. | Three dispatch paths, two session/worker protocols, an unused Roc core import and a drifting `protocol.d.ts`. |
+| 06 Retire legacy paths (done) | One worker protocol, one bridge dispatch, one source of truth for protocol types; dead build wiring removed. | Three dispatch paths, two session/worker protocols, an unused Roc core import and a drifting `protocol.d.ts`. |
 | [07 Side-by-side notebooks](07-side-by-side-notebooks.md) | Two notebook panels on one page, each with its own worker and engine; the title moves to the top of each panel and the status bar to a fixed bar at its bottom. | Exercises plans 01, 02, 04, 05 and 06 with two engines alive at once (attribution, per-engine baselines, memory, shared caches, package prompts) in the real UI. Implement after 02. |
 
 ## Sequencing
@@ -52,10 +52,11 @@ relying on them, since the branch moves.
 - **Tree stays green at every step.** Each step names the tests that cover it.
 - **Protocol-1 JSON at the boundary is preserved unless the plan says
   otherwise.** Native and WASM responses are compared field for field by the
-  parity suites (`tests/documents.zig`, `tests/m4.zig`, `tests/native.zig` and
+  parity suites (`tests/documents.zig`, `tests/m4.zig` and
   the `web/*-conformance.html` pages through `tests/harness.mjs`
   `compilerSemantics`). Any protocol change must be documented in
-  `compiler-adapter/README.md` and `protocol.d.ts` (or its replacement). The
+  `compiler-adapter/README.md`, and the pinned wire shape in
+  `tests/protocol-shape.json` regenerated with `-Dupdate-protocol-shape`. The
   `protocol` number is bumped only when an older client's request could be
   misinterpreted; JS and WASM ship together as a pinned set
   (`web/offline-release.json`), so additive response fields and rejected
@@ -77,10 +78,8 @@ relying on them, since the branch moves.
 - **Docs are updated in the same change**: `compiler-adapter/README.md`,
   `docs/compiler-workspace.md`, the protocol description, and the relevant
   `docs/m*.md` adapter-contract sections. The protocol description is
-  `compiler-adapter/protocol.d.ts` until plan 06 step F lands, and
-  `tests/protocol-shape.json` (a pinned, machine-checked wire shape) after it.
-  Where a plan says "update `protocol.d.ts`", read it as "update whichever of
-  the two exists".
+  `tests/protocol-shape.json`, a pinned, machine-checked wire shape that
+  replaced `compiler-adapter/protocol.d.ts`.
 
 ## Shared validation commands
 
@@ -130,7 +129,7 @@ deferred to one final validation pass when the PR is ready.
 | 02 engine-owned baseline | Merged (`plan/02-engine-baseline`) |
 | 06 step E (single `operation` dispatch) | Merged (`plan/06e-retire-legacy-dispatch`) |
 | 03 checked dependency graph | Merged (`plan/03-checked-graph`) |
-| 06 step F (pin the wire shape) | In progress |
+| 06 step F (pin the wire shape), H | Merged (`plan/06f-protocol-shape`) |
 | 07 side-by-side notebooks | In progress |
 
 ### Deferred final validation (LLVM)
@@ -174,3 +173,8 @@ deferred to one final validation pass when the PR is ready.
   graph v2 fingerprints (module identity hashes, type strings); edit-ui
   dependency dialog with type nodes, changed scope note, F2 rename; benchmark
   worker ms (each analysis adds one parser pass over the user program).
+- Plan 06 step F: document-conformance replays 264 cases, including the new
+  `syntax` and `markdown` fixtures; packaged asset list unchanged
+  (`protocol.d.ts` was not packaged). `docs/compiler-workspace.md` still
+  quotes "30 complete selective/full evaluation responses"; M4 now records 84
+  across 28 workloads, so refresh the validation section with the LLVM run.
