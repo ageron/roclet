@@ -114,7 +114,7 @@ fn finishCompact(result: *V) void {
     _ = result.object.swapRemove("program");
     for (fieldArray(result.object.get("model").?, "cells")) |*cell| _ = cell.object.swapRemove("source_map");
 }
-pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
+pub fn process(gpa: A, bytes: []const u8, evaluate: anytype) ![]u8 {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();

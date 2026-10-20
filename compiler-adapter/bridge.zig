@@ -76,7 +76,6 @@ var response: Response = .{};
 var arena: std.mem.Allocator = undefined;
 var user_bytes: u32 = 0;
 var callback_failed = false;
-var bounded_events = true;
 var event_bytes: usize = 0;
 var events_truncated = false;
 var rich_output = false;
@@ -90,22 +89,19 @@ fn dupe(s: []const u8) []const u8 {
     };
 }
 fn observe(kind: []const u8, message: []const u8) void {
-    var end = message.len;
-    if (bounded_events) {
-        const designated = std.mem.eql(u8, kind, "value");
-        const value_limit: usize = if (rich_output and value_index == 1) 512 * 1024 else 64 * 1024;
-        if (designated) value_index += 1;
-        end = @min(end, if (designated) value_limit else @min(@as(usize, 64 * 1024), 256 * 1024 -| event_bytes));
-        if (!designated and response.events.items.len >= 1000) end = 0;
-        while (end > 0 and end < message.len and message[end] & 0xc0 == 0x80) end -= 1;
-        if (end < message.len and !events_truncated) {
-            events_truncated = true;
-            response.events.append(arena, .{ .kind = "truncated", .message = "Output truncated: at most 1,000 observations, 256 KiB of observations, and 64 KiB per text result/message (512 KiB for rich data) are retained per root." }) catch {
-                callback_failed = true;
-            };
-        }
-        if (end == 0 and message.len > 0 and !designated) return;
+    const designated = std.mem.eql(u8, kind, "value");
+    const value_limit: usize = if (rich_output and value_index == 1) 512 * 1024 else 64 * 1024;
+    if (designated) value_index += 1;
+    var end = @min(message.len, if (designated) value_limit else @min(@as(usize, 64 * 1024), 256 * 1024 -| event_bytes));
+    if (!designated and response.events.items.len >= 1000) end = 0;
+    while (end > 0 and end < message.len and message[end] & 0xc0 == 0x80) end -= 1;
+    if (end < message.len and !events_truncated) {
+        events_truncated = true;
+        response.events.append(arena, .{ .kind = "truncated", .message = "Output truncated: at most 1,000 observations, 256 KiB of observations, and 64 KiB per text result/message (512 KiB for rich data) are retained per root." }) catch {
+            callback_failed = true;
+        };
     }
+    if (end == 0 and message.len > 0 and !designated) return;
     event_bytes += end;
     response.events.append(arena, .{ .kind = kind, .message = dupe(message[0..end]), .root = if (platform.observation_root) |root| dupe(root) else null }) catch {
         callback_failed = true;
@@ -308,20 +304,12 @@ pub fn process(bytes: []const u8) ![]u8 {
     return processSource(bytes);
 }
 
-var core_cache: runner.CachedProgram = .{ .allocator = gpa };
-fn processCore(bytes: []const u8) ![]u8 {
-    return processSourceImpl(bytes, &core_cache);
-}
 fn processSource(bytes: []const u8) ![]u8 {
-    return processSourceImpl(bytes, null);
-}
-fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
     var arena_impl = std.heap.ArenaAllocator.init(gpa);
     defer arena_impl.deinit();
     arena = arena_impl.allocator();
     response = .{};
     callback_failed = false;
-    bounded_events = cache == null;
     event_bytes = 0;
     events_truncated = false;
     const parsed = std.json.parseFromSlice(Request, arena, bytes, .{ .allocate = .alloc_always }) catch {
@@ -361,7 +349,7 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
     }
     // Only the checked, unaliased import of our bundled nominal type opts in.
     // A local type called Display or a different supplied module stays ordinary.
-    if (trusted_display and cache == null) {
+    if (trusted_display) {
         const facts = try @import("syntax.zig").roc(arena, req.source[0..req.user_bytes]);
         for (facts.statements) |statement| if (std.mem.eql(u8, statement.kind, "import")) {
             var count: usize = 0;
@@ -404,8 +392,7 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         if (callback_failed) return error.OutOfMemory;
         return serialize();
     }
-    const cold_core = cache != null and cache.?.bytes == null;
-    const runtime_buffer = try gpa.alignedAlloc(u8, .@"16", (if (cold_core) @as(usize, if (is_wasm) 1024 else 2048) else 256) * 1024 * 1024);
+    const runtime_buffer = try gpa.alignedAlloc(u8, .@"16", 256 * 1024 * 1024);
     defer gpa.free(runtime_buffer);
     var fba = std.heap.FixedBufferAllocator.init(runtime_buffer);
 
@@ -421,9 +408,8 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         .root_name = req.root,
         .extras = extras.items,
         .diagnostics = .{ .ctx = null, .vtable = &diag_vtable },
-        .analyze = if (cache == null) analyze else null,
+        .analyze = analyze,
         .args = req.args,
-        .cached_program = cache,
         .check_only = req.check_only,
         .target_usize = if (is_wasm) .u32 else .native,
         .roc_target = if (is_wasm) .wasm32 else @import("roc_target").RocTarget.detectNative(),
@@ -519,7 +505,7 @@ fn processDocument(bytes: []const u8, value: std.json.Value) ![]u8 {
         if (previous_graph) |graph| try reactivity.object.put(a, "previous", try std.json.parseFromSliceLeaky(std.json.Value, a, graph, .{}));
     };
     const input_bytes = try @import("snapshot.zig").json(a, request);
-    const result = try @import("document.zig").process(gpa, input_bytes, processSource, processCore);
+    const result = try @import("document.zig").process(gpa, input_bytes, processSource);
     defer gpa.free(result);
     var parsed = try std.json.parseFromSliceLeaky(std.json.Value, a, result, .{});
     if (parsed == .object) {

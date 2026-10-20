@@ -97,7 +97,6 @@ pub const Paths = struct {
 };
 
 /// Inputs to `runEcho`. See field doc comments for the contract on each.
-pub const CachedProgram = struct { allocator: Allocator, bytes: ?[]u8 = null };
 pub fn isEmbeddedDisplayPackage(shorthand: []const u8, spec: []const u8) bool {
     return std.mem.eql(u8, shorthand, "roclet") and std.mem.eql(u8, spec, std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n"));
 }
@@ -107,7 +106,6 @@ pub const RunOptions = struct {
     analyze: ?*const fn (*@import("can").ModuleEnv, u32) void = null,
     check_only: bool = false,
     args: []const []const u8 = &.{},
-    cached_program: ?*CachedProgram = null,
     /// Single contiguous arena used for the entire pipeline (BuildEnv,
     /// lowering, LIR image, interpreter). Must own a flat virtual
     /// region—`std.heap.ArenaAllocator` will not work because the
