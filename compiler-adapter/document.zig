@@ -722,7 +722,7 @@ fn dependencyGraph(a: A, checked: *const notebook.Checked, app_header: []const u
     const analysis = checked.analysis.?;
     var context = std.crypto.hash.sha2.Sha256.init(.{});
     workspace.hashField(&context, "roclet-context-v2");
-    workspace.hashField(&context, workspace.identity);
+    workspace.hashField(&context, workspace.semantic_identity);
     for ((try syntax.roc(a, app_header)).tokens) |token| {
         workspace.hashField(&context, token.tag);
         workspace.hashField(&context, app_header[@intCast(token.start)..@intCast(token.end)]);
