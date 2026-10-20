@@ -214,7 +214,7 @@ zig build test-unit
 zig build package
 
 # Node (no npm); Node 22+
-node --test tests/
+node --test tests/*.test.mjs
 
 # Browser parity and UI contracts (Node 22+ and a local Chrome)
 node tools/browser-check.mjs --page web/document-conformance.html
@@ -234,7 +234,7 @@ Grep gates (run from the repository root; every command must print nothing):
 
 ```sh
 grep -rn "BrowserSession\|RevisionGate\|CompilerAdapter\|byteOffsetToUtf16" --include=*.mjs --include=*.html --include=*.zig --include=*.md . | grep -v "^./web/vendor\|^./zig-pkg\|^./.toolchain\|^./zig-out\|^./docs/m[0-9]\|^./docs/.*-validation.json\|^./design.md\|^./wip/"
-grep -rn "web/session.mjs\|web/worker.mjs\|web/app.mjs\|adapter.mjs\|conformance.mjs\|web/conformance.html\|tests/unit.test.mjs\|tests/fixtures.mjs" --include=*.mjs --include=*.html --include=*.zig --include=*.md --include=*.yml . | grep -v "^./web/vendor\|^./zig-pkg\|^./.toolchain\|^./zig-out\|^./docs/m[0-9]\|^./docs/.*-validation.json\|^./wip/"
+grep -rn "web/session.mjs\|web/worker.mjs\|web/app.mjs\|adapter.mjs\|web/conformance.mjs\|web/conformance.html\|tests/unit.test.mjs\|tests/fixtures.mjs" --include=*.mjs --include=*.html --include=*.zig --include=*.md --include=*.yml . | grep -v "^./web/vendor\|^./zig-pkg\|^./.toolchain\|^./zig-out\|^./docs/m[0-9]\|^./docs/.*-validation.json\|^./wip/"
 grep -rn "processCore\|core_cache\|CachedProgram\|cold_core\|overlay.json\|Document\.roc\|core/" compiler-adapter build.zig tools .github | grep -v "ROC-LICENSE"
 grep -rn "protocol.d.ts" . --include=*.md --include=*.mjs --include=*.zig | grep -v "^./design.md\|^./wip/\|^./zig-pkg\|^./.toolchain"
 # After step E only:

@@ -88,8 +88,7 @@ to the values that use it.
    flip the notebook to module scope for the lifetime of the document.
 
 The adapter already admits this in its capability string:
-`compiler-adapter/adapter.mjs:12`
-`dependencyPrecision: 'compiler name references; conservative module fallback for types/dispatch'`,
+the former M0 capability string `dependencyPrecision: 'compiler name references; conservative module fallback for types/dispatch'` (in the now-deleted `compiler-adapter/adapter.mjs`),
 and `docs/m4.md:13-20` documents the textual fingerprint and the fallbacks.
 
 ## 3. Why it matters
@@ -574,7 +573,7 @@ worker ms before and after; the Wall Area and module-edit workloads must show
 - [ ] `grep -n "module" compiler-adapter/bridge.zig` shows `dependency_scope =
       "module"` only for the two defensive conditions in 5.8.
 - [ ] `protocol.d.ts`, `compiler-adapter/README.md`, `docs/m4.md`,
-      `docs/compiler-workspace.md`, `adapter.mjs` `dependencyPrecision` updated.
+      `docs/compiler-workspace.md` updated.
 - [ ] Benchmark worker time not slower than the recorded baseline.
 
 ## 10. Risks, open questions, deferred decisions
@@ -643,8 +642,7 @@ When complete:
   `docs/m4.md:13-20` (fingerprint description and the conservative-invalidation
   sentence), `docs/compiler-workspace.md` (one sentence under "What changed"),
   `compiler-adapter/protocol.d.ts:151-155` (`DependencyGraph` v2) and
-  `Definition` (lines 44-55), `compiler-adapter/adapter.mjs:12`
-  (`dependencyPrecision: 'compiler strict-demand relation with type, associated-item and module edges; token-stream fingerprints'`),
+  `Definition` (lines 44-55), 
   `web/edit.mjs:324` note text.
 - Record the final workload sources and the step 4 verification result in
   `docs/m4.md`.

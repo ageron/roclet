@@ -92,7 +92,7 @@ zig build test-documents
 zig build test-m4
 
 # Node (no npm)
-node --test tests/workspace.test.mjs
+node --test tests/*.test.mjs
 
 # Browser parity and UI contracts (Node 22+ and a local Chrome; no npm)
 node tools/browser-check.mjs --page web/document-conformance.html
@@ -111,3 +111,26 @@ zig build package
 Record benchmark numbers with the machine, Chrome version and optimisation
 mode, as `docs/compiler-workspace.md` does. Wall-clock timings are
 measurements, not pass gates; counters and result equality are the gates.
+
+## Coordination status
+
+Work happens on `plan/*` branches in agent worktrees and lands on
+`integration/code-checks` by fast-forward or rebase, so history stays linear.
+Iterate with the self-hosted backend (`-Dllvm=false`, native suites and
+`node --test tests/*.test.mjs`). LLVM builds, browser pages and benchmarks are
+deferred to one final validation pass when the PR is ready.
+
+| Plan | State |
+| --- | --- |
+| 06 steps A–D (JS, tests, build wiring), G | Merged (`plan/06a-retire-legacy-js`) |
+| 04 engine struct | In progress |
+| 01, 02, 03, 05, 06 steps E–F | Not started |
+
+### Deferred final validation (LLVM)
+
+- `zig build`, `zig build test`, `zig build package`; packaged asset list
+  identical to before plan 06 (98 entries).
+- Browser pages: document-conformance (expect at least 261 responses and 115
+  fresh-worker runs before plan 06 step E), edit-ui (46 contracts, desktop and
+  compact), workspace, m4, m5, edit, math, m3, demos conformance.
+- Benchmarks: `web/workspace-benchmark.html` against the recorded medians.
