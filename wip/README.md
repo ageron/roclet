@@ -21,11 +21,11 @@ relying on them, since the branch moves.
 
 | Plan | What changes | Why |
 | --- | --- | --- |
-| [01 Typed engine pipeline](01-typed-engine-pipeline.md) | `document.zig` calls the retained revision through typed Zig functions instead of re-entering the public JSON entry point once per root. JSON exists only at the WASM/native boundary. | Per-root JSON re-parse, re-hash and a repeated O(definitions × CIR nodes) analysis scale with cells × roots. Also shares one app-header synthesiser between the notebook and script pipelines; the check/run/export script path keeps its own pipeline but loses its JSON hop. |
+| 01 Typed engine pipeline (done) | `document.zig` calls the retained revision through typed Zig functions instead of re-entering the public JSON entry point once per root. JSON exists only at the WASM/native boundary. | Per-root JSON re-parse, re-hash and a repeated O(definitions × CIR nodes) analysis scale with cells × roots. Also shares one app-header synthesiser between the notebook and script pipelines; the check/run/export script path keeps its own pipeline but loses its JSON hop. |
 | [02 Engine-owned baseline](02-engine-owned-baseline.md) | The engine retains the last successful presentation per root and returns complete value sets with `reused` flags. JS stops carrying the previous graph and merging old results. | The previous graph lives in four places with duplicated elision logic; reuse is decided in Zig but performed in JS. |
 | [03 Checked dependency graph](03-checked-dependency-graph.md) | Definition fingerprints come from checked CIR, not source text; type declarations and annotations become graph nodes and edges; the module-scope fallback shrinks. | A comment edit between cells invalidates every root today, and any nominal type declaration disables selective evaluation entirely. |
-| [04 Engine state struct](04-engine-state-struct.md) | Module-level globals become an explicit `Engine` struct with a request-scoped observer. | Single-tenant engine, nesting-dependent event attribution, no in-process parallel tests, header parsed through a workspace side channel. |
-| [05 Image buffer vs revision arena](05-image-buffer-vs-revision-arena.md) | Only what the LIR image requires lives in a flat buffer; everything else in a growable arena; the flat buffer is sized adaptively. | A fixed 512 MiB reservation per revision sets both the memory floor and a hard ceiling that the Debug engine already hits. |
+| 04 Engine state struct (done) | Module-level globals become an explicit `Engine` struct with a request-scoped observer. | Single-tenant engine, nesting-dependent event attribution, no in-process parallel tests, header parsed through a workspace side channel. |
+| 05 Image buffer vs revision arena (done) | Only what the LIR image requires lives in a flat buffer; everything else in a growable arena; the flat buffer is sized adaptively. | A fixed 512 MiB reservation per revision sets both the memory floor and a hard ceiling that the Debug engine already hits. |
 | [06 Retire legacy paths](06-retire-legacy-paths.md) | One worker protocol, one bridge dispatch, one source of truth for protocol types; dead build wiring removed. | Three dispatch paths, two session/worker protocols, an unused Roc core import and a drifting `protocol.d.ts`. |
 
 ## Sequencing
@@ -124,9 +124,11 @@ deferred to one final validation pass when the PR is ready.
 | --- | --- |
 | 06 steps A–D (JS, tests, build wiring), G | Merged (`plan/06a-retire-legacy-js`) |
 | 04 engine struct | Merged (`plan/04-engine-struct`) |
-| 01 typed pipeline | In progress |
-| 05 image buffer, steps 1–5, 7, 8 | Merged (`plan/05-image-buffer`); step 6 (`runEcho`) waits for 01 |
-| 02, 03, 06 steps E–F | Not started |
+| 01 typed pipeline | Merged (`plan/01-typed-pipeline`) |
+| 05 image buffer | Merged (`plan/05-image-buffer`; step 6 landed with plan 01) |
+| 02 engine-owned baseline | In progress |
+| 06 step E (remove `cells` entry and raw legacy shape) | In progress |
+| 03, 06 step F | Not started |
 
 ### Deferred final validation (LLVM)
 
@@ -149,3 +151,9 @@ deferred to one final validation pass when the PR is ready.
   the 256 MiB `maxWallMemoryBytes` bound (chosen without a browser
   measurement), timings within 10 %; add a memory column to the
   `docs/compiler-workspace.md` measurements table.
+- Plan 01: first WASM run of the typed bridge, `engine.prepareBuiltins`, and
+  script runs through `image.build` on wasm32; `test-engine` under LLVM;
+  `node tests/pipeline-benchmark.mjs` on the ReleaseFast binary (self-hosted
+  60-cell median went 377 ms to 180 ms); packaged assets exclude
+  `tests/pipeline-benchmark.mjs`; benchmark asserts `analyses == 1` per warm
+  edit with medians near 9.7 ms and 8.1 ms.
