@@ -2721,5 +2721,360 @@
         "/workspace/Geometry.roc"
       ]
     }
+  },
+  {
+    "name": "standalone top-level expect passes without any output",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect 2 + 2 == 4\n"
+    },
+    "expect": {
+      "status": "ok",
+      "tests_passed": [
+        true
+      ],
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "standalone top-level expect fails without any output",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect 2 + 2 == 5\n"
+    },
+    "expect": {
+      "status": "partial",
+      "tests_passed": [
+        false
+      ],
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "failed expect preserves independent output without isolateErrors",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nx = 2\n# %%\nexpect x == 3\n# %%\nx * 2\n"
+    },
+    "expect": {
+      "status": "partial",
+      "tests_passed": [
+        false
+      ],
+      "evaluated_values": [
+        "4.0"
+      ]
+    }
+  },
+  {
+    "name": "multiple expects and output share a cell",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nx = 2\nexpect x == 2\nexpect x == 3\nx * 2\n"
+    },
+    "expect": {
+      "status": "partial",
+      "tests_passed": [
+        true,
+        false
+      ],
+      "evaluated_values": [
+        "4.0"
+      ]
+    }
+  },
+  {
+    "name": "selected test-only cell runs its assertions",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect 2 == 2\n# %%\nexpect 2 == 3\n",
+      "selectedCell": 0
+    },
+    "expect": {
+      "status": "ok",
+      "tests_passed": [
+        true
+      ],
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "selected output does not run unrelated failing tests",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect 2 == 3\n# %%\n42\n",
+      "selectedCell": 1
+    },
+    "expect": {
+      "status": "ok",
+      "tests_passed": [],
+      "evaluated_values": [
+        "42.0"
+      ]
+    }
+  },
+  {
+    "name": "test uses imported module but excludes imported tests",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nimport Numbers\nexpect Numbers.answer == 42\n",
+      "modules": [
+        {
+          "name": "Numbers",
+          "content": "module [answer]\nanswer = 42\nexpect False\n"
+        }
+      ]
+    },
+    "expect": {
+      "status": "ok",
+      "tests_passed": [
+        true
+      ],
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "UTF-8 assertion source attribution",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nmessage = \"héllo 🌍\"\n# %%\nexpect message == \"hello\"\n"
+    },
+    "expect": {
+      "status": "partial",
+      "tests_passed": [
+        false
+      ],
+      "evaluated_values": [],
+      "test_location_text": "expect message == \"hello\""
+    }
+  },
+  {
+    "name": "Markdown assertion source attribution",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "markdown",
+      "source": "# Calendar checks\n\n```roc\nmessage = \"héllo 🌍\"\n```\n\n```roc\nexpect message == \"hello\"\n```\n"
+    },
+    "expect": {
+      "status": "partial",
+      "tests_passed": [
+        false
+      ],
+      "evaluated_values": [],
+      "test_location_text": "expect message == \"hello\""
+    }
+  },
+  {
+    "name": "expect missing dependency remains a compile error",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect missing_value == 2\n"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "expect wrong condition type remains a compile error",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect 42\n"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "expect in app header is explicitly diagnosed",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\nexpect False\n# %%\n42\n"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "diagnostic": "expect-in-header"
+    }
+  },
+  {
+    "name": "existing inline expect still fails",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\n{\n    expect False\n    42\n}\n"
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "expect crash is local and preserves independent output",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect crash \"test crash\"\n# %%\n42\n"
+    },
+    "expect": {
+      "status": "partial",
+      "tests_passed": [
+        false
+      ],
+      "evaluated_values": [
+        "42.0"
+      ]
+    }
+  },
+  {
+    "name": "expect block supports successful Result propagation",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect {\n    value = Ok(3)?\n    value == 3\n}\n"
+    },
+    "expect": {
+      "status": "ok",
+      "tests_passed": [
+        true
+      ],
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "expect block reports Result propagation errors as failed test",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect {\n    value = Err(Bad)?\n    value == 3\n}\n"
+    },
+    "expect": {
+      "status": "partial",
+      "tests_passed": [
+        false
+      ],
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "debug observations inside expect belong to test cell",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nexpect {\n    dbg 42\n    True\n}\n"
+    },
+    "expect": {
+      "status": "ok",
+      "tests_passed": [
+        true
+      ],
+      "evaluated_values": [],
+      "events": [
+        {
+          "kind": "dbg",
+          "message": "42.0",
+          "cell": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "frozen constant debug is replayed once for test and once for output",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nx = {\n    dbg 42\n    42\n}\n# %%\nexpect x == 42\n# %%\nx\n"
+    },
+    "expect": {
+      "status": "ok",
+      "tests_passed": [
+        true
+      ],
+      "evaluated_values": [
+        "42.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "message": "42.0",
+          "cell": 2
+        },
+        {
+          "kind": "dbg",
+          "message": "42.0",
+          "cell": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "helper debug in expect executes once",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nhelper = |value| {\n    dbg value\n    value == 42\n}\n# %%\nexpect helper(42)\n"
+    },
+    "expect": {
+      "status": "ok",
+      "tests_passed": [
+        true
+      ],
+      "evaluated_values": [],
+      "events": [
+        {
+          "kind": "dbg",
+          "message": "42.0",
+          "cell": 1
+        }
+      ]
+    }
+  },
+  {
+    "name": "expect roots avoid user binding collisions",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "source": "app [] {}\n# %%\nroclet_expect_1 = 42\nexpect roclet_expect_1 == 42\nroclet_expect_1\n"
+    },
+    "expect": {
+      "status": "ok",
+      "tests_passed": [
+        true
+      ],
+      "evaluated_values": [
+        "42.0"
+      ]
+    }
   }
 ]

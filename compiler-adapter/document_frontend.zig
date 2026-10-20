@@ -5,6 +5,7 @@ const syntax = @import("syntax.zig");
 const A = std.mem.Allocator;
 const S = []const u8;
 const Strings = std.ArrayList(S);
+pub const Expectation = struct { root: S, start: u64, end: u64, cell: u64 };
 pub const Output = struct { kind: S, source: S };
 pub const SourceMap = struct { start: u64, end: u64, original_start: u64, original_end: u64 };
 pub const Cell = struct {
@@ -13,6 +14,7 @@ pub const Cell = struct {
     attributes: S = "",
     id: S = "",
     output: S = "",
+    expectations: []const S = &.{},
     outputs: []const Output = &.{},
     start: u64,
     end: u64,
@@ -35,7 +37,7 @@ pub const Plan = struct { changed: []const S = &.{}, evaluate: []const S = &.{},
 pub const MetadataField = struct { key: S, value: S };
 pub const Input = struct { compact: bool = false, reactivity: Reactive = .{}, metadata_fields: []const MetadataField = &.{}, phase: S, format: S, target: S, source: S, facts: syntax.Facts = .{}, blocks: []const syntax.Block = &.{}, model: Model = .{}, draft: Draft = .{} };
 pub const Mapping = struct { generated_start: u64, generated_end: u64, source_start: u64, source_end: u64, cell: u64 };
-pub const Result = struct { plan: Plan = .{}, status: S = "ok", model: Model, draft: Draft, source: S = "", program: S = "", execution: S = "", roots: []const S = &.{}, mappings: []const Mapping = &.{} };
+pub const Result = struct { plan: Plan = .{}, status: S = "ok", model: Model, draft: Draft, source: S = "", program: S = "", execution: S = "", roots: []const S = &.{}, expectations: []const Expectation = &.{}, mappings: []const Mapping = &.{} };
 fn eq(x: S, y: S) bool {
     return std.mem.eql(u8, x, y);
 }
@@ -573,10 +575,12 @@ fn finish(a: A, input: Input) !Result {
     }
     var roots: Strings = .empty;
     var maps: std.ArrayList(Mapping) = .empty;
+    var expectations: std.ArrayList(Expectation) = .empty;
     var lowered: Strings = .empty;
     var ids: Strings = .empty;
     var handwritten = false;
     for (input.facts.statements) |s| {
+        if (eq(s.kind, "expect")) try diagnostic(a, &ds, "expect-in-header", "Move this expect into a notebook code cell to run it; the App header holds packages, imports and shared declarations", s.start, s.end, 0);
         if (eq(s.kind, "dbg")) try diagnostic(a, &ds, "top-level-dbg", "dbg must be inside a Roc function or expression block", s.start, s.end, 0);
         if (eq(s.name, "main!")) {
             handwritten = true;
@@ -657,6 +661,21 @@ fn finish(a: A, input: Input) !Result {
             const tail = c.source[cursor..];
             try maps.append(a, mapping(base + code.written().len, base + code.written().len + tail.len, c.body_start + cursor, c.body_start + c.source.len, index));
             try code.writer.writeAll(tail);
+            var cell_expects: Strings = .empty;
+            for (c.facts.statements) |statement| if (eq(statement.kind, "expect")) {
+                const root = try fresh(a, used.items, "roclet_expect", true);
+                try used.append(a, root);
+                try cell_expects.append(a, root);
+                // The source remains an ordinary top-level expect. Only its
+                // parser-backed position identifies the checked test root.
+                const original = c.body_start + statement.start;
+                for (maps.items) |m| if (m.cell == index and original >= m.source_start and original < m.source_end) {
+                    const start = m.generated_start + original - m.source_start;
+                    try expectations.append(a, .{ .root = root, .start = start, .end = start + statement.end - statement.start, .cell = index });
+                    break;
+                };
+            };
+            c.expectations = try cell_expects.toOwnedSlice(a);
             try execution.writer.writeAll(code.written());
             try execution.writer.writeAll("\n\n");
             try lowered.append(a, if (input.compact) "" else try escapeRoc(a, code.written(), c.*, base, maps.items));
@@ -701,7 +720,7 @@ fn finish(a: A, input: Input) !Result {
     for (model.diagnostics) |d| if (eq(d.severity, "error")) {
         status = "diagnostic";
     };
-    return .{ .status = status, .model = model, .draft = .{ .supplied = true, .preamble = model.preamble, .metadata = model.metadata, .cells = try draft_cells.toOwnedSlice(a) }, .source = if (input.compact) "" else if (!input.draft.supplied and !oneOf(input.phase, &.{ "normalize", "export", "view", "compose" }) and eq(input.target, model.format)) model.original else rendered, .program = try a.dupe(u8, execution.written()), .execution = if (input.compact) "" else try cat(a, &.{ execution.written(), main, "\n" }), .roots = try roots.toOwnedSlice(a), .mappings = try maps.toOwnedSlice(a) };
+    return .{ .status = status, .model = model, .draft = .{ .supplied = true, .preamble = model.preamble, .metadata = model.metadata, .cells = try draft_cells.toOwnedSlice(a) }, .source = if (input.compact) "" else if (!input.draft.supplied and !oneOf(input.phase, &.{ "normalize", "export", "view", "compose" }) and eq(input.target, model.format)) model.original else rendered, .program = try a.dupe(u8, execution.written()), .execution = if (input.compact) "" else try cat(a, &.{ execution.written(), main, "\n" }), .roots = try roots.toOwnedSlice(a), .expectations = try expectations.toOwnedSlice(a), .mappings = try maps.toOwnedSlice(a) };
 }
 fn definitionEqual(old: []const Definition, new: []const Definition, name: S) bool {
     var oi: usize = 0;

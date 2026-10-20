@@ -82,6 +82,7 @@ var event_bytes: usize = 0;
 var events_truncated = false;
 var rich_output = false;
 var value_index: usize = 0;
+var notebook_expectations: []const @import("notebook.zig").Expectation = &.{};
 
 fn dupe(s: []const u8) []const u8 {
     return arena.dupe(u8, s) catch {
@@ -241,6 +242,33 @@ fn analyzeFallible(env: *can.ModuleEnv, prefix: u32) !void {
             .rename_safe = rename_safe,
         });
     }
+    // Tests are real checked statement roots rather than generated bindings.
+    // Expose their resolved references to the same reactive graph as outputs.
+    for (notebook_expectations) |expectation| {
+        for (env.store.sliceStatements(env.all_statements)) |idx| {
+            const statement = env.store.getStatement(idx);
+            if (statement != .s_expect) continue;
+            const region = env.store.getStatementRegion(idx);
+            if (region.start.offset < prefix or region.start.offset - prefix < expectation.start or region.start.offset - prefix >= expectation.end) continue;
+            refs.clearRetainingCapacity();
+            try can.DependencyGraph.collectNameReferences(env, &patterns, statement.s_expect.body, &refs, &stack, &defaults, arena);
+            var deps: std.ArrayList([]const u8) = .empty;
+            for (defs) |other| if (refs.contains(other)) {
+                const pattern = env.store.getPattern(env.store.getDef(other).pattern);
+                if (pattern == .assign) try deps.append(arena, dupe(env.getIdent(pattern.assign.ident))) else response.dependency_scope = "module";
+            };
+            try response.definitions.append(arena, .{
+                .name = dupe(expectation.root),
+                .type = "Bool",
+                .region = .{ .start = expectation.start, .end = expectation.end },
+                .name_region = .{ .start = expectation.start, .end = expectation.start },
+                .dependencies = deps.items,
+                .references = &.{},
+                .rename_safe = false,
+            });
+            break;
+        }
+    }
 }
 const diag_vtable: runner.Diagnostics.VTable = .{ .write = writeFailure, .emitReport = emitReport };
 
@@ -348,6 +376,8 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
     }
     if (is_wasm) try compiled_builtins.decompress();
     if (req.notebook) |notebook| {
+        notebook_expectations = notebook.expectations;
+        defer notebook_expectations = &.{};
         platform.observer = observe;
         defer platform.observer = null;
         const exit_code = @import("notebook.zig").run(.{

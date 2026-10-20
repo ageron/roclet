@@ -34,16 +34,31 @@ export function cellsFrom(result, previous = []) {
 }
 
 // Presentation reuse only: these strings never enter compiler evaluation.
-function mergeCheckedResults(previous, result) {
+function mergeCheckedResults(previous, result, state) {
   if (!result.graph || !result.evaluation) return result;
   const reused = new Set(result.plan?.reused ?? []);
   const old = previous?.evaluation;
-  const positions = new Map(result.model.cells.map((cell, i) => [cell.output, i]));
+  const positions = new Map(result.model.cells.flatMap((cell, i) => [cell.output,...(cell.expectations ?? [])].map(root=>[root,i])));
   const values = [...(old?.values ?? []).filter(v => reused.has(v.root)), ...(result.evaluation.values ?? [])];
   values.sort((a,b) => positions.get(a.root) - positions.get(b.root));
   const events = [...(old?.events ?? []).filter(e => reused.has(e.root)), ...result.evaluation.events]
     .map(e => ({...e, cell:positions.get(e.root) ?? null})).sort((a,b) => (a.cell ?? -1) - (b.cell ?? -1));
-  return {...result, evaluation:{...result.evaluation, values, events:events.map((e,sequence) => ({...e,sequence}))}};
+  const tests = [...(old?.tests ?? []).filter(t=>reused.has(t.root)), ...(result.evaluation.tests ?? [])]
+    .map(test=>{
+      const cell=positions.get(test.root) ?? null;
+      if(!reused.has(test.root)) return {...test,cell};
+      // Reused statuses still use this revision's compiler-provided source map.
+      const expectation=result.expectations?.find(e=>e.root===test.root);
+      const mapping=result.mappings?.find(m=>m.cell===cell && m.generated_start<=expectation?.start && expectation.start<m.generated_end);
+      if(!mapping) return {...test,cell};
+      const absolute=mapping.source_start+expectation.start-mapping.generated_start;
+      const raw=state.sourceCurrent, start=raw?absolute:absolute-result.model.cells[cell].body_start;
+      const source=raw?state.source:result.model.cells[cell].source;
+      const prefix=new TextDecoder().decode(new TextEncoder().encode(source).subarray(0,start));
+      const lines=prefix.split('\n'),location={line:lines.length,column:new TextEncoder().encode(lines.at(-1)).length+1};
+      return {...test,cell,start,end:start+expectation.end-expectation.start,location,scope:raw?'source':'cell'};
+    });
+  return {...result, evaluation:{...result.evaluation, values, tests, events:events.map((e,sequence) => ({...e,sequence}))}};
 }
 
 // Browser-owned edit history, persistence and worker lifecycle. Parsing, output
@@ -148,7 +163,7 @@ export class Studio {
     const roots = previous?.roots ?? [];
     // A forced cell is resolved against the *new* model in the adapter below.
     request.reactivity = {known:!!previous?.graph, previous:previous?.graph ?? {context:'',scope:'module',definitions:[]},
-      current:{context:'',scope:'module',definitions:[]}, roots:[], available:(previous?.evaluation?.values ?? []).map(v=>v.root), force:forceAll ? roots : []};
+      current:{context:'',scope:'module',definitions:[]}, roots:[], available:[...(previous?.evaluation?.values ?? []),...(previous?.evaluation?.tests ?? []).filter(t=>t.passed)].map(v=>v.root), force:forceAll ? roots : []};
     request.forceAll = forceAll;
     if (selectedCell != null) request.selectedCell = selectedCell;
     request.isolateErrors = true;
@@ -156,7 +171,7 @@ export class Studio {
   }
   publish(result) {
     const previous = this.baseline?.id === this.state.id ? this.baseline.result : null;
-    this.result = mergeCheckedResults(previous, result);
+    this.result = mergeCheckedResults(previous, result, this.state);
     if (result.graph) this.baseline = {id:this.state.id,result:this.result};
     return this.result;
   }
@@ -180,7 +195,11 @@ export class Studio {
       const result = await this.session.request(request);
       if (runId !== this.runId || revision !== this.state.revision || id !== this.state.id) return null;
       this.publish(result);
-      this.status = result.status === 'ok' ? `Current · ${this.result.evaluation?.values?.length ?? 0} results · ${Math.round(performance.now() - started)} ms` : result.status === 'partial' ? `Current · ${this.result.evaluation.values.length} results · ${result.evaluation.root_errors.length} failed` : result.status === 'diagnostic' ? 'Needs attention · no current results' : 'Run failed · no current results';
+      const count=this.result.evaluation?.values?.length ?? 0, results=`${count} ${count===1?'result':'results'}`;
+      this.status = result.status === 'ok' ? `Current · ${results} · ${Math.round(performance.now() - started)} ms` : result.status === 'partial' ? `Current · ${results} · ${result.evaluation.root_errors.length} failed` : result.status === 'diagnostic' ? 'Needs attention · no current results' : 'Run failed · no current results';
+      const tests=this.result.evaluation?.tests ?? [], failed=tests.filter(t=>!t.passed).length;
+      if (failed) this.status=`Needs attention · ${failed} failed ${failed===1?'test':'tests'} · ${results}`;
+      else if (tests.length && result.status==='ok') this.status+=` · ${tests.length} ${tests.length===1?'test':'tests'} passed`;
       this.emit('result'); return result;
     } catch (error) {
       if (runId === this.runId && error.name !== 'AbortError') { this.result = null; this.status = `Run failed: ${error.message}`; this.emit('result'); }

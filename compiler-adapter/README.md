@@ -61,6 +61,28 @@ responses. `workspaceCache.frontend_builds`, `lowerings`, `executions`, and
 `prepared_hits` expose the actual work so tests can verify reuse independently of
 wall-clock timing.
 
+## Notebook assertions
+
+Top-level `expect` statements in code cells are first-class test roots. The source
+is preserved: the adapter selects the pinned compiler's checked `.test_expect`
+requests, lowers them with output roots in the revision's single LIR image, and
+runs each selected assertion in its own interpreter. Tests in imported modules
+and packages are not selected.
+
+`evaluation.tests` reports each root's pass/fail status and message; document
+responses add its cell and original UTF-8 source location. A false condition,
+crash, or failed `?` inside an expect block fails that test without discarding
+independent notebook values. Failed assertions produce `partial` evaluation
+status and `root_errors` with `status: "test_failed"`. Compile/type errors remain
+module-wide diagnostics. Inline expects keep their existing compiler semantics.
+
+Assertions use the same resolved definition dependencies and reactive planner as
+outputs. Run all forces every assertion; Run cell forces all assertions in that
+cell. Passing statuses can be reused for unchanged dependencies, with source
+locations remapped to the current revision. Test-only cells and notebooks work
+without output roots. Top-level expects in the App header are diagnosed explicitly;
+move them into code cells to execute them.
+
 ## Persistent workspace and packages
 
 A browser session keeps one worker and WASM instance across completed requests.
@@ -98,7 +120,9 @@ counters for the whole top-level request. These counters are instrumentation,
 not part of semantic result equality.
 
 `web/build-cache.mjs` persists artifacts in IndexedDB with per-entry SHA-256
-verification, a 32 MiB / 512-entry bound, and recency eviction. Unavailable browser
+verification and recency eviction. Compiler artifacts and verified package
+archives each have a separate 32 MiB / 512-entry bound across namespaces, so
+compiler revision churn cannot evict source archives. Unavailable browser
 storage does not prevent compilation. Compiler artifacts are distinct from saved
 output snapshots: restoring an output does not count as a compiler-cache hit.
 `web/workspace-conformance.mjs` verifies that importing actual emitted artifacts

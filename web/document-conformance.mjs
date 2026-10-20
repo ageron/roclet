@@ -2,7 +2,7 @@ import { assert, compilerSemantics } from '../tests/harness.mjs';
 import { DocumentDraft, DocumentSession } from './document-session.mjs';
 const status = document.getElementById('status');
 const log = document.getElementById('log');
-let worker;
+let worker, paritySession;
 try {
   const [bytes, native, manifest] = await Promise.all([
     fetch('../artifacts/roclet.wasm').then(r => r.arrayBuffer()),
@@ -12,21 +12,18 @@ try {
   assert.deepEqual(native.manifest, manifest);
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(v => v.toString(16).padStart(2, '0')).join('');
   assert.equal(hash, manifest.artifacts['roclet.wasm'].sha256);
-  worker = new Worker('./format-worker.mjs', { type: 'module' });
+  paritySession = new DocumentSession(bytes);
   let count = 0;
   for (const fixture of native.cases) {
     status.textContent = `Checking ${fixture.name} · ${count}/${native.cases.length}`;
-    const result = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error(`Timeout: ${fixture.name}`)), 60000);
-      worker.onmessage = ({ data }) => { clearTimeout(timeout); data.error ? reject(new Error(data.error)) : resolve(data.result); };
-      worker.onerror = error => { clearTimeout(timeout); reject(error); };
-      worker.postMessage({ bytes: count === 0 ? bytes : undefined, request: fixture.request });
-    });
+    // Each fixture owns its desired project files. Use the production session
+    // transport so deletions remove prior files from the persistent workspace.
+    const result = await paritySession.request(fixture.request);
     assert.deepEqual(compilerSemantics(result), compilerSemantics(fixture.result));
     count++;
     log.textContent += `PASS ${fixture.name}\n`;
   }
-  worker.terminate();
+  paritySession.stop();
   let freshWorkerRuns = 0;
   // Stop/restart creates a fresh instance. Test both cold and warm core caches,
   // including possible linear-memory addresses above 2 GiB.
@@ -89,4 +86,4 @@ try {
 } catch (error) {
   status.textContent = 'FAIL'; log.textContent += error.stack ?? error.message;
   document.documentElement.dataset.result = 'fail';
-} finally { worker?.terminate(); }
+} finally { worker?.terminate(); paritySession?.stop(); }

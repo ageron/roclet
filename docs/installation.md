@@ -97,6 +97,10 @@ Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
 - Expand **App header** above the notebook cells to edit package declarations
   and imports as ordinary Roc source. Header edits auto-run, autosave, and undo
   like cell edits. The card starts collapsed and remembers whether you left it expanded.
+- Put `expect` assertions directly in code cells. Run all executes them; Run cell
+  executes the selected cell's tests. The notebook shows passed/failed tests
+  beside their source, and dependency edits rerun affected tests. Failed tests
+  keep independent results visible. Tests in imported packages do not run.
 - Declare packages in the notebook's app header using normal Roc dependency
   syntax. The bundled server proxies GitHub release archives to handle browser
   CORS restrictions. Roc verifies their original content hashes, and verified

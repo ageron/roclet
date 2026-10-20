@@ -100,6 +100,20 @@ pub const Suite = struct {
         if (wanted.object.get("absent")) |items| for (items.array.items) |item| try expect(std.mem.find(u8, str(result, "source"), item.string) == null);
         if (wanted.object.get("no_evaluation")) |_| try expect(result.object.get("evaluation") == null);
         if (wanted.object.get("exact")) |_| try expect(eq(str(request, "source"), str(result, "source")));
+        if (wanted.object.get("tests_passed")) |expected| {
+            const tests = field(field(result, "evaluation"), "tests").array.items;
+            try expect(tests.len == expected.array.items.len);
+            for (tests, expected.array.items) |actual, passed| try expect(field(actual, "passed").bool == passed.bool);
+        }
+        if (wanted.object.get("test_location_text")) |expected| {
+            const tests = field(field(result, "evaluation"), "tests").array.items;
+            try expect(tests.len > 0);
+            const start: usize = @intCast(field(tests[0], "start").integer);
+            const end: usize = @intCast(field(tests[0], "end").integer);
+            const input = str(request, "source");
+            try expect(end <= input.len and eq(input[start..end], expected.string));
+            try expect(field(tests[0], "cell") == .integer);
+        }
         if (wanted.object.get("evaluated_values")) |expected| {
             const values = field(field(result, "evaluation"), "values").array.items;
             try expect(values.len == expected.array.items.len);

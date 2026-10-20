@@ -55,12 +55,12 @@ function renderObservation(view, kind, content, stale = false) {
   const updating = stale && (/^(Saving before evaluation|Running)/.test(studio.status) || (studio.state.autoRun && studio.status.startsWith('Changed')));
   block.dataset.stale = String(stale);
   block.dataset.updating = String(updating);
-  block.setAttribute('aria-label', stale ? `${kind === 'value' ? 'Result' : 'Debug'} from an earlier run, ${updating ? 'updating' : 'awaiting update'}` : content.heading);
+  block.setAttribute('aria-label', stale ? `${kind === 'value' ? 'Result' : kind === 'tests' ? 'Tests' : 'Debug'} from an earlier run, ${updating ? 'updating' : 'awaiting update'}` : content.heading);
   block.title = stale ? `From an earlier run. ${updating ? 'Updating…' : 'Awaiting an update.'}` : '';
   if (block.parentNode !== view.results) view.results.append(block);
 }
 function clearObservations(view) {
-  for (const kind of ['value', 'debug']) renderObservation(view, kind, null);
+  for (const kind of ['value', 'debug', 'tests']) renderObservation(view, kind, null);
 }
 const selection = new CellSelection();
 let documentId, selectionActive = false;
@@ -301,16 +301,21 @@ function renderCells() {
 }
 function showDependencies(index) {
   closeMenus();
-  const result=studio.result, cell=result?.model?.cells[index], root=cell?.output;
-  const item=result?.plan?.explanations?.find(e=>e.root===root);
+  const result=studio.result, cell=result?.model?.cells[index];
+  const roots=[cell?.output,...(cell?.expectations ?? [])].filter(Boolean);
+  const items=result?.plan?.explanations?.filter(e=>roots.includes(e.root)) ?? [];
   const content=$('dependencies-content'); content.replaceChildren();
-  if (!item) content.textContent='Run or check the notebook to inspect this output’s dependencies.';
+  if (!items.length) content.textContent='Run or check the notebook to inspect this cell’s dependencies.';
   else {
-    const reason=document.createElement('p'); reason.textContent=item.reason;
-    const deps=document.createElement('pre'); deps.textContent=item.dependencies.map(name=>`${name}: ${(result.graph.definitions.find(d=>d.name===name)?.dependencies ?? []).join(', ') || 'no notebook dependencies'}`).join('\n');
+    for(const item of items) {
+      const label=item.root===cell.output?'Output':`Test ${cell.expectations.indexOf(item.root)+1}`;
+      const reason=document.createElement('p'); reason.textContent=`${label}: ${item.reason}`;
+      const deps=document.createElement('pre'); deps.textContent=item.dependencies.map(name=>`${name}: ${(result.graph.definitions.find(d=>d.name===name)?.dependencies ?? []).join(', ') || 'no notebook dependencies'}`).join('\n');
+      content.append(reason,deps);
+    }
     const time=document.createElement('p');
-    time.textContent=`Last request: ${Math.round(result.workerMs ?? 0)} ms in the worker · ${result.evaluation.evaluated_roots?.length ?? 0} outputs evaluated · ${result.plan.reused.length} reused.`;
-    content.append(reason,deps,time);
+    time.textContent=`Last request: ${Math.round(result.workerMs ?? 0)} ms in the worker · ${result.evaluation.evaluated_roots?.length ?? 0} evaluations · ${result.plan.reused.length} reused.`;
+    content.append(time);
     if (result.graph?.scope==='module') {const note=document.createElement('p');note.textContent='This document uses types or dispatch requiring conservative module-wide invalidation.';content.append(note);}
   }
   $('dependencies-dialog').showModal();
@@ -376,6 +381,25 @@ function renderResults() {
       if (!displayed && showDiagnostics) view.meta.textContent = result?.status === 'diagnostic' ? 'Blocked by document diagnostics' : '';
       const error = result?.evaluation?.root_errors?.find(e=>e.root===root);
       if (error && showDiagnostics) view.results.append(outputBlock('Output failed',error.failure ?? error.status,'diagnostic'));
+      const tests = result?.evaluation?.tests?.filter(t=>t.cell===index) ?? [];
+      const testFailures=tests.filter(t=>!t.passed);
+      const testLocation=test=>{
+        const at=test.scope==='source'?test.start-analyzed.body_start:test.start;
+        if(at==null) return null;
+        const prefix=new TextDecoder().decode(new TextEncoder().encode(cell.source).subarray(0,Math.max(0,at)));
+        const lines=prefix.split('\n');return {line:lines.length,column:new TextEncoder().encode(lines.at(-1)).length+1};
+      };
+      const testContent=tests.length ? {
+        heading:testFailures.length ? `Tests · ${testFailures.length} failed, ${tests.length-testFailures.length} passed` : `Tests · ${tests.length} passed`,
+        text:tests.map(t=>{const at=testLocation(t);return `${t.passed?'PASS':'FAIL'}${at?` · line ${at.line}:${at.column}`:''}: ${t.message}`;}).join('\n'),
+      } : evaluated ? null : view.observations.tests;
+      renderObservation(view, 'tests', testContent, !tests.length);
+      view.outputBlocks.tests?.classList.toggle('diagnostic', testFailures.length>0);
+      if (tests.length && view.outputBlocks.tests) {
+        const heading=view.outputBlocks.tests.querySelector('.result-heading');
+        const target=testFailures[0] ?? tests[0];
+        const at=testLocation(target);if(at) heading.append(button('Go to source',()=>{editCell(cell.key);view.editor.goTo(at.line,at.column,true);}));
+      }
       const events = transcript.filter(e => e.cell === index);
       const debug = events.length ? { heading:!error && ['ok','partial'].includes(result.status) ? 'Debug · current result' : 'Debug · failed run', text:events.map(e => `${e.kind === 'dbg' ? 'dbg' : e.kind}: ${e.message}`).join('\n') }
         : value || removedOutput ? null : view.observations.debug;
@@ -390,6 +414,7 @@ function renderResults() {
   }
   const unassigned = transcript.filter(e => e.cell == null);
   if (unassigned.length) $('document-diagnostics').append(outputBlock('Notebook debug', unassigned.map(e => e.message).join('\n'), 'debug'));
+  if (studio.state.mode === 'source' && result?.evaluation?.tests?.length) $('document-diagnostics').append(outputBlock('Tests',result.evaluation.tests.map(t=>`${t.passed?'PASS':'FAIL'}${t.location?` · source ${t.location.line}:${t.location.column}`:''}: ${t.message}`).join('\n'),result.evaluation.tests.some(t=>!t.passed)?'diagnostic':''));
   if (studio.state.mode === 'source' && result?.status === 'ok' && result?.evaluation?.values?.length) $('document-diagnostics').append(outputBlock('Current results', result.evaluation.values.map(v => `${v.root}: ${v.text}`).join('\n')));
 }
 async function refreshLibrary() {

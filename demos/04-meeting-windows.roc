@@ -138,6 +138,18 @@ candidate_windows = eligible_windows(free_windows, meeting_minutes)
 out_candidates = show_windows(candidate_windows)
 
 # %%
+# Before using the rule, check its boundaries: **exactly 45 minutes qualifies**,
+# and a zero-length meeting is invalid. These small fixtures test the function
+# independently of the editable calendar above.
+
+# %%
+expect eligible_windows(
+    Ok([{ minutes: 30 }, { minutes: 45 }, { minutes: 60 }]),
+    45,
+) == Ok([{ minutes: 45 }, { minutes: 60 }])
+expect eligible_windows(Ok([]), 0) == Err("Meeting length must be positive.")
+
+# %%
 # ## 6. Turn the first candidate into a booking
 # The gaps are in chronological order. Reserve only the requested duration at
 # the start of the first one, leaving the rest of that gap available.

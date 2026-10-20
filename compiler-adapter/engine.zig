@@ -615,8 +615,14 @@ pub const DebugCapture = struct {
             self.failed = true;
         };
     }
-    const Item = struct { env: *can.ModuleEnv, def: can.CIR.Def.Idx };
+    const Item = struct { env: *can.ModuleEnv, def: ?can.CIR.Def.Idx = null, expr: can.CIR.Expr.Idx };
     pub fn replay(self: *@This(), build_env: *BuildEnv, root_name: []const u8) !void {
+        try self.replayFrom(build_env, .{ .name = root_name });
+    }
+    pub fn replayExpression(self: *@This(), build_env: *BuildEnv, expression: can.CIR.Expr.Idx) !void {
+        try self.replayFrom(build_env, .{ .expression = expression });
+    }
+    fn replayFrom(self: *@This(), build_env: *BuildEnv, root: union(enum) { name: []const u8, expression: can.CIR.Expr.Idx }) !void {
         if (self.failed) return error.OutOfMemory;
         if (self.events.items.len == 0) return;
         var temporary = std.heap.ArenaAllocator.init(if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator);
@@ -626,9 +632,13 @@ pub const DebugCapture = struct {
         const modules = try build_env.getCompiledModules(a);
         var pending: std.ArrayList(Item) = .empty;
         var reachable: std.AutoHashMapUnmanaged(Item, void) = .{};
-        for (app.env.store.sliceDefs(app.env.all_defs)) |idx| {
-            const pattern = app.env.store.getPattern(app.env.store.getDef(idx).pattern);
-            if (pattern == .assign and std.mem.eql(u8, app.env.getIdent(pattern.assign.ident), root_name)) try pending.append(a, .{ .env = app.env, .def = idx });
+        switch (root) {
+            .name => |name| for (app.env.store.sliceDefs(app.env.all_defs)) |idx| {
+                const def = app.env.store.getDef(idx);
+                const pattern = app.env.store.getPattern(def.pattern);
+                if (pattern == .assign and std.mem.eql(u8, app.env.getIdent(pattern.assign.ident), name)) try pending.append(a, .{ .env = app.env, .def = idx, .expr = def.expr });
+            },
+            .expression => |expr| try pending.append(a, .{ .env = app.env, .expr = expr }),
         }
         while (pending.pop()) |item| {
             if ((try reachable.getOrPut(a, item)).found_existing) continue;
@@ -641,13 +651,13 @@ pub const DebugCapture = struct {
                 try can.DependencyGraph.appendPatternBinders(env, env.store.getDef(idx).pattern, &binders, &binder_stack, a);
                 for (binders.items) |binder| try pattern_defs.put(a, binder, idx);
             }
-            const expr = env.store.getDef(item.def).expr;
+            const expr = item.expr;
             var references: std.AutoHashMapUnmanaged(can.CIR.Def.Idx, void) = .{};
             var stack: std.ArrayList(can.CIR.Expr.Idx) = .empty;
             var defaults: std.AutoHashMapUnmanaged(can.CIR.Expr.Idx, void) = .{};
             try can.DependencyGraph.collectNameReferences(env, &pattern_defs, expr, &references, &stack, &defaults, a);
             var refs = references.keyIterator();
-            while (refs.next()) |def| try pending.append(a, .{ .env = env, .def = def.* });
+            while (refs.next()) |def| try pending.append(a, .{ .env = env, .def = def.*, .expr = env.store.getDef(def.*).expr });
             const region = env.store.getExprRegion(expr);
             for (env.store.nodes.items.items(.tag), 0..) |tag, i| {
                 if (tag != .expr_external_lookup and tag != .expr_associated_lookup_resolved) continue;
@@ -669,7 +679,7 @@ pub const DebugCapture = struct {
                     if (!std.mem.eql(u8, identity, (owner.contentIdentityHash() orelse continue))) continue;
                     for (owner.store.sliceDefs(owner.all_defs)) |def| {
                         const d = owner.store.getDef(def);
-                        if (@backingInt(def) == target or @backingInt(d.pattern) == target or @backingInt(d.expr) == target) try pending.append(a, .{ .env = owner, .def = def });
+                        if (@backingInt(def) == target or @backingInt(d.pattern) == target or @backingInt(d.expr) == target) try pending.append(a, .{ .env = owner, .def = def, .expr = d.expr });
                     }
                 }
             }
@@ -681,7 +691,7 @@ pub const DebugCapture = struct {
                 const env = module.semantic.env;
                 var include = false;
                 if (event.source) |source| if (source == .def) {
-                    include = reachable.contains(.{ .env = env, .def = source.def });
+                    include = reachable.contains(.{ .env = env, .def = source.def, .expr = env.store.getDef(source.def).expr });
                 };
                 if (!include) {
                     const region = event.region orelse if (event.source) |source| switch (source) {
@@ -693,7 +703,7 @@ pub const DebugCapture = struct {
                     var it = reachable.keyIterator();
                     while (it.next()) |item| {
                         if (item.env != env) continue;
-                        const owner = env.store.getExprRegion(env.store.getDef(item.def).expr);
+                        const owner = env.store.getExprRegion(item.expr);
                         if (region.start.offset >= owner.start.offset and region.end.offset <= owner.end.offset) {
                             include = true;
                             break;

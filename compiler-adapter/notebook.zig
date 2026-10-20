@@ -13,7 +13,8 @@ const host = @import("platform.zig");
 const workspace = @import("workspace.zig");
 const A = std.mem.Allocator;
 const gpa = if (builtin.cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator;
-pub const Metadata = struct { roots: []const []const u8, runtime_roots: []const []const u8 = &.{}, isolate_errors: bool = false };
+pub const Expectation = struct { root: []const u8, start: u32, end: u32, cell: u64 = 0 };
+pub const Metadata = struct { expectations: []const Expectation = &.{}, roots: []const []const u8, runtime_roots: []const []const u8 = &.{}, isolate_errors: bool = false };
 pub const Options = struct {
     source: []const u8,
     app_header: []const u8,
@@ -40,6 +41,8 @@ const State = struct {
     constant_failures: bool = false,
     prefix: u32 = 0,
     labels: []Label = &.{},
+    expectations: []const Expectation = &.{},
+    expectation_expressions: []can.CIR.Expr.Idx = &.{},
     wire_name: ?[]const u8 = null,
     requests: []check.CheckedArtifact.RootRequest = &.{},
     request_names: []const []const u8 = &.{},
@@ -68,15 +71,28 @@ const State = struct {
     }
     fn prepare(self: *State, opts: Options) !void {
         const a = self.fba.allocator();
-        self.labels = try a.alloc(Label, opts.metadata.roots.len);
+        const expectations = try a.dupe(Expectation, opts.metadata.expectations);
+        for (expectations) |*expectation| expectation.root = try a.dupe(u8, expectation.root);
+        self.expectations = expectations;
+        self.expectation_expressions = try a.alloc(can.CIR.Expr.Idx, expectations.len);
+        var output_count: usize = 0;
+        for (opts.metadata.roots) |root| if (!isExpectation(opts.metadata, root)) {
+            output_count += 1;
+        };
+        self.labels = try a.alloc(Label, output_count);
         var source_hash: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(opts.source, &source_hash, .{});
         const hash_text = std.fmt.bytesToHex(source_hash, .lower);
-        for (opts.metadata.roots, self.labels) |root, *label| label.* = .{
-            .root = try a.dupe(u8, root),
-            .text = try std.fmt.allocPrint(a, "roclet_{s}_text_{s}", .{ hash_text, root }),
-            .value = try std.fmt.allocPrint(a, "roclet_{s}_value_{s}", .{ hash_text, root }),
-        };
+        var output_index: usize = 0;
+        for (opts.metadata.roots) |root| {
+            if (isExpectation(opts.metadata, root)) continue;
+            self.labels[output_index] = .{
+                .root = try a.dupe(u8, root),
+                .text = try std.fmt.allocPrint(a, "roclet_{s}_text_{s}", .{ hash_text, root }),
+                .value = try std.fmt.allocPrint(a, "roclet_{s}_value_{s}", .{ hash_text, root }),
+            };
+            output_index += 1;
+        }
         if (opts.rich_support) self.wire_name = try std.fmt.allocPrint(a, "roclet_{s}_display_wire", .{hash_text});
         var header: std.Io.Writer.Allocating = .init(a);
         try header.writer.writeAll("app [main!");
@@ -160,6 +176,24 @@ const State = struct {
                 need_wire = true;
             }
         }
+        // Select tests only from the notebook's checked root artifact. Imported
+        // module/package test suites are deliberately never requested.
+        for (self.expectations, 0..) |expectation, expectation_index| {
+            var found = false;
+            for (artifact.root_requests.requests) |request| {
+                if (request.kind != .test_expect or request.source != .statement) continue;
+                const region = app.env.store.getStatementRegion(request.source.statement);
+                if (region.start.offset < self.prefix) continue;
+                const start = region.start.offset - self.prefix;
+                if (start < expectation.start or start >= expectation.end) continue;
+                self.expectation_expressions[expectation_index] = app.env.store.getStatement(request.source.statement).s_expect.body;
+                try selected.append(a, request);
+                try names.append(a, expectation.root);
+                found = true;
+                break;
+            }
+            if (!found) return error.ExpectRootNotFound;
+        }
         if (need_wire) try appendRoot(a, app.env, exported, self.wire_name.?, &selected, &names);
         self.requests = selected.items;
         self.request_names = names.items;
@@ -215,8 +249,14 @@ const State = struct {
             label = candidate;
             break;
         };
-        const selected = label orelse return error.EntrypointNotFound;
-        try self.capture.replay(self.build.?, root);
+        var expectation: ?can.CIR.Expr.Idx = null;
+        for (self.expectations, self.expectation_expressions) |candidate, expression| if (std.mem.eql(u8, candidate.root, root)) {
+            expectation = expression;
+            break;
+        };
+        if (label == null and expectation == null) return error.EntrypointNotFound;
+        if (label != null) try self.capture.replay(self.build.?, root);
+        if (expectation) |expression| try self.capture.replayExpression(self.build.?, expression);
         var scratch = std.heap.ArenaAllocator.init(gpa);
         defer scratch.deinit();
         const a = scratch.allocator();
@@ -235,6 +275,21 @@ const State = struct {
         defer interpreter.deinit();
         static_data.install(&interpreter);
         static_data.ownByInterpreter(&interpreter);
+        if (expectation != null) {
+            var passed: u8 = 0;
+            _ = interpreter.runEntrypoint(&view, try self.ordinal(root), null, @ptrCast(&passed)) catch |err| {
+                if (host.observer) |emit| emit("test_failed", switch (err) {
+                    error.Crash => interpreter.getCrashMessage(),
+                    error.ExpectErr => "An error propagated from the expect block",
+                    else => interpreter.getRuntimeErrorMessage() orelse @errorName(err),
+                });
+                return 1;
+            };
+            const ok = passed != 0 and !environment.inline_expect_failed;
+            if (host.observer) |emit| emit(if (ok) "test_passed" else "test_failed", if (ok) "Expectation passed" else "Expectation evaluated to False");
+            return if (ok) 0 else 1;
+        }
+        const selected = label.?;
         var text: host.RocStr = undefined;
         _ = interpreter.runEntrypoint(&view, try self.ordinal(selected.text), null, @ptrCast(&text)) catch |err| return reportRuntime(&interpreter, opts.diagnostics, err);
         defer text.decref(&ops);
@@ -327,6 +382,14 @@ fn inputKey(opts: Options) ![32]u8 {
     std.mem.writeInt(u64, &count, opts.metadata.roots.len, .little);
     hash.update(&count);
     for (opts.metadata.roots) |root| field(&hash, root);
+    field(&hash, "expectations");
+    for (opts.metadata.expectations) |expectation| {
+        field(&hash, expectation.root);
+        var span: [8]u8 = undefined;
+        std.mem.writeInt(u32, span[0..4], expectation.start, .little);
+        std.mem.writeInt(u32, span[4..8], expectation.end, .little);
+        hash.update(&span);
+    }
     field(&hash, "modules");
     std.mem.writeInt(u64, &count, opts.extras.len, .little);
     hash.update(&count);
@@ -340,4 +403,9 @@ fn inputKey(opts: Options) ![32]u8 {
     var key: [32]u8 = undefined;
     hash.final(&key);
     return key;
+}
+
+fn isExpectation(metadata: Metadata, root: []const u8) bool {
+    for (metadata.expectations) |expectation| if (std.mem.eql(u8, expectation.root, root)) return true;
+    return false;
 }

@@ -57,8 +57,8 @@ result beside the algorithm.
 
 Four bookings become three busy blocks. The free gaps are 09:00–10:00,
 12:30–14:00, 14:30–15:00, and 16:00–17:00 UTC. The 30-minute gap is too short;
-the first recommendation is **Book 15 Jun 2026, 09:00–09:45 UTC.** Increasing the requested length
-to 90 minutes leaves only the 12:30–14:00 gap. At 120 minutes there is no opening.
+the first recommendation is **Book 15 Jun 2026, 09:00–09:45 UTC.** Increasing
+the requested length to 90 minutes leaves only the 12:30–14:00 gap. At 120 minutes there is no opening.
 Moving a booking outside the working day verifies clipping at the planning bounds.
 
 The **App header** card starts collapsed. Expand it to edit the actual Roc app
@@ -70,6 +70,12 @@ All result tables use roc-time’s `EnglishGregorian.date` and `.clock` formatte
 for example `15 Jun 2026, 09:00`. Supplied offsets remain explicit in the input
 table. Whole-minute clocks omit seconds; nonzero seconds and fractions remain
 exact. Recommendations spanning midnight include both dates.
+
+Two standalone `expect` assertions check the meeting-length rule against small
+fixtures: a gap exactly 45 minutes long qualifies, and zero length is rejected.
+They remain independent of the editable booking data and show pass/fail beside
+their source. The probe deliberately breaks one expected value, verifies that
+the failed test keeps all independent tables visible, then restores it.
 
 ```sh
 node tools/browser-check.mjs --base-url http://127.0.0.1:4179 \
@@ -99,8 +105,8 @@ proxy service. No external HTTPS deployment is claimed by this local check.
 
 ## Verified browser results
 
-The final ReleaseFast browser compiler is 25,063,956 bytes, SHA-256
-`3791ec6d865abce743e3d8a5c868418aeae740b3ff3bb73b88296ad0e7296b0f`.
+The final ReleaseFast browser compiler is 25,090,811 bytes, SHA-256
+`3c2bc4a897ef75df55f2282242784724f8d56214a53a6e149ce06ae1bad447ec`.
 The local-endpoint test at 1280×960 and separate-origin proxy test at 390×960
 both pass the complete roc-time probe: all six intermediate/final outputs,
 booking edits, 90-minute and 120-minute requests, an off-hours booking,
@@ -112,8 +118,12 @@ screenshots were inspected. Neither run records a failed network request.
 The fresh worker restores the verified package archive and compiler artifacts
 from IndexedDB and recomputes all six outputs. Cache counts depend on the bounded
 cache and the preceding edits. The probe requires checked artifact hits and
-recomputes all six roots; missing compiler artifacts are rebuilt without
-downloading the package again.
+recomputes all six outputs and both assertions using one frontend build and
+one lowering (eight root executions). Missing compiler artifacts are rebuilt
+without downloading the package again. Verified archives and compiler artifacts
+have separate eviction budgets, each bounded to 32 MiB and 512 entries across
+namespaces. Compiler-cache churn therefore cannot evict the source package.
+This scenario exercises the actual IndexedDB cache after many notebook edits.
 
 The header probe checks that a new notebook starts with the card collapsed,
 then exercises expansion, source editing, a missing-module diagnostic, undo,
@@ -134,7 +144,7 @@ The original 256 MiB retained-revision arena exhausted memory while lowering
 roc-time and the larger typed CSV parser example. The adapter now reserves
 512 MiB per retained revision. Both examples pass native ReleaseFast checks.
 Earlier scheduling and typed CSV cases also passed Debug checks; the expanded
-formatted notebook reports `OutOfMemory` with the cached Debug executable.
+formatted notebook reports `OutOfMemory` with the Debug engine.
 The current formatted notebook passes native and WASM ReleaseFast validation.
 This is separate from the browser's package-download restriction.
 

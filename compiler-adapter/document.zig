@@ -25,6 +25,7 @@ const CompactCell = struct {
     attributes: []const u8,
     id: []const u8,
     output: []const u8,
+    expectations: []const []const u8,
     outputs: []const frontend.Output,
     start: u64,
     end: u64,
@@ -40,13 +41,14 @@ fn frontendValue(a: A, result: frontend.Result, compact: bool) !V {
         .attributes = c.attributes,
         .id = c.id,
         .output = c.output,
+        .expectations = c.expectations,
         .outputs = c.outputs,
         .start = c.start,
         .end = c.end,
         .body_start = c.body_start,
         .source_map = c.source_map,
     };
-    return value(a, .{ .plan = result.plan, .status = result.status, .model = .{ .format = result.model.format, .preamble = result.model.preamble, .metadata = result.model.metadata, .cells = cells, .diagnostics = result.model.diagnostics }, .program = result.program, .roots = result.roots, .mappings = result.mappings });
+    return value(a, .{ .plan = result.plan, .status = result.status, .model = .{ .format = result.model.format, .preamble = result.model.preamble, .metadata = result.model.metadata, .cells = cells, .diagnostics = result.model.diagnostics }, .program = result.program, .roots = result.roots, .expectations = result.expectations, .mappings = result.mappings });
 }
 fn finishCompact(result: *V) void {
     _ = result.object.swapRemove("program");
@@ -131,21 +133,22 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
     try result.object.put(a, "protocol", .{ .integer = 1 });
     if ((std.mem.eql(u8, action, "evaluate") or std.mem.eql(u8, action, "analyze")) and std.mem.eql(u8, string(result, "status", ""), "ok")) {
         const program = string(result, "program", "");
-        var roots = result.object.get("roots").?;
+        var all_roots = result.object.get("roots").?;
+        for (fieldArray(result, "expectations")) |expectation| try all_roots.array.append(expectation.object.get("root").?);
+        try result.object.put(a, "roots", all_roots);
+        var roots = all_roots;
         const reactive = request.object.get("reactivity");
         if (request.object.get("selectedCell")) |selected| {
             const cells = fieldArray(result.object.get("model").?, "cells");
             if (selected != .integer or selected.integer < 0 or selected.integer >= cells.len) return json(gpa, .{ .status = "protocol_error", .failure = "Invalid selected cell" });
             if (reactive == null) {
-                const output = string(cells[@intCast(selected.integer)], "output", "");
-                roots = if (output.len == 0) try value(a, &[_]V{}) else try value(a, .{output});
+                roots = try cellRoots(a, cells[@intCast(selected.integer)]);
             }
         }
         var failure_roots = roots;
         if (request.object.get("selectedCell")) |selected| {
             const cell = fieldArray(result.object.get("model").?, "cells")[@intCast(selected.integer)];
-            const output = string(cell, "output", "");
-            failure_roots = if (output.len == 0) try value(a, &[_]V{}) else try value(a, .{output});
+            failure_roots = try cellRoots(a, cell);
         }
         const modules = request.object.get("modules") orelse try value(a, &[_]V{});
         const checked_bytes = try snapshot.evaluate(gpa, try json(a, .{
@@ -156,6 +159,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
             .isolate_errors = if (request.object.get("isolateErrors")) |v| v == .bool and v.bool else false,
             .modules = modules,
             .app_header = app_header,
+            .expectations = result.object.get("expectations").?,
         }), evaluate);
         defer gpa.free(checked_bytes);
         var evaluation = try std.json.parseFromSliceLeaky(V, a, checked_bytes, .{ .allocate = .alloc_always });
@@ -170,8 +174,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
             }
             if (reactive != null) if (request.object.get("selectedCell")) |selected| {
                 const cell = fieldArray(result.object.get("model").?, "cells")[@intCast(selected.integer)];
-                const output = string(cell, "output", "");
-                reactivity.force = if (output.len == 0) &.{} else try a.dupe([]const u8, &.{output});
+                reactivity.force = try std.json.parseFromValueLeaky([]const []const u8, a, try cellRoots(a, cell), .{});
             };
             const plan = try value(a, try frontend.plan(a, reactivity));
             try result.object.put(a, "plan", plan);
@@ -183,6 +186,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
                     .possible_roots = result.object.get("roots").?,
                     .modules = modules,
                     .app_header = app_header,
+                    .expectations = result.object.get("expectations").?,
                     .isolate_errors = if (request.object.get("isolateErrors")) |v| v == .bool and v.bool else false,
                 }), evaluate);
                 defer gpa.free(evaluated);
@@ -193,8 +197,36 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
         for (evaluation.object.getPtr("events").?.array.items, 0..) |*event, sequence| {
             try event.object.put(a, "sequence", .{ .integer = @intCast(sequence) });
             try event.object.put(a, "cell", .null);
-            for (cells, 0..) |cell, index| if (std.mem.eql(u8, string(cell, "output", ""), string(event.*, "root", ""))) {
-                try event.object.put(a, "cell", .{ .integer = @intCast(index) });
+            for (cells, 0..) |cell, index| {
+                const root = string(event.*, "root", "");
+                var matches = std.mem.eql(u8, string(cell, "output", ""), root);
+                for (fieldArray(cell, "expectations")) |expectation| if (std.mem.eql(u8, expectation.string, root)) {
+                    matches = true;
+                };
+                if (matches) {
+                    try event.object.put(a, "cell", .{ .integer = @intCast(index) });
+                    break;
+                }
+            }
+        }
+        for (fieldArray(evaluation, "tests")) |*test_result| {
+            for (fieldArray(result, "expectations")) |expectation| if (std.mem.eql(u8, string(expectation, "root", ""), string(test_result.*, "root", ""))) {
+                const index = number(expectation, "cell");
+                const start = number(expectation, "start");
+                const end = number(expectation, "end");
+                const maps = fieldArray(result, "mappings");
+                for (maps) |m| if (number(m, "cell") == index and start >= number(m, "generated_start") and start < number(m, "generated_end")) {
+                    const source_start = number(m, "source_start") + start - number(m, "generated_start");
+                    const cell = cells[@intCast(index)];
+                    const draft_mode = draft.supplied;
+                    const test_offset = if (draft_mode) source_start - number(cell, "body_start") else source_start;
+                    try test_result.object.put(a, "cell", .{ .integer = @intCast(index) });
+                    try test_result.object.put(a, "start", .{ .integer = @intCast(test_offset) });
+                    try test_result.object.put(a, "end", .{ .integer = @intCast(test_offset + end - start) });
+                    try test_result.object.put(a, "location", try value(a, location(if (draft_mode) string(cell, "source", "") else source, test_offset)));
+                    try test_result.object.put(a, "scope", .{ .string = if (draft_mode) "cell" else "source" });
+                    break;
+                };
                 break;
             };
         }
@@ -307,6 +339,13 @@ fn locateDiagnostics(a: A, result: *V, source: []const u8, draft: bool) !void {
         try d.object.put(a, "location", try value(a, location(if (draft and index < cells.len) string(cells[@intCast(index)], "source", "") else source, start)));
         if (draft) try d.object.put(a, "scope", .{ .string = "cell" });
     }
+}
+fn cellRoots(a: A, cell: V) !V {
+    var roots = try value(a, &[_]V{});
+    const output = string(cell, "output", "");
+    if (output.len > 0) try roots.array.append(.{ .string = output });
+    if (cell.object.get("expectations")) |expectations| try roots.array.appendSlice(expectations.array.items);
+    return roots;
 }
 fn fieldArray(v: V, key: []const u8) []V {
     return v.object.get(key).?.array.items;

@@ -24,6 +24,8 @@ export interface Snapshot extends Token {
   cells: Cell[];
   roots: string[];
   modules?: { name: string; content: string }[];
+  /** Parser-backed top-level notebook tests, identified without rewriting source. */
+  expectations?: { root: string; start: number; end: number; cell?: number }[];
   /** Browser session desired module set; changed UTF-8 files are mounted once.
    * Main.roc is generated; ordinary modules live under /workspace/. */
   files?: {path: string; source: string}[];
@@ -57,6 +59,7 @@ export interface Response extends Token {
   root_errors: {root: string; status: string; failure: string | null}[];
   evaluated_roots: string[];
   values: { root: string; text: string; display?: DisplayValue }[];
+  tests: { root: string; passed: boolean; message: string; cell?: number; start?: number; end?: number; location?: {line:number; column:number}; scope?: 'cell' | 'source' }[];
   events: Observation[];
   diagnostics: {
     title: string;
@@ -98,7 +101,7 @@ export interface DocumentRequest {
   files?: {path: string; source: string}[];
   /** M2 notebook editing retains explicit cell kinds without parsing an incomplete aggregate. */
   draft?: DocumentDraft;
-  /** evaluate only: output belonging to this model-cell index; the whole module is still checked. */
+  /** evaluate only: force the output and top-level expects in this cell; the whole module is checked. */
   selectedCell?: number;
   /** Evaluate only invalidated/forced roots. Prior strings are never execution inputs. */
   /** Persistent browser engines may omit the confirmed baseline graphs. */
@@ -133,6 +136,8 @@ export interface DocumentCell extends ByteSpan {
   /** Explicit or inferred; may be empty. Inferred IDs are not persistent IDs. */
   id: string;
   output: string;
+  /** Top-level expect execution roots associated with this code cell. */
+  expectations: string[];
   /** Saved, unverified data, never evaluation input. */
   outputs: { kind: string; source: string }[];
   body_start: number;
@@ -178,6 +183,8 @@ export interface DocumentResponse {
   /** Safe editable representation; inline snapshot comments are not repeated in outputs. */
   draft?: DocumentDraft;
   roots: string[];
+  /** Checked test roots map to unchanged generated program spans. */
+  expectations: {root: string; start: number; end: number; cell: number}[];
   /** Source positions are body_start + normalized cell offsets; compose with source_map. */
   mappings: { generated_start: number; generated_end: number; source_start: number; source_end: number; cell: number }[];
   evaluation?: {
@@ -185,6 +192,7 @@ export interface DocumentResponse {
     events: { kind: string; message: string; root?: string; cell?: number | null; sequence?: number }[];
     /** evaluate returns separate designated values and root-attributed observations. */
     values?: { root: string; text: string; display?: DisplayValue }[];
+    tests?: Response['tests'];
     diagnostics: unknown[];
     definitions: unknown[];
     dependency_scope?: 'definitions' | 'module';

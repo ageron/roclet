@@ -11,6 +11,7 @@ pub const Snapshot = struct {
     workerGeneration: u64 = 1,
     cells: []const Cell,
     roots: []const []const u8,
+    expectations: []const struct { root: []const u8, start: u32, end: u32, cell: u64 = 0 } = &.{},
     possible_roots: []const []const u8 = &.{},
     failure_roots: []const []const u8 = &.{},
     modules: []const Module = &.{},
@@ -41,6 +42,7 @@ const RawResponse = struct {
     diagnostics: []const std.json.Value = &.{},
     failure: ?[]const u8 = null,
 };
+const TestResult = struct { root: []const u8, passed: bool, message: []const u8 };
 const RootError = struct { root: []const u8, status: []const u8, failure: ?[]const u8 };
 const Value = struct {
     root: []const u8,
@@ -72,6 +74,7 @@ const Result = struct {
     root_errors: []const RootError = &.{},
     evaluated_roots: []const []const u8 = &.{},
     values: []const Value = &.{},
+    tests: []const TestResult = &.{},
     events: []const Event = &.{},
     diagnostics: []const std.json.Value = &.{},
     failure: ?[]const u8 = null,
@@ -112,7 +115,7 @@ fn validate(s: Snapshot) !void {
 fn invoke(gpa: Allocator, arena: Allocator, s: Snapshot, source: []const u8, root: ?[]const u8, rich: bool, comptime compile: anytype) !RawResponse {
     if (source.len >= limit) return error.SourceTooLarge;
     const possible = if (s.possible_roots.len == 0) s.roots else s.possible_roots;
-    const request = try json(arena, .{ .protocol = @as(u32, 1), .source = source, .user_bytes = source.len, .check_only = root == null, .rich_output = rich, .modules = s.modules, .app_header = s.app_header, .root = root, .notebook = .{ .roots = possible, .runtime_roots = if (s.roots.len == 0) s.failure_roots else s.roots, .isolate_errors = s.isolate_errors } });
+    const request = try json(arena, .{ .protocol = @as(u32, 1), .source = source, .user_bytes = source.len, .check_only = root == null, .rich_output = rich, .modules = s.modules, .app_header = s.app_header, .root = root, .notebook = .{ .expectations = s.expectations, .roots = possible, .runtime_roots = if (s.roots.len == 0) s.failure_roots else s.roots, .isolate_errors = s.isolate_errors } });
     const bytes = try compile(request);
     defer gpa.free(bytes);
     const response = try std.json.parseFromSliceLeaky(RawResponse, arena, bytes, .{ .allocate = .alloc_always, .ignore_unknown_fields = true });
@@ -174,6 +177,7 @@ pub fn evaluate(gpa: Allocator, bytes: []const u8, comptime compile: anytype) ![
     var failures: std.ArrayList(RootError) = .empty;
     var evaluated_roots: std.ArrayList([]const u8) = .empty;
     var events: std.ArrayList(Event) = .empty;
+    var tests: std.ArrayList(TestResult) = .empty;
     for (s.roots) |root| {
         try evaluated_roots.append(arena, root);
         result.evaluated_roots = evaluated_roots.items;
@@ -182,6 +186,27 @@ pub fn evaluate(gpa: Allocator, bytes: []const u8, comptime compile: anytype) ![
             if (std.mem.eql(u8, definition.name, root) and std.mem.eql(u8, definition.type, "Display")) rich = true;
         };
         const evaluated = try invoke(gpa, arena, s, source.written(), root, rich, compile);
+        var is_test = false;
+        for (s.expectations) |expectation| if (std.mem.eql(u8, expectation.root, root)) {
+            is_test = true;
+            break;
+        };
+        if (is_test) {
+            var passed = std.mem.eql(u8, evaluated.status, "ok");
+            var message: []const u8 = if (passed) "Expectation passed" else evaluated.failure orelse evaluated.status;
+            for (evaluated.events) |event| {
+                if (std.mem.eql(u8, event.kind, "test_passed") or std.mem.eql(u8, event.kind, "test_failed")) {
+                    passed = std.mem.eql(u8, event.kind, "test_passed");
+                    message = event.message;
+                } else try events.append(arena, .{ .kind = event.kind, .message = event.message, .root = root });
+            }
+            try tests.append(arena, .{ .root = root, .passed = passed, .message = message });
+            result.tests = tests.items;
+            result.events = events.items;
+            if (!passed) try failures.append(arena, .{ .root = root, .status = "test_failed", .failure = message });
+            // Assertion failures do not discard independent notebook results.
+            continue;
+        }
         var wire: ?[]const u8 = null;
         var text: ?[]const u8 = null;
         var value_count: usize = 0;

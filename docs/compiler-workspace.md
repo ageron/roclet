@@ -80,7 +80,8 @@ also omit the worker's already confirmed dependency graph.
 
 The worker keeps its virtual filesystem and live compiler cache between edits.
 IndexedDB stores checked/canonicalized artifacts under the compiler identity and
-actual WASM digest, with entry checksums and a global 32 MiB/512-entry bound. The
+actual WASM digest, with entry checksums and a global 32 MiB/512-entry artifact bound. Verified
+package archives have their own 32 MiB/512-entry eviction budget. The
 live artifact cache has a separate 24 MiB/512-entry bound. Source files and
 verified package inputs are not evicted as compiler artifacts. Fresh workers
 restore artifacts; changed source and dependencies use the compiler's own keys
@@ -190,3 +191,24 @@ graphs also pass native lowering. See the
 [package validation report](browser-package-validation.md) for reproduction and
 [hosting instructions](installation.md#package-downloads-on-a-static-host) for
 the separately deployed HTTPS service required by GitHub Pages.
+
+
+## Notebook assertion follow-up
+
+Top-level `expect` statements now select Roc's checked test roots alongside the
+notebook's output roots. They share the revision's checked graph and lowered
+image, use resolved dependencies for reactive reruns, and display source-linked
+pass/fail results. Assertion failures preserve independent outputs; imported
+module/package test suites are not selected. See the
+[adapter contract](../compiler-adapter/README.md#notebook-assertions).
+
+The rebuilt ReleaseFast pair passes 141 native document contracts, 216 complete
+native/WASM comparisons and 78 fresh-worker runs, 36 compiler cases, 30 M4
+responses, and desktop/compact assertion and Studio UI probes. The formatted
+calendar demo evaluates six outputs and two assertions with one frontend build
+and one lowering, including restoration with package networking disabled.
+Compiler artifacts and package archives now have separate bounded eviction
+budgets so derived-artifact churn does not discard verified package inputs.
+The current WASM digest is
+`3c2bc4a897ef75df55f2282242784724f8d56214a53a6e149ce06ae1bad447ec`;
+the timing table above still describes its earlier baseline.

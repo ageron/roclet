@@ -19,6 +19,7 @@
   assert(rows('out_free').length===4 && rows('out_free')[2][2]==='30','The short free gap is missing');
   assert(text('out_recommendation').includes('Book 15 Jun 2026, 09:00–09:45 UTC.') && text('out_recommendation').includes('Qualifying gaps: 3'),'Wrong recommendation');clean();
   assert(rows('out_calendar')[0][1]==='15 Jun 2026, 12:00 UTC+02:00' && rows('out_calendar')[3][2]==='15 Jun 2026, 12:00 UTC-04:00','Readable calendar lost its supplied offsets');
+  assert([...document.querySelectorAll('#notebook .tests[data-stale="false"]')].some(node=>node.textContent.includes('Tests · 2 passed')),'Calendar boundary checks were not executed');
   const initial={busy:rows('out_busy'),free:rows('out_free'),candidates:rows('out_candidates'),recommendation:text('out_recommendation')};
   $('auto').checked=false;$('auto').dispatchEvent(new Event('change'));
   const bookingEditor=editors().find(editor=>editor.source.includes('bookings = [')),settingsEditor=editors().find(editor=>editor.source.includes('meeting_minutes = 45'));
@@ -48,6 +49,12 @@
   replace(settingsEditor,settingsSource.replace('09:00:00Z/2026-06-15T17:00:00Z','17:00:00Z/2026-06-15T09:00:00Z'));await run();
   assert(rows('out_candidates').length===0 && text('out_recommendation').includes('Planning window: ReversedBounds'),'Invalid input retained a recommendation');
   const invalid=text('out_recommendation');
+  replace(settingsEditor,settingsSource);await run();
+  const checkEditor=editors().find(editor=>editor.source.includes('expect eligible_windows(')),checkSource=checkEditor.source;
+  replace(checkEditor,checkSource.replace('== Ok([{ minutes: 45 }','== Ok([{ minutes: 46 }'));
+  $('run').click();await until(()=>$('status').textContent.startsWith('Needs attention'));
+  assert(rows('out_candidates').length===3 && [...document.querySelectorAll('#notebook .tests')].some(node=>node.textContent.includes('1 failed, 1 passed')),'Failed boundary test hid independent results or stayed green');
+  replace(checkEditor,checkSource);await run();
   const manifest=await fetch('/artifacts/manifest.json').then(response=>response.json()),source=await fetch('/demos/04-meeting-windows.roc').then(response=>response.text()),bytes=await fetch('/artifacts/roclet.wasm').then(response=>response.arrayBuffer());
   const module=path=>JSON.stringify(new URL(path,location.href).href);
   const code=`import{createWasmTransport}from ${module('/compiler-adapter/wasm.mjs')};import{BuildCache,compilerNamespace}from ${module('/web/build-cache.mjs')};import{BrowserPackages}from ${module('/web/packages.mjs')};onmessage=async({data})=>{try{const raw=await createWasmTransport(data.bytes),ns=await compilerNamespace(data.bytes,raw.cacheIdentity());if(!raw.importCache(await new BuildCache(ns).load()))throw Error('Invalid compiler cache');const packages=new BrowserPackages(new BuildCache(ns+':packages'),{fetch:async()=>{throw Error('Package networking disabled');}});postMessage({result:await packages.evaluate(raw,data.request)});}catch(error){postMessage({error:error.stack});}};`;
@@ -56,7 +63,9 @@
   assert(offline.status==='ok','Offline compile failed: '+JSON.stringify(offline));
   assert(JSON.stringify(offline.evaluation.values.find(value=>value.root==='out_candidates')?.display.rows)===JSON.stringify(expected),'Offline candidates differ');
   assert(offline.evaluation.values.find(value=>value.root==='out_recommendation')?.text.includes('Book 15 Jun 2026, 09:00–09:45 UTC.'),'Offline recommendation differs');
+  assert(offline.evaluation.tests?.length===2 && offline.evaluation.tests.every(test=>test.passed),'Offline boundary checks differ');
+  assert(offline.workspaceCache.frontend_builds===1 && offline.workspaceCache.lowerings===1 && offline.workspaceCache.executions===8,'Outputs and tests did not share one compiler graph and lowering');
   assert(offline.workspaceCache.hits>0,'Offline run did not consume compiler artifacts');
   replace(settingsEditor,settingsSource);await run();assert(JSON.stringify(rows('out_candidates'))===JSON.stringify(expected),'Restored analysis differs');
-  return {result:'pass',buildMode:manifest.wasmOptimize,compilerSha256:manifest.artifacts['roclet.wasm'].sha256,initial,changed,ninetyMinutes,offHours,noOpening:'pass',readablePrecision:'pass',crossMidnight,invalid,studioWorkerRestart:'pass',offline:{values:offline.evaluation.values,workspaceCache:offline.workspaceCache},horizontalOverflow:document.documentElement.scrollWidth>innerWidth};
+  return {result:'pass',buildMode:manifest.wasmOptimize,compilerSha256:manifest.artifacts['roclet.wasm'].sha256,initial,changed,ninetyMinutes,offHours,noOpening:'pass',boundaryTests:'pass',readablePrecision:'pass',crossMidnight,invalid,studioWorkerRestart:'pass',offline:{values:offline.evaluation.values,workspaceCache:offline.workspaceCache},horizontalOverflow:document.documentElement.scrollWidth>innerWidth};
 })()
