@@ -113,8 +113,10 @@ export class DocumentSession {
       if(fresh && this.WorkerType===globalThis.Worker) {
         // Structured cloning a compiled Module shares browser-managed code,
         // avoiding another copy of the compiler binary on every worker restart.
+        // The post waits for compilation, so take the request's snapshot now.
+        const owned=structuredClone({...message,bytes:undefined});
         prepareCompiler(this.bytes).then(prepared=>{
-          if(this.worker===worker && this.pending?.resolve===resolve) worker.postMessage({...message,bytes:undefined,...prepared});
+          if(this.worker===worker && this.pending?.resolve===resolve) worker.postMessage({...owned,...prepared});
         },error=>{
           if(this.worker!==worker || this.pending?.resolve!==resolve) return;
           this.pending=null;this.stop();reject(error);
