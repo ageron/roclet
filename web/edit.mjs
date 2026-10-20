@@ -107,12 +107,15 @@ function renderSelection() {
     view.card.dataset.selected = String(active); view.card.tabIndex = key === selection.focus ? 0 : -1;
     view.card.setAttribute('aria-label', `Cell ${selection.keys.indexOf(key) + 1}, ${cell.kind === 'markdown' ? 'Markdown' : 'Code'}${active && selection.mode === 'cells' ? ', selected' : ''}`);
     view.gutter.setAttribute('aria-pressed', active && selection.mode === 'cells');
-    const sourceCollapsed = cell.collapsed && !editing;
+    const sourceCollapsed = cell.kind === 'code' && cell.collapsed && !editing;
     view.editor.setHidden(sourceCollapsed || (cell.kind === 'markdown' && !editing));
-    view.preview.hidden = cell.kind !== 'markdown' || editing || cell.collapsed;
+    view.preview.hidden = cell.kind !== 'markdown' || editing;
     view.expand.hidden = !sourceCollapsed;
     const keys = actionKeys(key), count = keys.length;
-    const collapsed = keys.every(k => notebook.state.cells[cellIndex(k)].collapsed);
+    const codeCells = keys.map(k => notebook.state.cells[cellIndex(k)]).filter(c => c.kind === 'code');
+    const collapsed = codeCells.length > 0 && codeCells.every(c => c.collapsed);
+    view.collapse.hidden = codeCells.length === 0;
+    view.collapse.disabled = codeCells.length === 0;
     view.up.textContent = count > 1 ? `Move ${count} cells up` : 'Move up';
     view.up.setAttribute('aria-label', count > 1 ? view.up.textContent : 'Move cell up');
     view.down.textContent = count > 1 ? `Move ${count} cells down` : 'Move down';
@@ -122,8 +125,8 @@ function renderSelection() {
     view.merge.textContent = count > 1 ? `Merge ${count} cells` : 'Merge with next';
     view.merge.setAttribute('aria-label', view.merge.textContent);
     view.merge.disabled = count === 1 && view.down.disabled;
-    view.collapse.textContent = `${collapsed ? 'Expand' : 'Collapse'} ${count > 1 ? `${count} sources` : 'source'}`;
-    view.collapse.setAttribute('aria-label', count > 1 ? view.collapse.textContent : `${collapsed ? 'Expand' : 'Collapse'} cell`);
+    view.collapse.textContent = `${collapsed ? 'Expand' : 'Collapse'} ${codeCells.length > 1 ? `${codeCells.length} sources` : 'source'}`;
+    view.collapse.setAttribute('aria-label', codeCells.length > 1 ? view.collapse.textContent : `${collapsed ? 'Expand' : 'Collapse'} cell`);
   }
   $('selection-status').textContent = !selectionActive || notebook.state.mode !== 'notebook' ? '' : selection.mode === 'text' ? 'Editing · Esc to select cell' : selected.length > 1 ? `${selected.length} cells selected · ⌘ / Ctrl C, X, V` : selected.length ? 'Cell selected · Enter to edit' : 'No cells · A or B to insert';
 }
@@ -158,7 +161,8 @@ function moveCells(keys, delta) {
   focusCells(keys);
 }
 function collapseCells(keys) {
-  const cells = keys.map(key => notebook.state.cells[cellIndex(key)]);
+  const cells = keys.map(key => notebook.state.cells[cellIndex(key)]).filter(c => c.kind === 'code');
+  if (!cells.length) return;
   const collapsed = !cells.every(c => c.collapsed);
   for (const cell of cells) cell.collapsed = collapsed;
   focusCells(keys); void notebook.persist();
@@ -240,7 +244,7 @@ function createCard(cell) {
   for (const [value, text] of [['code','Code'],['markdown','Markdown']]) { const option = document.createElement('option'); option.value = value; option.textContent = text; kind.append(option); }
   kindLabel.append(kind);
   const index = () => cellIndex(cell.key);
-  kind.onchange = () => { notebook.change(s => { s.cells[index()].kind = kind.value; s.cells[index()].outputs = []; }); editCell(cell.key); };
+  kind.onchange = () => { notebook.change(s => { s.cells[index()].kind = kind.value; s.cells[index()].outputs = []; s.cells[index()].collapsed = false; }); editCell(cell.key); };
   const run = button('▷', () => runCell(cell.key), 'Run cell'); run.title = 'Run cell · ⌘ / Ctrl Enter';
   const up = button('Move up', () => moveCells(actionKeys(cell.key), -1), 'Move cell up');
   const down = button('Move down', () => moveCells(actionKeys(cell.key), 1), 'Move cell down');
@@ -466,7 +470,7 @@ function bind() {
       // delivered after another cell has already been edited.
       if (notebook.state.id !== id || notebook.state.revision !== revision || !editor.dom.isConnected || editor.dom.contains(document.activeElement)) return;
       notebook.finishEditing();
-      if (selection.mode === 'text' && cards.get(selection.focus)?.editor === editor && notebook.state.cells[cellIndex(selection.focus)]?.collapsed) {
+      if (selection.mode === 'text' && cards.get(selection.focus)?.editor === editor && notebook.state.cells[cellIndex(selection.focus)]?.kind === 'code' && notebook.state.cells[cellIndex(selection.focus)]?.collapsed) {
         selection.mode = 'cells';
         renderSelection();
       }
@@ -625,7 +629,11 @@ try {
   notebook = new Notebook(binary, store, {onChange:reflect,loadPackage:loadPackageBundle});
   const dispose=notebook.dispose.bind(notebook);
   notebook.dispose=()=>{highlighter.dispose();sourceEditor.destroy();headerEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
-  bind(); await notebook.initialize();
+  bind();
+  const launch = new URL(location.href);
+  const id = launch.searchParams.get('notebook'), fresh = launch.searchParams.get('new') === '1';
+  await notebook.initialize({id, fresh});
+  if (id || fresh) {launch.searchParams.delete('notebook');launch.searchParams.delete('new');history.replaceState(null,'',launch.pathname+launch.search+launch.hash);}
   const example=new URL(location.href).searchParams.get('example');
   const examples = new Map([
     ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],

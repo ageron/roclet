@@ -100,6 +100,9 @@ try {
   cards()[0].querySelector('.gutter').click(); $('title').focus();
   for (const collapsed of [false,true]) {
     notebook.change(s=>{s.cells[1].collapsed=collapsed;});
+    assert(!cards()[1].querySelector('.cell-preview').hidden);
+    assert(cards()[1].querySelector('.expand-cell').hidden);
+    assert([...cards()[1].querySelectorAll('button')].find(b=>b.textContent==='Collapse source').disabled);
     for (const card of cards().slice(1)) {
       card.scrollIntoView({block:'center'}); await new Promise(resolve=>requestAnimationFrame(resolve));
       const rect=card.getBoundingClientRect(), body=card.querySelector('.cell-body').getBoundingClientRect(), tools=card.querySelector('.cell-tools').getBoundingClientRect();
@@ -156,10 +159,10 @@ try {
   report('group boundaries disable movement; a menu outside the selection acts only on its own cell');
   notebook.change(s=>{s.cells=[makeCell('code','a = 1'),makeCell('markdown','# Notes'),makeCell('code','b = 2')];});
   selectRange(0); cellAction(0,'Collapse source'); assert(isHidden(inputs()[0]));
-  selectRange(0,2); cellAction(1,'Collapse 3 sources');
-  assert(notebook.state.cells.every(c=>c.collapsed)); assert(inputs().every(isHidden));
+  selectRange(0,2); cellAction(1,'Collapse 2 sources');
+  assert(notebook.state.cells.every(c=>c.collapsed === (c.kind === 'code'))); assert(inputs().every(isHidden));
   assert.deepEqual(selected(),[0,1,2]); assert(document.activeElement===cards()[2]);
-  await notebook.persist(); assert((await store.get(notebook.state.id)).cells.every(c=>c.collapsed));
+  await notebook.persist(); assert((await store.get(notebook.state.id)).cells.every(c=>c.collapsed === (c.kind === 'code')));
   // Revealing a collapsed editor must not change the saved preference.
   cards()[0].querySelector('.expand-cell').click(); assert(!isHidden(inputs()[0]));
   assert(notebook.state.cells[0].collapsed); key('Escape'); assert(isHidden(inputs()[0]));
@@ -170,15 +173,18 @@ try {
   key('ArrowDown'); assert(document.activeElement===inputs()[1]); assert(isHidden(inputs()[0])); assert(!isHidden(inputs()[1]));
   await Promise.resolve(); assert(!isHidden(inputs()[1]));
   key('Escape'); assert(isHidden(inputs()[1]));
-  cards()[1].querySelector('.expand-cell').click(); key('Enter',{metaKey:true}); assert(isHidden(inputs()[1]));
-  await notebook.persist(); assert((await store.get(notebook.state.id)).cells.every(c=>c.collapsed));
+  assert(!cards()[1].querySelector('.cell-preview').hidden);
+  assert(cards()[1].querySelector('.expand-cell').hidden);
+  assert(menuButton(1,'Collapse source').disabled);
+  cards()[1].querySelector('.cell-preview').click(); key('Enter',{metaKey:true}); assert(isHidden(inputs()[1]));
+  await notebook.persist(); assert((await store.get(notebook.state.id)).cells.every(c=>c.collapsed === (c.kind === 'code')));
   report('collapsed sources reveal temporarily and re-collapse on Escape, blur, keyboard exit and Markdown run without changing saved preferences');
   selectRange(0,2);
-  cellAction(0,'Expand 3 sources'); assert(notebook.state.cells.every(c=>!c.collapsed));
+  cellAction(0,'Expand 2 sources'); assert(notebook.state.cells.every(c=>!c.collapsed));
   assert(!isHidden(inputs()[0]) && !isHidden(inputs()[2])); assert(!cards()[1].querySelector('.cell-preview').hidden);
   assert.deepEqual(selected(),[0,1,2]); assert(document.activeElement===cards()[2]);
   cellAction(2,'Merge 3 cells'); await until(()=>$('notice').textContent.includes('same type')); assert.equal(cards().length,3);
-  report('mixed collapsed sources collapse together, expand together, persist, retain selection and keep mixed-kind merge protection');
+  report('mixed selections collapse only code sources; Markdown stays visible and has no collapse action');
   notebook.change(s=>{s.cells=[...['a','b','c','d'].map(name=>makeCell('code',`${name} = 1`))];});
   selectRange(1,3); const beforeMerge=notebook.state.cells.map(c=>c.key);
   cellAction(2,'Merge 3 cells'); await until(()=>cards().length===2); assert.equal(source(inputs()[1]),'b = 1\nc = 1\nd = 1');

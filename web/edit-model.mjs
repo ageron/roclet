@@ -72,11 +72,12 @@ export class Notebook {
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
   }
   emit(reason = 'status') { this.onChange(reason); }
-  async initialize() {
+  async initialize({id = null, fresh = false} = {}) {
     let record;
-    try { record = (await this.store.list()).find(validDraft); }
+    try { record = id ? await this.store.get(id) : fresh ? null : (await this.store.list()).find(validDraft); }
     catch (error) { this.saveStatus = `Browser storage unavailable: ${error.message}`; }
-    this.state = record ? clone(record) : newDraft('Wall area', true);
+    if (id && !validDraft(record)) throw new Error('This notebook is unavailable in this browser. Return home to choose another.');
+    this.state = record ? clone(record) : fresh ? newDraft() : newDraft('Wall area', true);
     this.status = record ? 'Recovered draft · results must be recomputed' : 'Ready';
     this.emit('document');
     await this.persist();

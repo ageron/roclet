@@ -73,6 +73,10 @@ pub fn main(init: std.process.Init) !void {
     try write(a, io, root, "web/vendor/md4c.LICENSE.md", try read(a, io, root, "vendor/md4c/LICENSE.md"));
     var paths: std.ArrayList([]const u8) = .empty;
     for ([_][]const u8{
+        "index.html",
+        "web/home.mjs",
+        "web/home.css",
+        "web/assets/roclet-logo-large.png",
         "LICENSE",
         "THIRD_PARTY_NOTICES.md",
         "demos/01-reactivity.roc",
@@ -154,7 +158,6 @@ pub fn main(init: std.process.Init) !void {
         var site: std.ArrayList(File) = .empty;
         for (files.items) |file| if (!std.mem.eql(u8, file.path, "roclet-serve")) try site.append(a, file);
         try site.append(a, .{ .path = ".nojekyll", .data = "" });
-        try site.append(a, .{ .path = "index.html", .data = "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Roclet</title><meta http-equiv=\"refresh\" content=\"0;url=web/edit.html\"><p><a href=\"web/edit.html\">Open Roclet</a></p><script>location.replace('web/edit.html'+location.search+location.hash)</script></html>" });
         try write(a, io, root, "zig-out/roclet-pages.zip", try archive(a, site.items));
         const distribution = try archive(a, files.items);
         try write(a, io, root, "zig-out/roclet.zip", distribution);

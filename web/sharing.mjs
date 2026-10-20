@@ -110,6 +110,8 @@ export async function exportSite(capture,reportOptions={}) {
   files.set('README.txt',utf8('Serve this extracted directory with any static HTTP server (HTTPS or localhost). Open index.html. No build, Node, accounts, or CDN needed. File URLs are not supported. The editable copy is saved only in the recipient browser. Choose File > Offline & storage > Prepare for offline use before disconnecting. The separate report.html opens directly without a server.\n'));
   // Include the publication in this site's offline release as well.
   release.assets.push({path:'published.roclet.zip',bytes:bundle.length,sha256:await sha256(bundle)});
+  const landing=files.get('index.html'),entry=release.assets.find(a=>a.path==='../index.html');
+  if(entry) Object.assign(entry,{bytes:landing.length,sha256:await sha256(landing)});
   release.version=await sha256(utf8(JSON.stringify(release.assets)));
   files.set('web/offline-release.json',utf8(JSON.stringify(release)));
   files.set('web/offline-worker.mjs',utf8(workerSource(release)));

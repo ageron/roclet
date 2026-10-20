@@ -130,7 +130,7 @@ proxy service. No external HTTPS deployment is claimed by this local check.
 
 ## Verified browser results
 
-After merging upstream main (`6819762`), the final ReleaseFast browser compiler
+After merging upstream main (`6dab68c`), the final ReleaseFast browser compiler
 is 25,097,937 bytes, SHA-256
 `cd92bdd279d304fecf80ed7cc6602923808a72fa5131df04fa521eb8fa1f2c7e`.
 The local-endpoint test at 1280×960 and separate-origin proxy test at 390×960
@@ -160,7 +160,7 @@ pass all 46 contracts at both widths, alongside the lifecycle and rich-output
 contracts. Document parity covers 226 complete native/WASM responses and 80
 fresh-worker runs; all 146 native document contracts also pass.
 
-Packaging verifies all 83 offline assets, including the demo and download
+Packaging verifies all 87 offline assets, including the demo and download
 configuration. Result rendering uses reusable functions, avoiding Roc’s empirical
 compile-time branch-coverage warning for a top-level match on the current value.
 No diagnostics are suppressed. The probe verifies the warning is absent for both

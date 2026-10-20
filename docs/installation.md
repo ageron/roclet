@@ -8,8 +8,10 @@ Open **[ageron.github.io/roclet](https://ageron.github.io/roclet/)** in Chrome. 
 installed: the compiler and editor run in your browser. The first visit downloads
 the compiler, so give it a moment to load.
 
-Choose **File → Rich outputs example** for a first notebook. Change `width`, or
-create your own with **File → New notebook**. Use the insertion buttons between
+Choose a demo from the home page, or select **New notebook** to start an empty
+notebook. Recent notebooks reopen your saved drafts. In the editor, use
+**File → Rich outputs example** to try a first calculation, or **File → New notebook**
+to start another. Change `width` and see its results update. Use the insertion buttons between
 cells to add code or Markdown. Press Cmd+Enter on macOS or Ctrl+Enter elsewhere
 to run a cell. Auto-run updates results after edits.
 

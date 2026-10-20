@@ -10,6 +10,20 @@ const until = async predicate => { for (let i = 0; i < 100; i++) { if (predicate
 let notebook, recovered, markdownSession, store;
 try {
   status.textContent = 'Checking revision and persistence races';
+  const recent = newDraft('Most recent'), older = newDraft('Chosen notebook'), savedLaunches = [];
+  const launchStore = {list:async()=>[recent,older],get:async id=>id===older.id?older:undefined,save:async record=>savedLaunches.push(record.id)};
+  const launchSession = {invalidate(){},stop(){},dispose(){}};
+  const launchNotebook = new Notebook(null,launchStore,{session:launchSession});
+  await launchNotebook.initialize({fresh:true});
+  assert.equal(launchNotebook.state.title,'Untitled');assert.equal(launchNotebook.state.cells.length,1);assert.equal(launchNotebook.state.cells[0].source,'');
+  assert.notEqual(launchNotebook.state.id,recent.id);launchNotebook.cancelPending();
+  await launchNotebook.initialize({id:older.id});assert.equal(launchNotebook.state.id,older.id);launchNotebook.cancelPending();
+  assert(!savedLaunches.includes(recent.id));
+  const savesBefore=savedLaunches.length;let missing=false;
+  try {await launchNotebook.initialize({id:'missing'});}catch{missing=true;}
+  assert(missing);assert.equal(savedLaunches.length,savesBefore);launchNotebook.dispose();
+  report('home launches create an empty notebook, reopen the chosen draft, and never overwrite a recent draft for a missing ID');
+
   const calls = [], pending = [];
   const memoryStore = { save: async state => { calls.push(`save:${state.revision}`); }, list: async () => [] };
   const mock = { invalidate() {}, stop() {}, request(request) { calls.push('evaluate'); return new Promise((resolve,reject) => pending.push({request,resolve,reject})); } };

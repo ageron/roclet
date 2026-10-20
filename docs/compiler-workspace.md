@@ -133,7 +133,7 @@ The merged ReleaseFast native/WASM pair passes:
 - 226 complete native/WASM document comparisons and 80 fresh-worker runs,
   including Unicode mappings, failure isolation, missing-module diagnostics,
   checked runnable exports, and the upstream pinned Display package.
-- 46 Edit UI contracts at each desktop/compact width, 20 lifecycle contracts,
+- 46 Edit UI contracts at each desktop/compact width, 21 lifecycle contracts,
   18 rich-output contracts, seven math contracts, 11 sharing/offline contracts,
   and the workspace/cache/package suite.
 - Desktop/compact top-level assertion and App header probes, including source
@@ -142,7 +142,7 @@ The merged ReleaseFast native/WASM pair passes:
   through local and separate-origin archive proxy configurations.
 - Native unit/workspace checks, 11 Node unit contracts, 13 Node workspace tests,
   five ordinary-Roc demo/fixture runs against an extracted Display package,
-  artifact verification, and packaging with 83 verified offline assets.
+  artifact verification, and packaging with 87 verified offline assets.
 
 The formatted calendar notebook evaluates six outputs and two assertions with
 one frontend build and one lowering, including fresh-worker restoration with

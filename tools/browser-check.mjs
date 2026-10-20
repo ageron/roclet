@@ -19,7 +19,8 @@ const server=createServer(async(req,res)=>{
     if(packageEndpoint && new URL(req.url,'http://localhost').pathname==='/web/package-config.json') {
       res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({endpoint:packageEndpoint}));return;
     }
-    const path=resolve(root,'.'+decodeURIComponent(new URL(req.url,'http://localhost').pathname));
+    const pathname=new URL(req.url,'http://localhost').pathname;
+    const path=resolve(root,pathname==='/'?'index.html':'.'+decodeURIComponent(pathname));
     if(!path.startsWith(root+sep)) {res.writeHead(403);res.end();return;}
     const bytes=await readFile(path);res.writeHead(200,{'Content-Type':types[extname(path)]??'application/octet-stream','Cache-Control':'no-store'});res.end(bytes);
   } catch {res.writeHead(404);res.end();}
