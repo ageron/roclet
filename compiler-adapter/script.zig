@@ -74,13 +74,13 @@ pub fn run(eng: *Engine, arena: A, inputs: Inputs) !Outcome {
     var events: host.EventBuffer = .{ .arena = arena, .rich = inputs.rich_output };
     var diagnostics: engine.DiagnosticList = .{ .arena = arena };
     var analyzer: Analyzer = .{ .arena = arena, .user_bytes = inputs.user_bytes, .stats = &eng.stats };
-    const runtime_buffer = try gpa.alignedAlloc(u8, .@"16", 256 * 1024 * 1024);
-    defer gpa.free(runtime_buffer);
-    var fba = std.heap.FixedBufferAllocator.init(runtime_buffer);
+    var scratch = std.heap.ArenaAllocator.init(gpa);
+    defer scratch.deinit();
     const result = engine.runEcho(.{
-        .runtime_fba = &fba,
+        .arena = scratch.allocator(),
+        .image_allocator = gpa,
         .paths = eng.paths,
-        .fallback_io = eng.workspace.io(fba.allocator()),
+        .fallback_io = eng.workspace.io(scratch.allocator()),
         .std_io = eng.workspace.std_io,
         .stats = &eng.stats,
         .source = inputs.source,

@@ -15,6 +15,7 @@ const eval = @import("eval");
 const lir = @import("lir");
 const roc_target = @import("roc_target");
 const reporting = @import("reporting");
+const image = @import("image.zig");
 
 const Allocator = std.mem.Allocator;
 const BuildEnv = compile.BuildEnv;
@@ -29,6 +30,8 @@ pub const RunEchoError = error{ WriteFailed, InvalidPath } || Allocator.Error ||
     compile.build.CompileDiscoveredError ||
     lir.CheckedPipeline.LowerResourceError ||
     lir.LirImage.ImageError ||
+    lir.LirImage.CopyError ||
+    lir.LirImage.ViewError ||
     eval.LirInterpreter.Error ||
     error{
         CompilationFailed,
@@ -249,12 +252,11 @@ pub const RunOptions = struct {
     args: []const []const u8 = &.{},
     /// Work counters of the engine serving this request.
     stats: *RequestStats,
-    /// Single contiguous arena used for the entire pipeline (BuildEnv,
-    /// lowering, LIR image, interpreter). Must own a flat virtual
-    /// region—`std.heap.ArenaAllocator` will not work because the
-    /// LIR image step computes offsets via `ptr - base_ptr` arithmetic
-    /// (see `src/compile/README.md` "Runtime arena").
-    runtime_fba: *std.heap.FixedBufferAllocator,
+    /// Scratch for the whole pipeline (BuildEnv, lowering, interpreter);
+    /// an ordinary arena, freed by the caller after the run.
+    arena: Allocator,
+    /// Owns the flat LIR image buffer for the duration of the run.
+    image_allocator: Allocator,
     /// Fallback Io that handles everything not served by EchoCtx (i.e. paths
     /// not in `Paths` and not in `extras`).
     fallback_io: Io,
@@ -284,7 +286,7 @@ pub const RunOptions = struct {
 /// Wraps the user `source` in a synthetic `app [main!]` header that imports
 /// the embedded echo platform, then walks the canonical embedding sequence
 /// (see `src/compile/README.md`): BuildEnv discovery → check → LIR lowering
-/// → `LirImage.referenceProgramWithStaticDataInBuffer` → `viewMappedImage` →
+/// → `image.build` (an adaptively sized flat LIR image) → `Image.view` →
 /// `LirInterpreter.runEntrypoint`.
 ///
 /// Returns the Roc program's exit code (or 1 if an inline `expect` failed
@@ -292,7 +294,7 @@ pub const RunOptions = struct {
 /// emits a labelled diagnostic through `opts.diagnostics` and propagates
 /// the error so the caller can decide on an exit code.
 pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
-    const allocator = opts.runtime_fba.allocator();
+    const allocator = opts.arena;
     const diag = opts.diagnostics;
 
     // A script whose header does not parse still runs on the echo platform alone.
@@ -410,7 +412,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     defer lowered.deinit();
 
     // Canonical embedding sequence: build entrypoints + LIR image, then
-    // view it and execute via runEntrypoint. The viewMappedImage step
+    // view it and execute via runEntrypoint. The view
     // re-constructs the layout Store with the correct target_usize, which
     // matters for cross-compile cases.
     const entrypoints = lowered.platformEntrypoints(allocator) catch |err| {
@@ -418,32 +420,26 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         return err;
     };
 
-    const image_header = allocator.create(lir.LirImage.Header) catch |err| {
-        diag.step("create LirImage.Header", err);
-        return err;
-    };
     const image_data = try eval.buildStaticDataForWidth(allocator, .{
         .root = check.CheckedArtifact.loweringViewWithRelations(root_artifact, relation_views),
         .imports = import_views,
     }, &lowered, lowered.target_usize, .{});
     defer eval.deinitStaticData(allocator, image_data);
-    const copied = try lir.LirImage.referenceProgramWithStaticDataInBuffer(
-        allocator,
-        opts.runtime_fba.buffer.ptr,
-        opts.runtime_fba.buffer.len,
-        &lowered.lir_result,
-        entrypoints,
-        image_data,
-    );
-    try copied.fillHeader(image_header, opts.runtime_fba.end_index);
+    // The same adaptively sized flat image a notebook revision builds.
+    var flat = image.build(opts.image_allocator, &lowered.lir_result, entrypoints, image_data, image.default_limits) catch |err| {
+        const reported: RunEchoError = switch (err) {
+            error.ImageTooLarge => error.OutOfMemory,
+            else => |other| other,
+        };
+        diag.step("image.build", reported);
+        return reported;
+    };
+    defer flat.deinit(opts.image_allocator);
+    opts.stats.image_bytes = flat.size;
+    opts.stats.image_retries += flat.attempts - 1;
 
-    var view = lir.LirImage.viewMappedImage(
-        image_header,
-        opts.runtime_fba.buffer.ptr,
-        opts.runtime_fba.end_index,
-        lowered.target_usize,
-    ) catch |err| {
-        diag.step("LirImage.viewMappedImage", err);
+    var view = flat.view(lowered.target_usize, allocator) catch |err| {
+        diag.step("Image.view", err);
         return err;
     };
     defer view.deinit();
