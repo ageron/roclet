@@ -1,0 +1,83 @@
+name: Roclet CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roclet-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, test, and package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Zig
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(jq -r .zigVersion compiler.lock.json)
+          curl --fail --location --retry 3 https://ziglang.org/download/index.json -o "$RUNNER_TEMP/zig-index.json"
+          url=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].tarball' "$RUNNER_TEMP/zig-index.json")
+          sha=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].shasum' "$RUNNER_TEMP/zig-index.json")
+          curl --fail --location --retry 3 "$url" -o "$RUNNER_TEMP/zig.tar.xz"
+          printf '%s  %s\n' "$sha" "$RUNNER_TEMP/zig.tar.xz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/zig"
+          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+      - uses: actions/cache/restore@v4
+        id: compiler-cache
+        with:
+          path: |
+            .toolchain
+            .zig-cache
+            ~/.cache/zig
+          key: roclet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            roclet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-
+      - name: Prepare pinned compiler dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/roc"
+          git -C "$RUNNER_TEMP/roc" remote add origin "$(jq -r .compilerRepository compiler.lock.json)"
+          git -C "$RUNNER_TEMP/roc" fetch --depth=1 origin "$(jq -r .compilerCommit compiler.lock.json)"
+          sh tools/prepare-compiler.sh "$RUNNER_TEMP/roc"
+      - name: Check generated artifacts are absent
+        run: test ! -e artifacts/manifest.json
+      - name: Build compilers and run native tests (ReleaseFast)
+        run: /usr/bin/time -v zig build test --summary all
+      - name: Run JavaScript unit and workspace tests
+        run: |
+          node --input-type=module -e 'await import("./tests/unit.test.mjs"); const {runTests}=await import("./tests/harness.mjs"); console.log("Passed",await runTests(console.log));'
+          node --test tests/workspace.test.mjs
+      - name: Package the verified site
+        run: zig build package --summary all
+      - name: Run Chrome conformance tests
+        run: node tools/test-browser.mjs
+      - name: Save compiler build cache
+        if: ${{ always() && !cancelled() && steps.compiler-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .toolchain
+            .zig-cache
+            ~/.cache/zig
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+      - name: Upload verified site
+        uses: actions/upload-artifact@v4
+        with:
+          name: roclet-site
+          path: zig-out/roclet-pages.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

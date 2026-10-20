@@ -100,6 +100,9 @@ pub fn build(b: *std.Build) void {
     native_tests.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     native_tests.has_side_effects = true;
     native_tests.step.dependOn(&cli.step);
+    // Parity reports include the manifest for the exact native/WASM pair.
+    // Installing the native runner alone does not publish that manifest.
+    native_tests.step.dependOn(ready);
     const test_step = b.step("test", "Run native conformance and unit tests; generate browser parity cases");
     test_step.dependOn(unit_step);
     test_step.dependOn(&workspace_run.step);
@@ -114,6 +117,7 @@ pub fn build(b: *std.Build) void {
     documents.addArg(root);
     documents.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     documents.step.dependOn(&cli.step);
+    documents.step.dependOn(ready);
     documents.has_side_effects = true;
     b.step("test-documents", "Test document formats and generate WASM parity cases").dependOn(&documents.step);
     test_step.dependOn(&documents.step);
@@ -126,6 +130,7 @@ pub fn build(b: *std.Build) void {
     m4_tests.addArg(root);
     m4_tests.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     m4_tests.step.dependOn(&cli.step);
+    m4_tests.step.dependOn(ready);
     m4_tests.has_side_effects = true;
     b.step("test-m4", "Check selective evaluation against full recomputation").dependOn(&m4_tests.step);
     test_step.dependOn(&m4_tests.step);
