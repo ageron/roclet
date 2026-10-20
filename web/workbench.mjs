@@ -140,7 +140,13 @@ export class Workbench {
   }
   writeUrl() {
     const ids = this.ids();
-    if (this.panels.length === 2 && ids.left && ids.right) this.history?.replaceState(null, '', layoutUrl(this.location.href, ids));
+    if (this.panels.length === 2 && ids.left && ids.right) this.replaceUrl(ids);
+  }
+  // The URL is a convenience for reloading; documents without one (srcdoc
+  // test frames) keep theirs.
+  replaceUrl(ids) {
+    if (!/^(https?|file):/.test(this.location?.href ?? '')) return;
+    this.history?.replaceState(null, '', layoutUrl(this.location.href, ids));
   }
   // Every path that opens a document in a panel comes through here.
   async open(slot, request, { focus = true } = {}) {
@@ -204,7 +210,7 @@ export class Workbench {
       if (!validDraft(record)) throw new Error('The right notebook is unavailable in this browser.');
       if (left.notebook.state) await left.notebook.replace(record); else await left.notebook.initialize({ id });
     } else this.remove(right);
-    this.history?.replaceState(null, '', layoutUrl(this.location.href, {}));
+    this.replaceUrl({});
     left.focus();
     return true;
   }

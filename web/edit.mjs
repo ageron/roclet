@@ -6,7 +6,7 @@ import { CompilerHighlighter } from './roc-highlighting.mjs';
 import { DraftStore } from './edit-store.mjs';
 import { PackagePrompts } from './package-dialog.mjs';
 import { NotebookPanel, closeMenus, showHelp } from './notebook-panel.mjs';
-import { Workbench, clonePanel, examples, exampleTitle, parseLayout, layoutUrl, statusDot, engineDetailsKey, readPreference, writePreference } from './workbench.mjs';
+import { Workbench, clonePanel, examples, exampleTitle, parseLayout, statusDot, engineDetailsKey, readPreference, writePreference } from './workbench.mjs';
 const $ = id => document.getElementById(id);
 let compilerManifest, libraryToken = 0, bench;
 const storage = (() => { try { return globalThis.localStorage; } catch { return null; } })();
@@ -219,6 +219,7 @@ try {
     return panel;
   };
   bench = new Workbench({ container:$('workbench'), createPanel, store:drafts, narrow:matchMedia('(max-width: 899px)'), onChange:(_,reason)=>reflectHeader(reason), onLayout:()=>renderTabs() });
+  bench.prompts = prompts;
   const panel = await bench.addPanel('left'), notebook = panel.notebook;
   // The left notebook stands for the page in existing tests: disposing it
   // disposes every panel and the shared highlighter.
@@ -250,7 +251,7 @@ try {
   // `right` names the right panel; the most-recent-draft fallback is never used for it.
   if (layout.right?.error) panel.notice(`The side panel could not be opened: ${layout.right.error}`);
   else if (layout.right) await bench.open('right', layout.right, { focus:false });
-  if (layout.right) history.replaceState(null, '', layoutUrl(location.href, bench.panels.length === 2 ? bench.ids() : {}));
+  if (layout.right) bench.replaceUrl(bench.panels.length === 2 ? bench.ids() : {});
   document.documentElement.dataset.ready = 'true'; return notebook;
 } catch (error) { $('status').textContent = 'Roclet could not start'; $('notice').textContent = error.message; $('notice').hidden = false; }
 
