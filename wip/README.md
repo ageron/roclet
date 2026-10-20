@@ -123,8 +123,10 @@ deferred to one final validation pass when the PR is ready.
 | Plan | State |
 | --- | --- |
 | 06 steps A–D (JS, tests, build wiring), G | Merged (`plan/06a-retire-legacy-js`) |
-| 04 engine struct | In progress |
-| 01, 02, 03, 05, 06 steps E–F | Not started |
+| 04 engine struct | Merged (`plan/04-engine-struct`) |
+| 01 typed pipeline | In progress |
+| 05 image buffer (notebook.zig; `runEcho` after 01) | In progress |
+| 02, 03, 06 steps E–F | Not started |
 
 ### Deferred final validation (LLVM)
 
@@ -134,3 +136,7 @@ deferred to one final validation pass when the PR is ready.
   fresh-worker runs before plan 06 step E), edit-ui (46 contracts, desktop and
   compact), workspace, m4, m5, edit, math, m3, demos conformance.
 - Benchmarks: `web/workspace-benchmark.html` against the recorded medians.
+- Plan 04: first LLVM WASM build of the Observer change (`echoHostedFn`'s
+  `js_echo` branch now reads `ops.env`); `test-engine` under LLVM ReleaseFast;
+  workspaceCache counters unchanged in the benchmark (1 frontend build, 1
+  lowering, 2 executions per warm edit).
