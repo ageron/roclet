@@ -87,10 +87,11 @@
     "before": "# %%\nimport Fresh\nout_import = Fresh.value\n# %%\nout_other = 7\n",
     "after": "# %%\nimport Fresh\nout_import = Fresh.value\n# %%\nout_other = 7\n",
     "evaluate": [
-      "out_import",
+      "out_import"
+    ],
+    "reused": [
       "out_other"
     ],
-    "reused": [],
     "modules": [
       {
         "name": "Fresh",
@@ -233,5 +234,36 @@
       "out_other"
     ],
     "demandUnionFallbacks": 1
+  },
+  {
+    "name": "import-unrelated-module",
+    "before": "# %%\nimport Fresh\nimport Other\nout_import = Fresh.value\n# %%\nout_other = Other.value\n",
+    "after": "# %%\nimport Fresh\nimport Other\nout_import = Fresh.value\n# %%\nout_other = Other.value\n",
+    "evaluate": [
+      "out_other"
+    ],
+    "reused": [
+      "out_import"
+    ],
+    "modules": [
+      {
+        "name": "Fresh",
+        "content": "Fresh := [].{ value = 7 }"
+      },
+      {
+        "name": "Other",
+        "content": "Other := [].{ value = 8 }"
+      }
+    ],
+    "afterModules": [
+      {
+        "name": "Fresh",
+        "content": "Fresh := [].{ value = 7 }"
+      },
+      {
+        "name": "Other",
+        "content": "Other := [].{ value = 9 }"
+      }
+    ]
   }
 ]

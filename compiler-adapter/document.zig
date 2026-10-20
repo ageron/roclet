@@ -61,8 +61,6 @@ pub const Request = struct {
         items: ?[]const Module = &.{},
         /// Every module has exactly `name` and `content` (script runs require it).
         strict: bool = true,
-        /// The supplied JSON, part of the dependency graph's module context.
-        json: []const u8 = "[]",
     };
 
     /// Read a parsed request object.
@@ -106,7 +104,6 @@ pub const Request = struct {
             result.modules = .{
                 .items = std.json.parseFromValueLeaky([]const Module, a, modules, .{ .ignore_unknown_fields = true }) catch null,
                 .strict = if (std.json.parseFromValueLeaky([]const Module, a, modules, .{})) |_| true else |_| false,
-                .json = try json(a, modules),
             };
         }
         return result;
@@ -519,7 +516,7 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
             .isolate_errors = request.isolate_errors,
         });
         if (eql(checked.evaluation.status, "ok")) {
-            const current = try dependencyGraph(a, &checked, app_header, request.modules.json, request.workspace_fingerprint);
+            const current = try dependencyGraph(a, &checked, app_header, request.workspace_fingerprint);
             document.graph = current;
             try document.put(a, .graph);
             var reactivity: frontend.PlanInput = switch (request.reactivity) {
@@ -721,7 +718,7 @@ fn cellRoots(a: A, cell: frontend.Cell) ![]const []const u8 {
 
 /// The request's graph: the revision's checked nodes (`analysis.zig`) and a
 /// context covering everything outside them that can change a result.
-fn dependencyGraph(a: A, checked: *const notebook.Checked, app_header: []const u8, modules_json: []const u8, workspace_fingerprint: []const u8) !frontend.Graph {
+fn dependencyGraph(a: A, checked: *const notebook.Checked, app_header: []const u8, workspace_fingerprint: []const u8) !frontend.Graph {
     const analysis = checked.analysis.?;
     var context = std.crypto.hash.sha2.Sha256.init(.{});
     workspace.hashField(&context, "roclet-context-v2");
@@ -732,7 +729,6 @@ fn dependencyGraph(a: A, checked: *const notebook.Checked, app_header: []const u
     }
     workspace.hashField(&context, analysis.graph.context);
     workspace.hashField(&context, if (checked.rich_support) "rich" else "plain");
-    workspace.hashField(&context, modules_json);
     workspace.hashField(&context, workspace_fingerprint);
     var digest: [32]u8 = undefined;
     context.final(&digest);
