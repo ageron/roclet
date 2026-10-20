@@ -18,7 +18,6 @@ const A = std.mem.Allocator;
 const gpa = if (builtin.cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator;
 pub const Expectation = dependency.Expectation;
 pub const Module = engine.ExtraFile;
-pub const Metadata = struct { expectations: []const Expectation = &.{}, roots: []const []const u8, runtime_roots: []const []const u8 = &.{}, isolate_errors: bool = false };
 /// Everything that determines the retained revision. Hashed once per request.
 pub const Inputs = struct {
     /// The user program: notebook cells only, without `main!`.
@@ -364,32 +363,6 @@ fn revision(eng: *Engine, opts: Inputs) !*State {
         eng.revision = state;
     }
     return eng.revision.?;
-}
-
-/// Options of the protocol-1 raw `notebook` request (the M0 `cells` adapter).
-pub const Options = struct {
-    inputs: Inputs,
-    metadata: Metadata,
-    root: ?[]const u8,
-    diagnostics: engine.Diagnostics,
-    /// The request observer; `run` attributes each execution to its root.
-    observer: host.Observer,
-    /// Receives the revision's dependency analysis when the check passes.
-    analysis: *?*const dependency.Analysis,
-};
-/// Run one raw notebook request against the engine's retained revision.
-pub fn run(eng: *Engine, opts: Options) !u8 {
-    const state = try revision(eng, opts.inputs);
-    defer state.reportCache(&eng.stats);
-    state.emitReports(opts.diagnostics);
-    if (state.failed or (state.constant_failures and !opts.metadata.isolate_errors)) {
-        for (opts.metadata.runtime_roots) |root| try state.capture.replay(state.build.?, root, opts.observer.forRoot(root));
-        return error.CompilationFailed;
-    }
-    opts.analysis.* = try state.analysis(&eng.stats);
-    const root = opts.root orelse return 0;
-    eng.stats.executions += 1;
-    return state.execute(eng.workspace.std_io, .{ .root = root, .target_usize = opts.inputs.target_usize, .diagnostics = opts.diagnostics }, opts.observer.forRoot(root));
 }
 
 // --- Typed document evaluation ---

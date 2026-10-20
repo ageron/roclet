@@ -95,15 +95,17 @@ pub fn build(b: *std.Build) void {
     fixture_run.has_side_effects = true;
     b.step("package-fixture", "Write a verified local package for browser integration tests").dependOn(&fixture_run.step);
     const unit_step = b.step("test-unit", "Test the snapshot protocol and host utilities");
-    inline for (.{ "compiler-adapter/snapshot.zig", "tools/build-tool.zig", "tools/serve.zig", "tools/package-proxy.zig" }) |file| {
+    inline for (.{ "tools/build-tool.zig", "tools/serve.zig", "tools/package-proxy.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
     }
     const image_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/image.zig") });
     unit_step.dependOn(&b.addRunArtifact(image_tests).step);
-    // The document layer's response types reach the compiler modules.
-    const document_unit = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/document.zig") });
-    unit_step.dependOn(&b.addRunArtifact(document_unit).step);
+    // The document and snapshot layers call the engine's typed API.
+    inline for (.{ "compiler-adapter/document.zig", "compiler-adapter/snapshot.zig" }) |file| {
+        const tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, file) });
+        unit_step.dependOn(&b.addRunArtifact(tests).step);
+    }
     const test_exe = b.addExecutable(.{ .name = "roclet-conformance", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/native.zig"),
         .target = b.graph.host,
