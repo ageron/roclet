@@ -1,0 +1,82 @@
+name: Roclet CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roclet-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, test, and package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read pinned Zig version
+        id: zig-version
+        run: |
+          version=$(jq -er .zigVersion compiler.lock.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Zig
+        # Official GitHub mirror of https://codeberg.org/mlugg/setup-zig/.
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ steps.zig-version.outputs.version }}
+          # Restore/save below owns both Zig caches and the prepared compiler.
+          use-cache: false
+      - uses: actions/cache/restore@v4
+        id: compiler-cache
+        with:
+          path: |
+            .toolchain
+            .zig-cache
+            ~/.cache/zig
+          key: roclet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            roclet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-
+      - name: Prepare pinned compiler dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/roc"
+          git -C "$RUNNER_TEMP/roc" remote add origin "$(jq -r .compilerRepository compiler.lock.json)"
+          git -C "$RUNNER_TEMP/roc" fetch --depth=1 origin "$(jq -r .compilerCommit compiler.lock.json)"
+          sh tools/prepare-compiler.sh "$RUNNER_TEMP/roc"
+      - name: Check generated artifacts are absent
+        run: test ! -e artifacts/manifest.json
+      - name: Build compilers and run native tests (ReleaseFast)
+        # The native and WASM LLVM compilations can exceed 16 GiB together.
+        # Only these large steps claim memory; other jobs remain parallel.
+        run: /usr/bin/time -v zig build test -Dcompiler-max-rss=15032385536 --summary all
+      - name: Run JavaScript unit and workspace tests
+        run: node --test tests/*.test.mjs
+      - name: Package the verified site
+        run: zig build package -Dcompiler-max-rss=15032385536 --summary all
+      - name: Run Chrome conformance tests
+        run: node tools/test-browser.mjs
+      - name: Save compiler build cache
+        if: ${{ always() && !cancelled() && steps.compiler-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .toolchain
+            .zig-cache
+            ~/.cache/zig
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+      - name: Upload verified site
+        uses: actions/upload-artifact@v4
+        with:
+          name: roclet-site
+          path: zig-out/roclet-pages.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

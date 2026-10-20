@@ -14,16 +14,19 @@ pub fn build(b: *std.Build) void {
     // minutes, but the result runs several times slower. Use -Dllvm=false for
     // local iteration; release artifacts and CI keep the default (LLVM).
     const use_llvm = b.option(bool, "llvm", "Use LLVM for the native and WASM adapters (default: Zig's choice, LLVM for release modes)");
+    const compiler_max_rss = b.option(u64, "compiler-max-rss", "Estimated peak bytes per compiler build for memory-aware scheduling") orelse 0;
     const roc = b.dependency("roc", .{ .target = b.graph.host, .optimize = optimize });
     const option_values = b.addOptions();
     option_values.addOption(?u64, "image_initial_bytes", b.option(u64, "image-initial-bytes", "First LIR image buffer size, a power of two (default 1 MiB WASM, 64 MiB native)"));
     const options = option_values.createModule();
     const native = adapter(b, roc, options, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
     native.use_llvm = use_llvm;
+    native.step.max_rss = compiler_max_rss;
     b.step("native-adapter", "Build only the native engine").dependOn(&native.step);
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const wasm = adapter(b, roc, options, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
     wasm.use_llvm = use_llvm;
+    wasm.step.max_rss = compiler_max_rss;
     b.step("wasm-adapter", "Build only the browser engine").dependOn(&wasm.step);
     wasm.entry = .disabled;
     wasm.rdynamic = true;
@@ -117,6 +120,7 @@ pub fn build(b: *std.Build) void {
     documents.addArg(root);
     documents.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     documents.step.dependOn(&cli.step);
+    documents.step.dependOn(ready);
     documents.has_side_effects = true;
     test_step.dependOn(&documents.step);
     const m4 = b.addExecutable(.{ .name = "roclet-m4-tests", .root_module = b.createModule(.{
@@ -128,6 +132,7 @@ pub fn build(b: *std.Build) void {
     m4_tests.addArg(root);
     m4_tests.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     m4_tests.step.dependOn(&cli.step);
+    m4_tests.step.dependOn(ready);
     m4_tests.has_side_effects = true;
     b.step("test-m4", "Check selective evaluation against full recomputation").dependOn(&m4_tests.step);
     test_step.dependOn(&m4_tests.step);

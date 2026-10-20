@@ -97,8 +97,10 @@ Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/dual-conformance.html` (side-by-side notebooks; add `?medium` or
 `?compact` for the 1000px and 390px layouts),
 `/web/document-conformance.html`, `/web/m5-conformance.html`, and
-`/web/math-conformance.html` on your local server. `zig build test` does not launch Chrome.
-Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
+`/web/math-conformance.html` on your local server. With Node.js 22+ and Chrome,
+`node tools/test-browser.mjs` runs the core browser suites, including desktop and
+compact UI checks. `zig build test` publishes the compiler pair and generates
+parity fixtures but does not launch Chrome. Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
 
 ## Save, open, and share
 
@@ -162,16 +164,31 @@ browser runtimes, so running notebooks in Roclet still works offline.
 
 ## Hosting on GitHub Pages
 
-The public app is **https://ageron.github.io/roclet/**. Every push to `main`
-automatically builds, tests, and deploys the static site through GitHub Actions.
-No execution server is needed. Follow progress under **Actions → Deploy Roclet**;
-a failed build or test leaves the previous deployment online.
+The public app is **https://ageron.github.io/roclet/**. **Roclet CI** builds and
+checks pull requests and pushes to `main`: native tests, JavaScript tests, browser
+conformance, and packaging all run in the same workflow. Its **Build, test, and
+package** check should be required by the repository's `main` branch rule, with
+pull requests and up-to-date branches required before merging. These repository
+settings must be enabled by a maintainer; workflow files alone do not protect a
+branch.
 
-The workflow installs the Zig version in `compiler.lock.json` and builds the
-pinned Roc compiler. Compiler artifacts are cached between runs; changes to the
-compiler inputs trigger a fresh build. The first deployment takes longer.
-You can also rerun deployment using **Actions → Deploy Roclet → Run workflow**.
-In **Settings → Pages**, the publishing source must be **GitHub Actions**.
+After a successful CI run on `main`, **Deploy Roclet** downloads that run's
+`roclet-site` artifact and publishes it. Deployment does not rebuild the compiler
+or rerun tests. Failed CI and superseded commits cannot replace the live site;
+PR artifacts are never deployed. No execution server is needed.
+
+CI installs the Zig version in `compiler.lock.json` and prepares the pinned Roc
+compiler. Only compiler sources and Zig build caches are restored; generated
+manifests and parity reports are recreated, so a warm cache cannot hide missing
+build dependencies. Compatible cache snapshots are reused across source edits,
+and partial build caches are saved even when tests fail. The first cold build
+still takes longer. CI declares a 14 GiB memory estimate per compiler build so
+Zig can schedule the native and WASM compile steps within the runner's 16 GiB.
+Other build jobs remain parallel; local builds keep their default scheduling.
+
+To redeploy the current verified site without rebuilding, use **Actions → Deploy
+Roclet → Run workflow** and supply the successful `main` CI run ID. In **Settings →
+Pages**, the publishing source must be **GitHub Actions**.
 
 For manual hosting elsewhere, `zig build package` creates
 `zig-out/roclet-pages.zip`. Extract the archive and serve its contents over HTTPS,
