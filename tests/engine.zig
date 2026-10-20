@@ -1,5 +1,6 @@
 //! In-process engine tests: several engines in one process, observer
-//! attribution, header parsing without workspace writes, and request resets.
+//! attribution, header parsing without workspace writes, request resets and
+//! image buffer sizing.
 const std = @import("std");
 const bridge = @import("bridge");
 const Engine = bridge.Engine;
@@ -127,4 +128,34 @@ test "header parsing leaves the workspace untouched and requests reset per-reque
     try std.testing.expectEqual(@as(usize, 0), plain.field("packagesRequired").array.items.len);
     try std.testing.expectEqual(@as(i64, 1), plain.counter("frontend_builds"));
     try std.testing.expectEqual(@as(i64, 1), plain.counter("executions"));
+}
+
+test "a revision's image is reported and grows its buffer only when it must" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    const source = "# %%\nwidth = 8\nheight = 3\n# %%\nwidth * height";
+    var first = try evaluate(&engine, source);
+    defer first.deinit();
+    try std.testing.expectEqualStrings("ok", first.field("status").string);
+    try std.testing.expectEqual(@as(i64, 1), first.counter("lowerings"));
+    const image = engine.revision.?.image.?;
+    const bytes = first.counter("image_bytes");
+    const retries = first.counter("image_retries");
+    try std.testing.expectEqual(@as(i64, @intCast(image.size)), bytes);
+    try std.testing.expectEqual(@as(i64, image.attempts - 1), retries);
+    try std.testing.expect(image.size <= image.buffer.len);
+    if (@import("roclet_options").image_initial_bytes) |initial| {
+        // A forced small first buffer doubles until the image fits.
+        try std.testing.expectEqual(initial << @intCast(retries), image.buffer.len);
+        try std.testing.expectEqual(image.size > initial, retries > 0);
+    } else {
+        // The default first buffer holds an ordinary notebook's image.
+        try std.testing.expectEqual(@as(i64, 0), retries);
+    }
+
+    var reused = try evaluate(&engine, source);
+    defer reused.deinit();
+    try std.testing.expectEqual(@as(i64, 0), reused.counter("lowerings"));
+    try std.testing.expectEqual(@as(i64, 0), reused.counter("image_bytes"));
+    try std.testing.expectEqual(@as(i64, 0), reused.counter("image_retries"));
 }

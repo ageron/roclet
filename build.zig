@@ -15,11 +15,14 @@ pub fn build(b: *std.Build) void {
     // local iteration; release artifacts and CI keep the default (LLVM).
     const use_llvm = b.option(bool, "llvm", "Use LLVM for the native and WASM adapters (default: Zig's choice, LLVM for release modes)");
     const roc = b.dependency("roc", .{ .target = b.graph.host, .optimize = optimize });
-    const native = adapter(b, roc, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
+    const option_values = b.addOptions();
+    option_values.addOption(?u64, "image_initial_bytes", b.option(u64, "image-initial-bytes", "First LIR image buffer size, a power of two (default 1 MiB WASM, 64 MiB native)"));
+    const options = option_values.createModule();
+    const native = adapter(b, roc, options, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
     native.use_llvm = use_llvm;
     b.step("native-adapter", "Build only the native engine").dependOn(&native.step);
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
-    const wasm = adapter(b, roc, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
+    const wasm = adapter(b, roc, options, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
     wasm.use_llvm = use_llvm;
     b.step("wasm-adapter", "Build only the browser engine").dependOn(&wasm.step);
     wasm.entry = .disabled;
@@ -96,7 +99,7 @@ pub fn build(b: *std.Build) void {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
     }
-    const image_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, b.graph.host, optimize, "compiler-adapter/image.zig") });
+    const image_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/image.zig") });
     unit_step.dependOn(&b.addRunArtifact(image_tests).step);
     const test_exe = b.addExecutable(.{ .name = "roclet-conformance", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/native.zig"),
@@ -142,7 +145,10 @@ pub fn build(b: *std.Build) void {
         .target = b.graph.host,
         .optimize = optimize,
         .link_libc = true,
-        .imports = &.{.{ .name = "bridge", .module = adapterModule(b, roc, b.graph.host, optimize, "compiler-adapter/bridge.zig") }},
+        .imports = &.{
+            .{ .name = "bridge", .module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/bridge.zig") },
+            .{ .name = "roclet_options", .module = options },
+        },
     }) });
     const engine_run = b.addRunArtifact(engine_tests);
     b.step("test-engine", "Run in-process engine tests (several engines, attribution, request state)").dependOn(&engine_run.step);
@@ -185,13 +191,13 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(check_step);
 }
 
-fn adapter(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, name: []const u8, root: []const u8) *std.Build.Step.Compile {
-    return b.addExecutable(.{ .name = name, .root_module = adapterModule(b, roc, target, optimize, root) });
+fn adapter(b: *std.Build, roc: *std.Build.Dependency, options: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, name: []const u8, root: []const u8) *std.Build.Step.Compile {
+    return b.addExecutable(.{ .name = name, .root_module = adapterModule(b, roc, options, target, optimize, root) });
 }
 
 /// A module rooted in compiler-adapter/ with the compiler modules, builtins,
-/// md4c and embedded package files the adapter imports.
-fn adapterModule(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, root: []const u8) *std.Build.Module {
+/// md4c, embedded package files and Roclet build options the adapter imports.
+fn adapterModule(b: *std.Build, roc: *std.Build.Dependency, options: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, root: []const u8) *std.Build.Module {
     const module = b.createModule(.{
         .root_source_file = b.path(root),
         .target = target,
@@ -206,6 +212,7 @@ fn adapterModule(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.Re
     module.addIncludePath(b.path("vendor/md4c"));
     module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("package/Display.roc") });
     module.addAnonymousImport("display-package-url.txt", .{ .root_source_file = b.path("package/display-package-url.txt") });
+    module.addImport("roclet_options", options);
     return module;
 }
 

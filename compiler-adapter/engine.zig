@@ -739,13 +739,17 @@ pub const RequestStats = struct {
     lowerings: u64 = 0,
     executions: u64 = 0,
     prepared_hits: u64 = 0,
+    /// Bytes of the LIR image built by this request; 0 when it reused one.
+    image_bytes: u64 = 0,
+    /// Image buffer doublings this request (see image.zig).
+    image_retries: u64 = 0,
     pub fn jsonStringify(self: @This(), w: anytype) !void {
         try w.beginObject();
         inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |name| {
             try w.objectField(name);
             try w.write(@field(self.cache, name));
         }
-        inline for (.{ "frontend_builds", "lowerings", "executions", "prepared_hits" }) |name| {
+        inline for (.{ "frontend_builds", "lowerings", "executions", "prepared_hits", "image_bytes", "image_retries" }) |name| {
             try w.objectField(name);
             try w.write(@field(self, name));
         }

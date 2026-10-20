@@ -84,6 +84,10 @@ export interface CompilerCacheStats {
   lowerings?: number;
   executions?: number;
   prepared_hits?: number;
+  /** Bytes of the flat LIR image built by this request (0 when a retained
+   *  revision was reused) and the image buffer doublings it took. */
+  image_bytes?: number;
+  image_retries?: number;
   [counter: string]: number | undefined;
 }
 

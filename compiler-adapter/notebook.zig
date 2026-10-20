@@ -251,6 +251,8 @@ pub const State = struct {
             error.ImageTooLarge => error.OutOfMemory,
             else => |other| other,
         };
+        eng.stats.image_bytes = self.image.?.size;
+        eng.stats.image_retries += self.image.?.attempts - 1;
     }
     fn ordinal(self: *State, name: []const u8) !u32 {
         for (self.entry_names, 0..) |actual, i| if (std.mem.eql(u8, actual, name)) return @intCast(i);

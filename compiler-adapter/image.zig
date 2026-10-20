@@ -7,6 +7,9 @@ const builtin = @import("builtin");
 const lir = @import("lir");
 const base = @import("base");
 const LirImage = lir.LirImage;
+/// `zig build -Dimage-initial-bytes=N` overrides the first buffer size, so
+/// test runs can force the retry path on every real workload.
+const initial_override: ?u64 = @import("roclet_options").image_initial_bytes;
 
 pub const Limits = struct {
     /// First buffer size tried; doubled after each exhausted attempt.
@@ -17,13 +20,20 @@ pub const Limits = struct {
 
 const mib = 1024 * 1024;
 
-/// WASM linear memory never shrinks, so start small there; native
-/// reservations are lazily committed pages, so a larger first buffer is free.
-/// Powers of two match the WASM allocator's big size classes.
-pub const default_limits: Limits = if (builtin.cpu.arch == .wasm32)
-    .{ .initial_bytes = 16 * mib, .max_bytes = 512 * mib }
-else
-    .{ .initial_bytes = 64 * mib, .max_bytes = 2048 * mib };
+/// Measured images (native, 2026-10-20): Wall Area 5 KiB, the roc-time
+/// calendar notebook (demos/04-meeting-windows.roc) 461 KiB. WASM linear
+/// memory never shrinks, so start at 1 MiB there; native pages are committed
+/// only when touched, so a larger first buffer costs nothing. Powers of two
+/// match the WASM allocator's big size classes.
+pub const default_limits: Limits = limits: {
+    const platform: Limits = if (builtin.cpu.arch == .wasm32)
+        .{ .initial_bytes = 1 * mib, .max_bytes = 512 * mib }
+    else
+        .{ .initial_bytes = 64 * mib, .max_bytes = 2048 * mib };
+    const initial = initial_override orelse break :limits platform;
+    if (!std.math.isPowerOfTwo(initial) or initial > platform.max_bytes) @compileError("-Dimage-initial-bytes must be a power of two no larger than the image cap");
+    break :limits .{ .initial_bytes = initial, .max_bytes = platform.max_bytes };
+};
 
 pub const Error = LirImage.CopyError || error{ImageTooLarge};
 
