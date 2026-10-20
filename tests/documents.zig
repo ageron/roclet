@@ -52,6 +52,16 @@ pub const Suite = struct {
             try request.object.put(self.a, "modules", .{ .array = modules });
         }
         const wanted = field(fixture, "expect");
+        if (wanted.object.get("program_events")) |events| {
+            // `operation: "program"` answers with the script response: no document
+            // model, and the host's observations are its top-level `events`.
+            const result = try self.call(name, request);
+            errdefer std.debug.print("FAIL {s}\n{s}\n", .{ name, json(self.a, result) catch "" });
+            try expect(eq(str(result, "status"), str(wanted, "status")));
+            try expect(eq(try json(self.a, field(result, "events")), try json(self.a, events)));
+            std.debug.print("PASS program: {s}\n", .{name});
+            return;
+        }
         if (wanted.object.get("permute") == null) return self.check(name, request, wanted);
         // Cell order must never matter: every permutation shares one expectation.
         var count: usize = 0;

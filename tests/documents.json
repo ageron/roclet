@@ -3865,5 +3865,27 @@
       ],
       "events": []
     }
+  },
+  {
+    "name": "program: runtime dbg in main! observes CLI args",
+    "request": {
+      "operation": "program",
+      "protocol": 1,
+      "source": "main! = |args| {\n    dbg args\n    Ok({})\n}",
+      "user_bytes": 0,
+      "args": [
+        "notebook",
+        "--flag"
+      ]
+    },
+    "expect": {
+      "status": "ok",
+      "program_events": [
+        {
+          "kind": "dbg",
+          "message": "[\"notebook\", \"--flag\"]"
+        }
+      ]
+    }
   }
 ]

@@ -151,8 +151,6 @@ pub fn main(init: std.process.Init) !void {
     if (!std.mem.eql(u8, unicode[start..end], "out_1 = 1 + 1")) return error.InvalidSourceRegion;
     try suite.source("selected roots and repeated dbg", "unused = { dbg \"unused\"\n0 }\nout_1 = { dbg \"same\"\ndbg \"same\"\n42 }", &.{"out_1"}, &.{"42.0"}, &.{ "\"same\"", "\"same\"" });
     try suite.source("atomic output failure", "out_good = 42\nout_bad = { crash \"boom\"\n0 }", &.{ "out_good", "out_bad" }, null, &.{});
-    const runtime = try parse(gpa, try encode(gpa, .{ .protocol = 1, .source = "main! = |args| {\n    dbg args\n    Ok({})\n}", .user_bytes = 0 }));
-    try suite.run("runtime dbg", runtime, &.{}, &.{"[]"}, true);
     const long = "abcdefghijklmnopqrstuvwxyz0123456789";
     try suite.source("heap-backed strings", try std.fmt.allocPrint(gpa, "out_1 = [\"{s}\", \"{s}\"]", .{ long, long }), &.{"out_1"}, &.{try std.fmt.allocPrint(gpa, "[\"{s}\", \"{s}\"]", .{ long, long })}, &.{});
     try suite.source("unknown output root", "x = 1", &.{"missing"}, null, &.{});
