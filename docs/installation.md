@@ -168,7 +168,9 @@ compiler. Only compiler sources and Zig build caches are restored; generated
 manifests and parity reports are recreated, so a warm cache cannot hide missing
 build dependencies. Compatible cache snapshots are reused across source edits,
 and partial build caches are saved even when tests fail. The first cold build
-still takes longer.
+still takes longer. CI declares a 14 GiB memory estimate per compiler build so
+Zig can schedule the native and WASM compile steps within the runner's 16 GiB.
+Other build jobs remain parallel; local builds keep their default scheduling.
 
 To redeploy the current verified site without rebuilding, use **Actions → Deploy
 Roclet → Run workflow** and supply the successful `main` CI run ID. In **Settings →

@@ -55,13 +55,15 @@ jobs:
       - name: Check generated artifacts are absent
         run: test ! -e artifacts/manifest.json
       - name: Build compilers and run native tests (ReleaseFast)
-        run: /usr/bin/time -v zig build test --summary all
+        # The native and WASM LLVM compilations can exceed 16 GiB together.
+        # Only these large steps claim memory; other jobs remain parallel.
+        run: /usr/bin/time -v zig build test -Dcompiler-max-rss=15032385536 --summary all
       - name: Run JavaScript unit and workspace tests
         run: |
           node --input-type=module -e 'await import("./tests/unit.test.mjs"); const {runTests}=await import("./tests/harness.mjs"); console.log("Passed",await runTests(console.log));'
           node --test tests/workspace.test.mjs
       - name: Package the verified site
-        run: zig build package --summary all
+        run: zig build package -Dcompiler-max-rss=15032385536 --summary all
       - name: Run Chrome conformance tests
         run: node tools/test-browser.mjs
       - name: Save compiler build cache

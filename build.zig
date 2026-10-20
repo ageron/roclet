@@ -10,11 +10,14 @@ pub fn build(b: *std.Build) void {
     _ = b.option([]const u8, "roc-source", "Deprecated: use the roc path dependency in build.zig.zon");
     _ = b.option(u32, "compiler-jobs", "Deprecated: use zig build -j");
     const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode (default ReleaseFast)") orelse .fast;
+    const compiler_max_rss = b.option(u64, "compiler-max-rss", "Estimated peak bytes per compiler build for memory-aware scheduling") orelse 0;
     const roc = b.dependency("roc", .{ .target = b.graph.host, .optimize = optimize });
     const native = adapter(b, roc, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
+    native.step.max_rss = compiler_max_rss;
     b.step("native-adapter", "Build only the native engine").dependOn(&native.step);
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const wasm = adapter(b, roc, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
+    wasm.step.max_rss = compiler_max_rss;
     b.step("wasm-adapter", "Build only the browser engine").dependOn(&wasm.step);
     wasm.entry = .disabled;
     wasm.rdynamic = true;
