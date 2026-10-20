@@ -95,6 +95,11 @@ artifacts, CI and performance measurements use the default LLVM backend.
 The versioned embedding patch includes the WASM assembly metadata needed by
 the self-hosted linker; no manual compiler edits are required.
 
+The in-process compiler tests (`test-unit`, `test-engine`) embed the whole
+compiler. An LLVM build of each needs about 13 GiB, so on x86_64 hosts they use
+the self-hosted backend even in release builds; pass `-Dtest-llvm=true` to
+build them with LLVM. Native/WASM parity always tests the shipped LLVM engines.
+
 Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/dual-conformance.html` (side-by-side notebooks; add `?medium` or
 `?compact` for the 1000px and 390px layouts),

@@ -102,10 +102,18 @@ pub fn build(b: *std.Build) void {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
     }
-    const image_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/image.zig") });
+    // In-process tests embed the whole compiler. An LLVM build of each peaks near
+    // 13 GiB, so on x86_64 they default to the self-hosted backend (about 3 GiB,
+    // under a minute); the shipped engines keep LLVM and the parity suites test them.
+    const test_llvm = b.option(bool, "test-llvm", "Use LLVM for in-process compiler tests (default: self-hosted on x86_64)") orelse
+        if (b.graph.host.result.cpu.arch == .x86_64) false else use_llvm;
+    const test_max_rss = if (test_llvm orelse true) compiler_max_rss else 0;
+    const image_tests = b.addTest(.{ .use_llvm = test_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/image.zig") });
+    image_tests.step.max_rss = test_max_rss;
     unit_step.dependOn(&b.addRunArtifact(image_tests).step);
     // The document layer calls the engine's typed API.
-    const document_unit_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/document.zig") });
+    const document_unit_tests = b.addTest(.{ .use_llvm = test_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/document.zig") });
+    document_unit_tests.step.max_rss = test_max_rss;
     unit_step.dependOn(&b.addRunArtifact(document_unit_tests).step);
     const test_step = b.step("test", "Run native conformance and unit tests; generate browser parity cases");
     test_step.dependOn(unit_step);
@@ -148,7 +156,7 @@ pub fn build(b: *std.Build) void {
     const documents_step = b.step("test-documents", "Test document formats, generate WASM parity cases and check the pinned wire shape");
     documents_step.dependOn(&documents.step);
     documents_step.dependOn(&protocol_shape.step);
-    const engine_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = b.createModule(.{
+    const engine_tests = b.addTest(.{ .use_llvm = test_llvm, .root_module = b.createModule(.{
         .root_source_file = b.path("tests/engine.zig"),
         .target = b.graph.host,
         .optimize = optimize,
@@ -158,6 +166,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "roclet_options", .module = options },
         },
     }) });
+    engine_tests.step.max_rss = test_max_rss;
     const engine_run = b.addRunArtifact(engine_tests);
     b.step("test-engine", "Run in-process engine tests (several engines, attribution, request state)").dependOn(&engine_run.step);
     test_step.dependOn(&engine_run.step);
