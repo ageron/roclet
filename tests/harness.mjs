@@ -1,6 +1,4 @@
-// Tiny browser test harness; intentionally independent of Node and npm.
-const tests = [];
-export function test(name, run) { tests.push({ name, run }); }
+// Tiny browser assertion helpers; intentionally independent of Node and npm.
 function fail(message) { throw new Error(message); }
 function canonical(value) {
   if (Array.isArray(value)) return value.map(canonical);
@@ -34,10 +32,3 @@ assert.rejects = async (promise, expected) => {
   try { await promise; } catch (error) { matches(error, expected); return; }
   fail('Expected a rejected promise');
 };
-export async function runTests(report) {
-  for (const { name, run } of tests) {
-    await run();
-    report(`PASS ${name}`);
-  }
-  return tests.length;
-}

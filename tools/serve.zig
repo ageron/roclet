@@ -137,9 +137,9 @@ test "static asset paths reject traversal, hidden files, and malformed escapes" 
     for ([_][]const u8{ "/../compiler.lock.json", "/web/%2e%2e/.toolchain/x", "/web/%00x", "/web/%xy", "/web/%5csecret", "/.git/config", "/tools/build-tool.zig", "/web//x" }) |target| {
         try std.testing.expectError(error.InvalidPath, assetPath(gpa, target));
     }
-    const result = try assetPath(gpa, "/web/app.mjs?version=1");
+    const result = try assetPath(gpa, "/web/edit.mjs?version=1");
     defer gpa.free(result);
-    try std.testing.expectEqualStrings("web/app.mjs", result);
+    try std.testing.expectEqualStrings("web/edit.mjs", result);
     try std.testing.expectEqualStrings("application/wasm", mime("artifacts/roclet.wasm"));
     const display = try assetPath(gpa, "/package/Display.roc");
     defer gpa.free(display);
