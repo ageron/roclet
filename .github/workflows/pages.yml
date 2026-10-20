@@ -1,9 +1,16 @@
 name: Deploy Roclet
 
 on:
-  push:
+  workflow_run:
+    workflows: [Roclet CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Roclet CI run for the current main commit
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,59 +20,63 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install pinned Zig
-        shell: bash
-        run: |
-          set -euo pipefail
-          version=$(jq -r .zigVersion compiler.lock.json)
-          curl --fail --location --retry 3 https://ziglang.org/download/index.json -o "$RUNNER_TEMP/zig-index.json"
-          url=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].tarball' "$RUNNER_TEMP/zig-index.json")
-          sha=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].shasum' "$RUNNER_TEMP/zig-index.json")
-          curl --fail --location --retry 3 "$url" -o "$RUNNER_TEMP/zig.tar.xz"
-          printf '%s  %s\n' "$sha" "$RUNNER_TEMP/zig.tar.xz" | sha256sum --check
-          mkdir "$RUNNER_TEMP/zig"
-          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
-          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
-      - uses: actions/cache@v4
-        id: compiler
-        with:
-          path: |
-            artifacts
-            .toolchain
-            .zig-cache
-            ~/.cache/zig
-          key: roclet-linux-v1-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'tools/**', 'compiler-adapter/**', 'core/**', 'package/**', 'vendor/**') }}
-      - name: Prepare pinned compiler dependency
-        shell: bash
-        run: |
-          set -euo pipefail
-          git init "$RUNNER_TEMP/roc"
-          git -C "$RUNNER_TEMP/roc" remote add origin "$(jq -r .compilerRepository compiler.lock.json)"
-          git -C "$RUNNER_TEMP/roc" fetch --depth=1 origin "$(jq -r .compilerCommit compiler.lock.json)"
-          sh tools/prepare-compiler.sh "$RUNNER_TEMP/roc"
-      - name: Test and package
-        run: |
-          zig build test
-          zig build package
-          unzip -q zig-out/roclet-pages.zip -d _site
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: _site
-
   deploy:
-    needs: build
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch'))
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
+      actions: read
+      contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Select the verified main artifact
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ github.event.workflow_run.id || inputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > "$RUNNER_TEMP/source-run.json"
+          jq -e --arg repo "$GITHUB_REPOSITORY" '
+            .status == "completed" and .conclusion == "success" and
+            .path == ".github/workflows/ci.yml" and .head_branch == "main" and
+            .head_repository.full_name == $repo and
+            (.event == "push" or .event == "workflow_dispatch")
+          ' "$RUNNER_TEMP/source-run.json"
+          tested_sha=$(jq -r .head_sha "$RUNNER_TEMP/source-run.json")
+          current_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          echo "run_id=$SOURCE_RUN" >> "$GITHUB_OUTPUT"
+          if [ "$tested_sha" = "$current_sha" ]; then
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+            echo '::notice::Skipping this older artifact because main has advanced.'
+          fi
+      - name: Download the verified site
+        if: steps.source.outputs.publish == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: roclet-site
+          path: verified-site
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.source.outputs.run_id }}
+      - name: Unpack the verified site
+        if: steps.source.outputs.publish == 'true'
+        run: unzip -q verified-site/roclet-pages.zip -d _site
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.source.outputs.publish == 'true'
+        with:
+          path: _site
       - uses: actions/deploy-pages@v4
+        if: steps.source.outputs.publish == 'true'
         id: deployment

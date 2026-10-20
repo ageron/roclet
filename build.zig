@@ -10,11 +10,14 @@ pub fn build(b: *std.Build) void {
     _ = b.option([]const u8, "roc-source", "Deprecated: use the roc path dependency in build.zig.zon");
     _ = b.option(u32, "compiler-jobs", "Deprecated: use zig build -j");
     const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode (default ReleaseFast)") orelse .fast;
+    const compiler_max_rss = b.option(u64, "compiler-max-rss", "Estimated peak bytes per compiler build for memory-aware scheduling") orelse 0;
     const roc = b.dependency("roc", .{ .target = b.graph.host, .optimize = optimize });
     const native = adapter(b, roc, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
+    native.step.max_rss = compiler_max_rss;
     b.step("native-adapter", "Build only the native engine").dependOn(&native.step);
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const wasm = adapter(b, roc, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
+    wasm.step.max_rss = compiler_max_rss;
     b.step("wasm-adapter", "Build only the browser engine").dependOn(&wasm.step);
     wasm.entry = .disabled;
     wasm.rdynamic = true;
@@ -100,6 +103,9 @@ pub fn build(b: *std.Build) void {
     native_tests.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     native_tests.has_side_effects = true;
     native_tests.step.dependOn(&cli.step);
+    // Parity reports include the manifest for the exact native/WASM pair.
+    // Installing the native runner alone does not publish that manifest.
+    native_tests.step.dependOn(ready);
     const test_step = b.step("test", "Run native conformance and unit tests; generate browser parity cases");
     test_step.dependOn(unit_step);
     test_step.dependOn(&workspace_run.step);
@@ -114,6 +120,7 @@ pub fn build(b: *std.Build) void {
     documents.addArg(root);
     documents.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     documents.step.dependOn(&cli.step);
+    documents.step.dependOn(ready);
     documents.has_side_effects = true;
     b.step("test-documents", "Test document formats and generate WASM parity cases").dependOn(&documents.step);
     test_step.dependOn(&documents.step);
@@ -126,6 +133,7 @@ pub fn build(b: *std.Build) void {
     m4_tests.addArg(root);
     m4_tests.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     m4_tests.step.dependOn(&cli.step);
+    m4_tests.step.dependOn(ready);
     m4_tests.has_side_effects = true;
     b.step("test-m4", "Check selective evaluation against full recomputation").dependOn(&m4_tests.step);
     test_step.dependOn(&m4_tests.step);
