@@ -21,7 +21,8 @@ fn stringify(a: std.mem.Allocator, data: anytype) ![]u8 {
 }
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
-    bridge.setNativeIo(init.io);
+    var engine = bridge.Engine.init(std.heap.page_allocator, init.io);
+    defer engine.deinit();
     const args = try init.minimal.args.toSlice(a);
     if (args.len == 1 or (args.len == 2 and std.mem.eql(u8, args[1], "--help"))) {
         try std.Io.File.stdout().writeStreamingAll(init.io, usage);
@@ -64,11 +65,11 @@ pub fn main(init: std.process.Init) !void {
     const is_document = !raw and !std.mem.eql(u8, format, "json");
     if (is_document) {
         const actual = try std.Io.Dir.cwd().realPathFileAlloc(init.io, file, a);
-        try bridge.setNativeSourceDirectory(std.fs.path.dirname(actual) orelse ".");
+        try engine.setNativeSourceDirectory(std.fs.path.dirname(actual) orelse ".");
     }
     if (convert and !is_document) return error.ExpectedDocumentExtension;
     const request = if (is_document) try stringify(a, .{ .operation = "document", .action = if (normalize) "normalize" else if (convert and std.mem.eql(u8, target, "roc")) "export" else if (std.mem.eql(u8, action, "run")) "evaluate" else action, .format = format, .target = target, .source = bytes }) else bytes;
-    const result = try bridge.process(request);
+    const result = try bridge.process(&engine, request);
     defer std.heap.page_allocator.free(result);
     const parsed = try std.json.parseFromSlice(std.json.Value, a, result, .{});
     const object = parsed.value.object;

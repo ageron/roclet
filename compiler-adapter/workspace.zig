@@ -6,7 +6,6 @@ const unbundle = @import("unbundle");
 const A = std.mem.Allocator;
 const gpa = if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator;
 pub const identity = "roclet-cache-v1/" ++ @import("build_options").compiler_compatibility_id;
-pub var global: Workspace = .{};
 pub const RequiredPackage = struct { url: []const u8, destination: []const u8 };
 const File = struct { bytes: []u8, dirty: bool = false, used: u64 = 0 };
 pub const Workspace = struct {

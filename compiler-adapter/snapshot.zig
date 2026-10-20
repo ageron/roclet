@@ -112,17 +112,18 @@ fn validate(s: Snapshot) !void {
         for (s.modules[0..i]) |previous| if (std.mem.eql(u8, previous.name, module.name)) return error.DuplicateModule;
     }
 }
-fn invoke(gpa: Allocator, arena: Allocator, s: Snapshot, source: []const u8, root: ?[]const u8, rich: bool, comptime compile: anytype) !RawResponse {
+fn invoke(gpa: Allocator, arena: Allocator, s: Snapshot, source: []const u8, root: ?[]const u8, rich: bool, compiler: anytype) !RawResponse {
     if (source.len >= limit) return error.SourceTooLarge;
     const possible = if (s.possible_roots.len == 0) s.roots else s.possible_roots;
     const request = try json(arena, .{ .protocol = @as(u32, 1), .source = source, .user_bytes = source.len, .check_only = root == null, .rich_output = rich, .modules = s.modules, .app_header = s.app_header, .root = root, .notebook = .{ .expectations = s.expectations, .roots = possible, .runtime_roots = if (s.roots.len == 0) s.failure_roots else s.roots, .isolate_errors = s.isolate_errors } });
-    const bytes = try compile(request);
+    const bytes = try compiler.compile(request);
     defer gpa.free(bytes);
     const response = try std.json.parseFromSliceLeaky(RawResponse, arena, bytes, .{ .allocate = .alloc_always, .ignore_unknown_fields = true });
     if (response.protocol != 1) return error.ProtocolMismatch;
     return response;
 }
-pub fn evaluate(gpa: Allocator, bytes: []const u8, comptime compile: anytype) ![]u8 {
+/// `compiler.compile(request)` serves each nested protocol-1 request.
+pub fn evaluate(gpa: Allocator, bytes: []const u8, compiler: anytype) ![]u8 {
     var arena_impl = std.heap.ArenaAllocator.init(gpa);
     defer arena_impl.deinit();
     const arena = arena_impl.allocator();
@@ -138,7 +139,7 @@ pub fn evaluate(gpa: Allocator, bytes: []const u8, comptime compile: anytype) ![
         try source.writer.writeAll(cell.source);
         ranges[i] = .{ .start = start, .end = source.written().len };
     }
-    const checked = try invoke(gpa, arena, s, source.written(), null, false, compile);
+    const checked = try invoke(gpa, arena, s, source.written(), null, false, compiler);
     for (checked.definitions) |*definition| {
         for (ranges, s.cells) |range, cell| {
             if (definition.region.start >= range.start and definition.region.end <= range.end) {
@@ -185,7 +186,7 @@ pub fn evaluate(gpa: Allocator, bytes: []const u8, comptime compile: anytype) ![
         if (checked.display_module) for (checked.definitions) |definition| {
             if (std.mem.eql(u8, definition.name, root) and std.mem.eql(u8, definition.type, "Display")) rich = true;
         };
-        const evaluated = try invoke(gpa, arena, s, source.written(), root, rich, compile);
+        const evaluated = try invoke(gpa, arena, s, source.written(), root, rich, compiler);
         var is_test = false;
         for (s.expectations) |expectation| if (std.mem.eql(u8, expectation.root, root)) {
             is_test = true;
@@ -244,7 +245,7 @@ pub fn evaluate(gpa: Allocator, bytes: []const u8, comptime compile: anytype) ![
 
 test "reject invalid snapshots before compilation" {
     const Mock = struct {
-        fn compile(_: []const u8) ![]u8 {
+        fn compile(_: @This(), _: []const u8) ![]u8 {
             return error.MustNotCompile;
         }
     };
@@ -255,13 +256,13 @@ test "reject invalid snapshots before compilation" {
         .{ "{\"cells\":[],\"roots\":[],\"documentRevision\":9007199254740992}", error.InvalidToken },
         .{ "{\"cells\":[],\"roots\":[],\"modules\":[{\"name\":\"bad\",\"content\":\"\"}]}", error.InvalidModule },
     };
-    inline for (cases) |case| try std.testing.expectError(case[1], evaluate(std.testing.allocator, case[0], Mock.compile));
+    inline for (cases) |case| try std.testing.expectError(case[1], evaluate(std.testing.allocator, case[0], Mock{}));
 }
 
 test "snapshot output is atomic when a later root fails" {
     const Mock = struct {
         var calls: usize = 0;
-        fn compile(_: []const u8) ![]u8 {
+        fn compile(_: @This(), _: []const u8) ![]u8 {
             calls += 1;
             const response = switch (calls) {
                 1 =>
@@ -280,7 +281,7 @@ test "snapshot output is atomic when a later root fails" {
     Mock.calls = 0;
     const result = try evaluate(std.testing.allocator,
         \\{"cells":[{"key":"outputs","source":"out_good = 42\nout_bad = 0"}],"roots":["out_good","out_bad"]}
-    , Mock.compile);
+    , Mock{});
     defer std.testing.allocator.free(result);
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, result, .{});
     defer parsed.deinit();
@@ -292,7 +293,7 @@ test "snapshot output is atomic when a later root fails" {
 
 test "generated entrypoint counts against the source limit" {
     const Mock = struct {
-        fn compile(_: []const u8) ![]u8 {
+        fn compile(_: @This(), _: []const u8) ![]u8 {
             return error.MustNotCompile;
         }
     };
@@ -302,5 +303,5 @@ test "generated entrypoint counts against the source limit" {
     @memset(source, ' ');
     const request = try json(gpa, .{ .cells = .{.{ .key = "large", .source = source }}, .roots = .{} });
     defer gpa.free(request);
-    try std.testing.expectError(error.SourceTooLarge, evaluate(gpa, request, Mock.compile));
+    try std.testing.expectError(error.SourceTooLarge, evaluate(gpa, request, Mock{}));
 }

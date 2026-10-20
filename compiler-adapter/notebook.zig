@@ -11,6 +11,7 @@ const can = @import("can");
 const engine = @import("engine.zig");
 const host = @import("platform.zig");
 const workspace = @import("workspace.zig");
+const Engine = @import("engine_state.zig").Engine;
 const A = std.mem.Allocator;
 const gpa = if (builtin.cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator;
 pub const Expectation = struct { root: []const u8, start: u32, end: u32, cell: u64 = 0 };
@@ -29,7 +30,8 @@ pub const Options = struct {
     analyze: *const fn (*can.ModuleEnv, u32) void,
 };
 const Label = struct { root: []const u8, text: []const u8, value: []const u8, rich: bool = false };
-const State = struct {
+/// A retained revision, owned by `Engine.revision`.
+pub const State = struct {
     key: [32]u8,
     buffer: []align(16) u8,
     fba: std.heap.FixedBufferAllocator,
@@ -58,9 +60,13 @@ const State = struct {
         }
         gpa.free(self.buffer);
     }
-    fn reportCache(self: *State) void {
+    pub fn destroy(self: *State) void {
+        self.deinit();
+        gpa.destroy(self);
+    }
+    fn reportCache(self: *State, stats: *engine.RequestStats) void {
         const now = if (self.build) |b| if (b.cache_manager) |cache| cache.getStats() else compile.CacheStats{} else compile.CacheStats{};
-        inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |name| @field(engine.request_cache_stats, name) += @field(now, name) - @field(self.cache_reported, name);
+        inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |name| @field(stats.cache, name) += @field(now, name) - @field(self.cache_reported, name);
         self.cache_reported = now;
     }
     fn emitReports(self: *State, diag: engine.Diagnostics) void {
@@ -68,7 +74,7 @@ const State = struct {
         defer scratch.deinit();
         for (self.reports) |module| for (module.reports) |*report| diag.emitReport(scratch.allocator(), report);
     }
-    fn prepare(self: *State, opts: Options) !void {
+    fn prepare(self: *State, eng: *Engine, opts: Options) !void {
         const a = self.fba.allocator();
         const expectations = try a.dupe(Expectation, opts.metadata.expectations);
         for (expectations) |*expectation| expectation.root = try a.dupe(u8, expectation.root);
@@ -99,9 +105,7 @@ const State = struct {
         if (self.wire_name) |wire| try header.writer.print(", {s}", .{wire});
         try header.writer.writeAll("] { pf: platform \"./.roc_echo_platform/main.roc\"");
         if (opts.app_header.len != 0) {
-            try workspace.global.put("/internal/header.roc", opts.app_header, false);
-            const parsed = try compile.app_header.parseAppHeader(workspace.global.io(a), a, a, "/internal/header.roc");
-            for (parsed.non_platform_packages) |package| {
+            for (try engine.parseHeaderPackages(a, eng.workspace.io(a), opts.app_header)) |package| {
                 if (engine.isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
                 try header.writer.print(", {s}: ", .{package.shorthand});
                 try std.json.Stringify.value(package.spec, .{}, &header.writer);
@@ -119,9 +123,9 @@ const State = struct {
         const extras = try a.alloc(engine.ExtraFile, opts.extras.len);
         for (extras, opts.extras) |*dest, src| dest.* = .{ .name = try a.dupe(u8, src.name), .content = try a.dupe(u8, src.content) };
         const fs = try a.create(engine.EchoCtx);
-        fs.* = .{ .paths = opts.paths, .synthetic_app_source = source.written(), .extras = extras, .fallback = workspace.global.io(a) };
+        fs.* = .{ .paths = opts.paths, .synthetic_app_source = source.written(), .extras = extras, .fallback = eng.workspace.io(a) };
         const build = try a.create(compile.BuildEnv);
-        build.* = compile.BuildEnv.initBorrowingBuiltinModules(a, .single_threaded, 1, opts.roc_target, opts.paths.cwd, workspace.global.std_io, try engine.persistentBuiltins());
+        build.* = compile.BuildEnv.initBorrowingBuiltinModules(a, .single_threaded, 1, opts.roc_target, opts.paths.cwd, eng.workspace.std_io, try engine.persistentBuiltins());
         self.build = build;
         build.filesystem = fs.io();
         build.package_cache_dir = try a.dupe(u8, "/packages");
@@ -139,7 +143,7 @@ const State = struct {
             if (self.reports.len == 0) return err;
             return;
         };
-        engine.request_frontend_builds += 1;
+        eng.stats.frontend_builds += 1;
         build.compileDiscovered() catch |err| {
             self.reports = try build.drainReports();
             self.failed = true;
@@ -215,7 +219,7 @@ const State = struct {
             }
         }
         if (self.requests.len == 0) return;
-        engine.request_lowerings += 1;
+        eng.stats.lowerings += 1;
         self.lowered = try build.runtimeProgramSession().?.takeRuntime(a, request_set, runtime_target);
         const lowered = &self.lowered.?;
         const imports = try build.collectImportedArtifactViews(a, artifact);
@@ -242,7 +246,7 @@ const State = struct {
         for (self.entry_names, 0..) |actual, i| if (std.mem.eql(u8, actual, name)) return @intCast(i);
         return error.EntrypointNotFound;
     }
-    fn execute(self: *State, opts: Options) !u8 {
+    fn execute(self: *State, std_io: std.Io, opts: Options) !u8 {
         const root = opts.root.?;
         var label: ?Label = null;
         for (self.labels) |candidate| if (std.mem.eql(u8, candidate.root, root)) {
@@ -263,7 +267,7 @@ const State = struct {
         var view = try lir.LirImage.viewMappedImageWithAllocator(self.header.?, self.buffer.ptr, @intCast(self.header.?.image_size), opts.target_usize, a);
         defer view.deinit();
         var hosted_fns = [_]host.host_abi.HostedFn{host.echoLineHostedFn()};
-        var environment: host.EchoEnv = .{ .std_io = workspace.global.std_io };
+        var environment: host.EchoEnv = .{ .std_io = std_io };
         var ops = host.makeDefaultRocOps(&environment, &hosted_fns);
         host.g_roc_ops = &ops;
         defer host.g_roc_ops = null;
@@ -308,31 +312,31 @@ const State = struct {
         return if (environment.inline_expect_failed) 1 else 0;
     }
 };
-var current: ?*State = null;
-pub fn run(opts: Options) !u8 {
-    const key = try inputKey(opts);
-    if (current != null and !std.mem.eql(u8, &current.?.key, &key)) {
-        current.?.deinit();
-        gpa.destroy(current.?);
-        current = null;
+/// Run one notebook request against the engine's retained revision, preparing
+/// a new revision when the input key changed.
+pub fn run(eng: *Engine, opts: Options) !u8 {
+    const key = try inputKey(eng, opts);
+    if (eng.revision != null and !std.mem.eql(u8, &eng.revision.?.key, &key)) {
+        eng.revision.?.destroy();
+        eng.revision = null;
     }
-    if (current != null) engine.request_prepared_hits += 1;
-    if (current == null) {
+    if (eng.revision != null) eng.stats.prepared_hits += 1;
+    if (eng.revision == null) {
         const buffer = try gpa.alignedAlloc(u8, .@"16", 512 * 1024 * 1024);
         errdefer gpa.free(buffer);
         const state = try gpa.create(State);
         errdefer gpa.destroy(state);
         state.* = .{ .key = key, .buffer = buffer, .fba = std.heap.FixedBufferAllocator.init(buffer), .capture = .{ .allocator = undefined } };
         state.capture.allocator = state.fba.allocator();
-        state.prepare(opts) catch |err| {
+        state.prepare(eng, opts) catch |err| {
             if (state.build) |build| build.deinit();
             return err;
         };
-        state.key = try inputKey(opts);
-        current = state;
+        state.key = try inputKey(eng, opts);
+        eng.revision = state;
     }
-    const state = current.?;
-    defer state.reportCache();
+    const state = eng.revision.?;
+    defer state.reportCache(&eng.stats);
     state.emitReports(opts.diagnostics);
     if (state.failed or (state.constant_failures and !opts.metadata.isolate_errors)) {
         for (opts.metadata.runtime_roots) |root| {
@@ -346,8 +350,8 @@ pub fn run(opts: Options) !u8 {
     if (opts.root == null) return 0;
     host.observation_root = opts.root;
     defer host.observation_root = null;
-    engine.request_executions += 1;
-    return state.execute(opts);
+    eng.stats.executions += 1;
+    return state.execute(eng.workspace.std_io, opts);
 }
 fn appendRoot(a: A, env: *can.ModuleEnv, exported: []const check.CheckedArtifact.RootRequest, name: []const u8, roots: *std.ArrayList(check.CheckedArtifact.RootRequest), names: *std.ArrayList([]const u8)) !void {
     for (exported) |request| {
@@ -369,7 +373,7 @@ fn reportRuntime(interpreter: *eval.LirInterpreter, diagnostics: engine.Diagnost
     return error.EvaluationFailed;
 }
 
-fn inputKey(opts: Options) ![32]u8 {
+fn inputKey(eng: *Engine, opts: Options) ![32]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
     const field = workspace.hashField;
     field(&hash, "roclet-notebook-v1");
@@ -397,7 +401,7 @@ fn inputKey(opts: Options) ![32]u8 {
         field(&hash, file.name);
         field(&hash, file.content);
     }
-    const workspace_hash = try workspace.global.contentIdentity(gpa);
+    const workspace_hash = try eng.workspace.contentIdentity(gpa);
     defer gpa.free(workspace_hash);
     field(&hash, workspace_hash);
     var key: [32]u8 = undefined;

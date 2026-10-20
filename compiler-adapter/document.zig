@@ -114,7 +114,8 @@ fn finishCompact(result: *V) void {
     _ = result.object.swapRemove("program");
     for (fieldArray(result.object.get("model").?, "cells")) |*cell| _ = cell.object.swapRemove("source_map");
 }
-pub fn process(gpa: A, bytes: []const u8, evaluate: anytype) ![]u8 {
+/// `compiler.compile(request)` serves each nested protocol-1 request.
+pub fn process(gpa: A, bytes: []const u8, compiler: anytype) ![]u8 {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     const a = arena.allocator();
@@ -229,7 +230,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype) ![]u8 {
             .modules = modules,
             .app_header = app_header,
             .expectations = result.object.get("expectations").?,
-        }), evaluate);
+        }), compiler);
         defer gpa.free(checked_bytes);
         var evaluation = try std.json.parseFromSliceLeaky(V, a, checked_bytes, .{ .allocate = .alloc_always });
         if (std.mem.eql(u8, string(evaluation, "status", ""), "ok")) {
@@ -257,7 +258,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype) ![]u8 {
                     .app_header = app_header,
                     .expectations = result.object.get("expectations").?,
                     .isolate_errors = if (request.object.get("isolateErrors")) |v| v == .bool and v.bool else false,
-                }), evaluate);
+                }), compiler);
                 defer gpa.free(evaluated);
                 evaluation = try std.json.parseFromSliceLeaky(V, a, evaluated, .{ .allocate = .alloc_always });
             }
@@ -313,7 +314,7 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype) ![]u8 {
     const check_export = std.mem.eql(u8, action, "export") and std.mem.eql(u8, target, "roc");
     if ((std.mem.eql(u8, action, "check") or std.mem.eql(u8, action, "run") or check_export) and std.mem.eql(u8, string(result, "status", ""), "ok")) {
         const execution = string(result, "execution", "");
-        const checked = try evaluate(try json(a, .{ .protocol = 1, .source = execution, .user_bytes = execution.len, .check_only = check_export or std.mem.eql(u8, action, "check"), .app_header = app_header, .modules = request.object.get("modules") orelse try value(a, &[_]V{}) }));
+        const checked = try compiler.compile(try json(a, .{ .protocol = 1, .source = execution, .user_bytes = execution.len, .check_only = check_export or std.mem.eql(u8, action, "check"), .app_header = app_header, .modules = request.object.get("modules") orelse try value(a, &[_]V{}) }));
         defer gpa.free(checked);
         const evaluation = try std.json.parseFromSliceLeaky(V, a, checked, .{ .allocate = .alloc_always });
         try mapDiagnostics(a, &result, evaluation, source, execution);

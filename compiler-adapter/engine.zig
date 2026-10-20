@@ -106,6 +106,8 @@ pub const RunOptions = struct {
     analyze: ?*const fn (*@import("can").ModuleEnv, u32) void = null,
     check_only: bool = false,
     args: []const []const u8 = &.{},
+    /// Work counters of the engine serving this request.
+    stats: *RequestStats,
     /// Single contiguous arena used for the entire pipeline (BuildEnv,
     /// lowering, LIR image, interpreter). Must own a flat virtual
     /// region—`std.heap.ArenaAllocator` will not work because the
@@ -155,9 +157,8 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     var header_writer: std.Io.Writer.Allocating = .init(allocator);
     try header_writer.writer.writeAll("app [main!] { pf: platform \"./.roc_echo_platform/main.roc\"");
     if (opts.app_header.len > 0) {
-        try @import("workspace.zig").global.put("/internal/header.roc", opts.app_header, false);
-        const header = compile.app_header.parseAppHeader(opts.fallback_io, allocator, allocator, "/internal/header.roc") catch null;
-        if (header) |parsed_header| for (parsed_header.non_platform_packages) |package| {
+        const packages = parseHeaderPackages(allocator, opts.fallback_io, opts.app_header) catch null;
+        if (packages) |entries| for (entries) |package| {
             if (isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
             try header_writer.writer.print(", {s}: ", .{package.shorthand});
             try std.json.Stringify.value(package.spec, .{}, &header_writer.writer);
@@ -202,8 +203,8 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     cache.* = compile.CacheManager.init(allocator, .{ .enabled = true, .cache_dir = "/cache", .roc_ctx = echo_ctx.io() }, echo_ctx.io());
     build_env.setCacheManager(cache);
     defer {
-        last_cache_stats = cache.getStats();
-        inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |field| @field(request_cache_stats, field) += @field(last_cache_stats, field);
+        const cache_stats = cache.getStats();
+        inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |field| @field(opts.stats.cache, field) += @field(cache_stats, field);
     }
     const runtime_target: lir.CheckedPipeline.TargetConfig = .{ .target_usize = opts.target_usize };
     if (!opts.check_only) build_env.setRuntimeLowering(.{ .target = runtime_target });
@@ -215,7 +216,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         }
         return err;
     };
-    request_frontend_builds += 1;
+    opts.stats.frontend_builds += 1;
     build_env.compileDiscovered() catch |err| {
         if (!try emitDiagnostics(&build_env, diag, allocator)) {
             diag.step("compileDiscovered", err);
@@ -267,7 +268,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     };
     defer allocator.free(lir_roots);
 
-    request_lowerings += 1;
+    opts.stats.lowerings += 1;
     var lowered = build_env.runtimeProgramSession().?.takeRuntime(
         allocator,
         .{ .requests = lir_roots },
@@ -317,7 +318,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     };
     defer view.deinit();
 
-    request_executions += 1;
+    opts.stats.executions += 1;
     return runEchoView(allocator, &view, diag, opts.std_io, opts.args) catch |err| {
         diag.step("runEchoView", err);
         return err;
@@ -589,9 +590,14 @@ pub fn persistentBuiltins() !*eval.BuiltinModules {
     return &builtin_modules.?;
 }
 
-pub var last_cache_stats: compile.CacheStats = .{};
-
-pub var request_cache_stats: compile.CacheStats = .{};
+/// Parse an app header held in memory. The path is virtual: nothing is written
+/// to any workspace, so header parsing never mutates engine state.
+pub fn parseHeaderPackages(arena: Allocator, fallback: Io, header_text: []const u8) compile.app_header.Error![]const compile.app_header.PackageEntry {
+    const path = "/internal/header.roc";
+    var ctx = EchoCtx{ .paths = .{ .app_abs = path }, .synthetic_app_source = header_text, .extras = &.{}, .fallback = fallback };
+    const info = try compile.app_header.parseAppHeader(ctx.io(), arena, arena, path);
+    return info.non_platform_packages;
+}
 
 // Finalization evaluates constants for the whole checked graph. Keep their
 // observations, then replay only the constants reachable from this output.
@@ -713,16 +719,13 @@ pub const DebugCapture = struct {
     }
 };
 
-pub var request_frontend_builds: u64 = 0;
-pub var request_lowerings: u64 = 0;
-pub var request_executions: u64 = 0;
-pub var request_prepared_hits: u64 = 0;
+/// Work done for one top-level request, reported as `workspaceCache`.
 pub const RequestStats = struct {
-    cache: compile.CacheStats,
-    frontend_builds: u64,
-    lowerings: u64,
-    executions: u64,
-    prepared_hits: u64,
+    cache: compile.CacheStats = .{},
+    frontend_builds: u64 = 0,
+    lowerings: u64 = 0,
+    executions: u64 = 0,
+    prepared_hits: u64 = 0,
     pub fn jsonStringify(self: @This(), w: anytype) !void {
         try w.beginObject();
         inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |name| {
@@ -736,9 +739,6 @@ pub const RequestStats = struct {
         try w.endObject();
     }
 };
-pub fn stats() RequestStats {
-    return .{ .cache = request_cache_stats, .frontend_builds = request_frontend_builds, .lowerings = request_lowerings, .executions = request_executions, .prepared_hits = request_prepared_hits };
-}
 
 pub const ScratchTypeWriter = @typeInfo(@typeInfo(@TypeOf(can.ModuleEnv.initTypeWriter)).@"fn".return_type.?).error_union.payload;
 pub fn scratchTypeWriter(env: *can.ModuleEnv, allocator: Allocator) !ScratchTypeWriter {
