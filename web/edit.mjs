@@ -192,23 +192,64 @@ async function mergeCells(keys) {
   notebook.change(s=>{ const first=s.cells[indices[0]];first.source=sources.join('\n');first.attributes=cells.find(c=>c.attributes?.trim())?.attributes??'';first.outputs=[];s.cells=s.cells.filter((c,i)=>!indices.slice(1).includes(i)); });
   focusCell(key);
 }
+let searchWorker, searchTimer, searchGeneration=0, searchMatches=[], searchIndex=-1, searchSnapshot='', searchRefresh;
+const searchSources=()=>notebook.state.mode==='source'?[{key:null,source:notebook.state.source}]:editable().map(({key,source})=>({key,source}));
+const searchIdentity=()=>JSON.stringify([notebook.state.id,notebook.state.mode,searchSources()]);
 function findNotebook() {
-  closeMenus();$('find-dialog').showModal();$('find-query').focus();updateFind();
+  closeMenus();$('find-bar').hidden=false;$('find-query').focus();$('find-query').select();updateFind();
 }
-function updateFind() {
-  const query=$('find-query').value.toLocaleLowerCase();$('find-results').replaceChildren();if(!query) return;
-  let count=0;
-  const sources=notebook.state.mode==='source'?[{source:notebook.state.source}]:editable();
-  for(const [index,cell] of sources.entries()) {
-    const lines=cell.source.split('\n');
-    for(const [line,text] of lines.entries()) {
-      const column=text.toLocaleLowerCase().indexOf(query);if(column<0) continue;
-      const hit=button(`${notebook.state.mode==='source'?'Source':`Cell ${index+1}`} · ${line+1}: ${text.slice(0,160)}`,()=>{
-        $('find-dialog').close();if(cell.key) {editCell(cell.key);cards.get(cell.key).editor.goTo(line+1,column+1);}else sourceEditor.goTo(line+1,column+1);
-      });$('find-results').append(hit);if(++count===100) return;
-    }
-  }
-  if(!count) $('find-results').textContent='No matches';
+function closeFind() {
+  $('find-bar').hidden=true;searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++;
+  if(notebook.state.mode==='source')sourceEditor.focus();else editCell(selection.focus);
+}
+function searchStatus(message) {
+  $('find-results').textContent=message??(searchMatches.length?`${searchIndex+1} of ${searchMatches.length}`:'No matches');
+  for(const id of ['find-prev','find-next','replace-next','replace-all'])$(id).disabled=!searchMatches.length;
+}
+function revealMatch() {
+  const match=searchMatches[searchIndex];if(!match)return;
+  const focused=document.activeElement;
+  let editor=sourceEditor;
+  if(match.key){selection.select(match.key);selection.mode='text';selectionActive=true;renderSelection();editor=cards.get(match.key)?.editor;}
+  editor?.selectMatch(match.from,match.to);editor?.dom.scrollIntoView({block:'nearest'});
+  if($('find-bar').contains(focused))focused.focus({preventScroll:true});
+  searchStatus();
+}
+function updateFind(preferred=null) {
+  if($('find-bar').hidden)return;
+  searchWorker?.terminate();clearTimeout(searchTimer);const generation=++searchGeneration;
+  searchMatches=[];searchIndex=-1;searchSnapshot=searchIdentity();searchStatus($('find-query').value?'Searching…':'Enter text to find');
+  if(!$('find-query').value)return;
+  const worker=searchWorker=new Worker(new URL('./notebook-search-worker.mjs',import.meta.url),{type:'module'});
+  const fail=message=>{if(generation!==searchGeneration)return;worker.terminate();clearTimeout(searchTimer);searchStatus(message);};
+  searchTimer=setTimeout(()=>fail('Search took too long. Try a simpler expression.'),1500);
+  worker.onerror=()=>fail('Search could not start. Please reload and try again.');
+  worker.onmessage=({data})=>{
+    if(generation!==searchGeneration)return;clearTimeout(searchTimer);worker.terminate();
+    if(searchSnapshot!==searchIdentity()){updateFind();return;}
+    if(data.error){searchStatus(data.error);return;}
+    searchMatches=data.matches;searchIndex=searchMatches.length?0:-1;
+    if(preferred){const keys=searchSources().map(c=>c.key), cell=keys.indexOf(preferred.key);const at=searchMatches.findIndex(m=>keys.indexOf(m.key)>cell||(m.key===preferred.key&&m.from>=preferred.from));if(at>=0)searchIndex=at;}
+    searchStatus();if($('find-bar').contains(document.activeElement))revealMatch();
+  };
+  worker.postMessage({sources:searchSources(),query:$('find-query').value,caseSensitive:$('find-case').checked,regex:$('find-regex').checked,replacement:$('replace-query').value});
+}
+function stepFind(delta) {
+  if(searchSnapshot!==searchIdentity()){updateFind();return;}
+  if(!searchMatches.length)return;searchIndex=(searchIndex+delta+searchMatches.length)%searchMatches.length;revealMatch();
+}
+function replaceFind(all) {
+  if(searchSnapshot!==searchIdentity()){updateFind();return;}
+  if(!searchMatches.length)return;
+  const chosen=all?searchMatches:[searchMatches[searchIndex]], current=chosen[0];
+  const sources=new Map(searchSources().map(c=>[c.key,c.source]));
+  for(const match of [...chosen].reverse()){const source=sources.get(match.key);sources.set(match.key,source.slice(0,match.from)+match.insert+source.slice(match.to));}
+  notebook.change(s=>{
+    if(s.mode==='source')s.source=sources.get(null);
+    else for(const cell of s.cells)if(sources.has(cell.key)&&cell.source!==sources.get(cell.key)){cell.source=sources.get(cell.key);cell.outputs=[];delete cell.editorSelection;}
+  },{source:notebook.state.mode==='source'});
+  clearTimeout(searchRefresh);
+  updateFind(all?null:{key:current.key,from:current.from+current.insert.length+(current.from===current.to?1:0)});
 }
 function insertion(position) {
   const rail = document.createElement('div'); rail.className = 'insertion';
@@ -429,6 +470,7 @@ function reflect(reason) {
   if (reason === 'result' || reason === 'edit' || reason === 'diagnostics') renderResults();
   if (!notebook.result) { $('generated').textContent = ''; if (reason === 'status') renderResults(); }
   if (reason === 'saved') void refreshLibrary();
+  if(!$('find-bar').hidden && searchSnapshot!==searchIdentity()){searchMatches=[];searchStatus('Searching…');clearTimeout(searchRefresh);searchRefresh=setTimeout(()=>updateFind(),120);}
 }
 function bind() {
   document.addEventListener('focusout', event => {
@@ -480,7 +522,10 @@ function bind() {
   $('offline').onclick=()=>perform(async()=>{closeMenus();$('offline-dialog').showModal();$('offline-state').textContent='Verifying offline files…';try {$('offline-state').textContent=(await offlineStatus()).label;}catch(error){$('offline-state').textContent=error.message;}$('storage-state').textContent=await storageStatus();});
   $('prepare-offline').onclick=()=>perform(async()=>{const b=$('prepare-offline');b.disabled=true;$('offline-state').textContent='Downloading and verifying Roclet and its compiler…';try {$('offline-state').textContent=(await prepareOffline()).label;}catch(error){$('offline-state').textContent=error.message;}finally {b.disabled=false;}});
   $('persist-storage').onclick=()=>perform(async()=>{$('storage-state').textContent=await storageStatus(true);});
-  $('find').onclick=findNotebook;$('find-query').oninput=updateFind;
+  $('find').onclick=findNotebook;
+  for(const id of ['find-query','replace-query','find-case','find-regex'])$(id).oninput=()=>updateFind();
+  $('find-close').onclick=closeFind;$('find-prev').onclick=()=>stepFind(-1);$('find-next').onclick=()=>stepFind(1);
+  $('replace-next').onclick=()=>replaceFind(false);$('replace-all').onclick=()=>replaceFind(true);
   $('back-notebook').onclick = $('notebook-view').onclick;
   const help = () => { closeMenus(); $('shortcuts-dialog').showModal(); };
   $('help').onclick = help; $('shortcuts').onclick = help;
@@ -495,7 +540,9 @@ function bind() {
     const target = event.target, card = target.closest?.('.cell');
     const menu = target.closest?.('details[open]');
     if (event.key === 'Escape' && menu) { event.preventDefault(); event.stopPropagation(); menu.open = false; menu.querySelector('summary').focus(); return; }
-    if (mod && event.shiftKey && key==='f') {event.preventDefault();event.stopPropagation();findNotebook();return;}
+    if (mod && key==='f') {event.preventDefault();event.stopPropagation();findNotebook();return;}
+    if(!$('find-bar').hidden && event.key==='Escape'){event.preventDefault();event.stopPropagation();closeFind();return;}
+    if($('find-bar').contains(target)&&event.key==='Enter'){event.preventDefault();event.stopPropagation();stepFind(event.shiftKey?-1:1);return;}
     const inNotebook = notebook.state.mode === 'notebook' && $('notebook').contains(target);
     if(event.key==='Escape' && target.closest?.('.cm-search')) return;
     if (event.key === 'Escape' && editorFor(target) === sourceEditor) { event.preventDefault(); event.stopPropagation(); notebook.finishEditing(); sourceEditor.element.blur(); return; }

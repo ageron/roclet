@@ -94,6 +94,7 @@ export class CellEditor {
     try { const size=this.view.state.doc.length; this.view.dispatch({selection:EditorSelection.create(positions.ranges.map(r=>EditorSelection.range(Math.min(size,r.anchor),Math.min(size,r.head))),Math.min(positions.main??0,positions.ranges.length-1))}); } catch { /* Old cursor positions are optional browser state. */ }
   }
   search() { openSearchPanel(this.view); }
+  selectMatch(from,to) { this.view.dispatch({selection:{anchor:from,head:to},scrollIntoView:true}); }
   goTo(line,column=1,byteColumn=false) { const l=this.view.state.doc.line(Math.max(1,Math.min(this.view.state.doc.lines,line))); const offset=byteColumn?new TextDecoder().decode(new TextEncoder().encode(l.text).slice(0,Math.max(0,column-1))).length:Math.max(0,column-1); this.view.dispatch({selection:{anchor:Math.min(l.to,l.from+offset)},scrollIntoView:true}); this.focus(); }
   enter(forward,goal) { enterAtBoundary(this.view,forward,goal); }
   highlight(source,spans) {

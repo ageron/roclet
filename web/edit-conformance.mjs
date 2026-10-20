@@ -81,6 +81,21 @@ try {
   unavailable.state=newDraft(); assert.equal(await unavailable.persist(),false); assert.match(unavailable.saveStatus,/Not saved: Quota exceeded/); unavailable.dispose();
   report('save status waits for the newest transaction and never hides a storage failure');
 
+  const search = data => new Promise((resolve,reject)=>{
+    const worker=new Worker('./notebook-search-worker.mjs',{type:'module'});
+    worker.onmessage=({data})=>{worker.terminate();resolve(data);};worker.onerror=error=>{worker.terminate();reject(error);};
+    worker.postMessage({sources:[{key:'a',source:'Cat cat cat. 12'},{key:'b',source:'cat'}],query:'cat',replacement:'dog',...data});
+  });
+  assert.equal((await search({})).matches.length,4);
+  assert.equal((await search({caseSensitive:true})).matches.length,3);
+  assert.equal((await search({query:'cat.'})).matches.length,1);
+  assert.equal((await search({query:'[',regex:true})).error.length>0,true);
+  const capture=await search({query:'(c)(at)',regex:true,replacement:'$2-$1-$$'});
+  assert.equal(capture.matches[0].insert,'at-C-$');
+  assert.equal((await search({query:'(?=cat)',regex:true})).matches.length,4);
+  assert.equal((await search({query:'(?<= )12',regex:true,replacement:'[$&]'})).matches[0].insert,'[12]');
+  report('notebook search supports literal text, case, captures, lookarounds, zero-width matches and invalid patterns');
+
   const bytes = await fetch('../artifacts/roclet.wasm').then(r => r.arrayBuffer());
   const name = `roclet-test-${crypto.randomUUID()}`;
   store = new DraftStore(name);
