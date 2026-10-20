@@ -55,6 +55,8 @@ export async function createWasmTransport(bytes) {
       wasm.roclet_free(ptr, bytes.length);
     }
   };
+  // Linear memory never shrinks, so this is the worker's high-water mark.
+  transport.memoryBytes = () => wasm.memory.buffer.byteLength;
   transport.workspace = typeof wasm.roclet_file_put === 'function';
   if (transport.workspace) {
     transport.putFile = (path, bytes) => withBytes(encoder.encode(path), (pathPtr, pathLen) =>

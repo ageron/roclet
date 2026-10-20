@@ -162,8 +162,9 @@ export interface RecomputePlan {
 export interface DocumentResponse {
   workspaceCache?: CompilerCacheStats;
   packagesRequired?: {url: string; destination: string}[];
-  /** Browser transport byte counts; fileBytes includes changed source only. */
-  transportMetrics?: {requestBytes: number; responseBytes: number; fileBytes: number};
+  /** Browser transport byte counts; fileBytes includes changed source only;
+   *  memoryBytes is the worker's WASM linear memory size after the request. */
+  transportMetrics?: {requestBytes: number; responseBytes: number; fileBytes: number; memoryBytes?: number};
   graph?: DependencyGraph;
   plan: RecomputePlan;
   protocol: 1;
