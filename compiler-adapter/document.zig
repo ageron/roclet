@@ -1,7 +1,7 @@
 //! Native/WASM notebook frontend and evaluator. Source assembly is native UTF-8.
 const std = @import("std");
 const syntax = @import("syntax.zig");
-const snapshot = @import("snapshot.zig");
+const notebook = @import("notebook.zig");
 const frontend = @import("document_frontend.zig");
 const A = std.mem.Allocator;
 const V = std.json.Value;
@@ -221,18 +221,18 @@ pub fn process(gpa: A, bytes: []const u8, compiler: anytype) ![]u8 {
             failure_roots = try cellRoots(a, cell);
         }
         const modules = request.object.get("modules") orelse try value(a, &[_]V{});
-        const checked_bytes = try snapshot.evaluate(gpa, try json(a, .{
-            .cells = .{.{ .key = "document", .source = program }},
-            .roots = &[_]V{},
-            .possible_roots = result.object.get("roots").?,
-            .failure_roots = if (std.mem.eql(u8, action, "evaluate")) failure_roots else try value(a, &[_]V{}),
-            .isolate_errors = if (request.object.get("isolateErrors")) |v| v == .bool and v.bool else false,
-            .modules = modules,
+        const isolate_errors = if (request.object.get("isolateErrors")) |v| v == .bool and v.bool else false;
+        var checked = try notebook.checkDocument(compiler.engine, a, .{
+            .program = program,
             .app_header = app_header,
-            .expectations = result.object.get("expectations").?,
-        }), compiler);
-        defer gpa.free(checked_bytes);
-        var evaluation = try std.json.parseFromSliceLeaky(V, a, checked_bytes, .{ .allocate = .alloc_always });
+            .modules = try std.json.parseFromValueLeaky([]const notebook.Module, a, modules, .{ .ignore_unknown_fields = true }),
+            .roots = try std.json.parseFromValueLeaky([]const []const u8, a, result.object.get("roots").?, .{}),
+            .expectations = try std.json.parseFromValueLeaky([]const notebook.Expectation, a, result.object.get("expectations").?, .{ .ignore_unknown_fields = true }),
+            .cells = &.{.{ .key = "document", .start = 0, .end = program.len }},
+            .failure_roots = if (std.mem.eql(u8, action, "evaluate")) try std.json.parseFromValueLeaky([]const []const u8, a, failure_roots, .{}) else &.{},
+            .isolate_errors = isolate_errors,
+        });
+        var evaluation = try value(a, checked.evaluation);
         if (std.mem.eql(u8, string(evaluation, "status", ""), "ok")) {
             const graph = try dependencyGraph(a, program, evaluation, modules, string(request, "workspaceFingerprint", ""));
             try result.object.put(a, "graph", graph);
@@ -246,21 +246,11 @@ pub fn process(gpa: A, bytes: []const u8, compiler: anytype) ![]u8 {
                 const cell = fieldArray(result.object.get("model").?, "cells")[@intCast(selected.integer)];
                 reactivity.force = try std.json.parseFromValueLeaky([]const []const u8, a, try cellRoots(a, cell), .{});
             };
-            const plan = try value(a, try frontend.plan(a, reactivity));
-            try result.object.put(a, "plan", plan);
-            const selected_roots = plan.object.get("evaluate").?;
-            if (std.mem.eql(u8, action, "evaluate") and selected_roots.array.items.len > 0) {
-                const evaluated = try snapshot.evaluate(gpa, try json(a, .{
-                    .cells = .{.{ .key = "document", .source = program }},
-                    .roots = selected_roots,
-                    .possible_roots = result.object.get("roots").?,
-                    .modules = modules,
-                    .app_header = app_header,
-                    .expectations = result.object.get("expectations").?,
-                    .isolate_errors = if (request.object.get("isolateErrors")) |v| v == .bool and v.bool else false,
-                }), compiler);
-                defer gpa.free(evaluated);
-                evaluation = try std.json.parseFromSliceLeaky(V, a, evaluated, .{ .allocate = .alloc_always });
+            const plan = try frontend.plan(a, reactivity);
+            try result.object.put(a, "plan", try value(a, plan));
+            if (std.mem.eql(u8, action, "evaluate") and plan.evaluate.len > 0) {
+                try checked.evaluate(plan.evaluate);
+                evaluation = try value(a, checked.evaluation);
             }
         }
         const cells = fieldArray(result.object.get("model").?, "cells");

@@ -13,7 +13,7 @@ const measure=async(session,request)=>{
     cacheHits:result.workspaceCache.hits,cacheMisses:result.workspaceCache.misses,
     frontendBuilds:result.workspaceCache.frontend_builds,lowerings:result.workspaceCache.lowerings,
     rootExecutions:result.workspaceCache.executions,preparedHits:result.workspaceCache.prepared_hits,
-    imageBytes:result.workspaceCache.image_bytes,imageRetries:result.workspaceCache.image_retries}};
+    imageBytes:result.workspaceCache.image_bytes,imageRetries:result.workspaceCache.image_retries,analyses:result.workspaceCache.analyses}};
 };
 const summarize=samples=>({rounds:samples.length,...Object.fromEntries(Object.keys(samples[0]).map(key=>[`${key}Median`,median(samples.map(s=>s[key]))]))});
 const reactive=(request,previous)=>({...request,compact:true,...(previous?{reactivity:{known:true,previous:previous.graph,current:{context:'',scope:'module',definitions:[]},roots:[],available:previous.roots,force:[]}}:{})});
@@ -33,7 +33,7 @@ export async function benchmarkWorkspace(bytes,{rounds=15,buildMode,maxWallMemor
       const measured=await measure(wall,reactive(requestFor(state,'evaluate'),previous));
       assert.deepEqual(measured.result.evaluation.values.map(value=>value.text),[`${width*3}.0`,`${width*3}.0`]);
       assert.equal(measured.sample.fileBytes,0);previous=measured.result;
-      assert.equal(measured.sample.frontendBuilds,1);assert.equal(measured.sample.lowerings,1);assert.equal(measured.sample.rootExecutions,2);
+      assert.equal(measured.sample.frontendBuilds,1);assert.equal(measured.sample.lowerings,1);assert.equal(measured.sample.rootExecutions,2);assert.equal(measured.sample.analyses,1);
       if(index===-3)wallStartup=measured.sample;
       if(index>=0)wallSamples.push(measured.sample);
     }
@@ -50,7 +50,7 @@ export async function benchmarkWorkspace(bytes,{rounds=15,buildMode,maxWallMemor
       currentRequest={operation:'document',action:'evaluate',format:'roc',source,compact:true,files:[{path:'/workspace/Geometry.roc',source:changedSource},{path:'/workspace/Materials.roc',source:materials}]};
       const measured=await measure(modules,reactive(currentRequest,previous));
       assert.deepEqual(measured.result.evaluation.values.map(value=>value.text),[`${15+offset}`,`${(15+offset)*4}`]);
-      assert.equal(measured.sample.frontendBuilds,1);assert.equal(measured.sample.lowerings,1);assert.equal(measured.sample.rootExecutions,2);
+      assert.equal(measured.sample.frontendBuilds,1);assert.equal(measured.sample.lowerings,1);assert.equal(measured.sample.rootExecutions,2);assert.equal(measured.sample.analyses,1);
       if(index!==-3)assert.equal(measured.sample.fileBytes,encoder.encode(changedSource).length);
       previous=measured.result;if(index===-3)moduleStartup=measured.sample;
       if(index>=0)moduleSamples.push(measured.sample);

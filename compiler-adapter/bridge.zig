@@ -3,11 +3,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const runner = @import("engine.zig");
 pub const platform = @import("platform.zig");
+pub const notebook = @import("notebook.zig");
 const can = @import("can");
-const reporting = @import("reporting");
+const analysis = @import("analysis.zig");
 const Workspace = @import("workspace.zig");
 pub const Engine = @import("engine_state.zig").Engine;
-const compiled_builtins = @import("compiled_builtins");
 pub const roc_compressed_builtins = @import("compressed_builtins");
 
 const is_wasm = builtin.cpu.arch == .wasm32;
@@ -25,53 +25,17 @@ const Request = struct {
     modules: []const runner.ExtraFile = &.{},
     app_header: []const u8 = "",
     root: ?[]const u8 = null,
-    notebook: ?@import("notebook.zig").Metadata = null,
+    notebook: ?notebook.Metadata = null,
     files: []const struct { path: []const u8, source: []const u8 } = &.{},
-};
-const Region = struct { start: u32, end: u32 };
-const Definition = struct {
-    name: []const u8,
-    type: []const u8,
-    region: Region,
-    name_region: Region,
-    dependencies: []const []const u8,
-    references: []const Region,
-    rename_safe: bool,
-};
-const Diagnostic = struct {
-    title: []const u8,
-    severity: []const u8,
-    message: []const u8,
-    filename: ?[]const u8 = null,
-    location: ?struct { start_line: u32, start_column: u32, end_line: u32, end_column: u32 } = null,
-};
-const Event = struct {
-    kind: []const u8,
-    message: []const u8,
-    root: ?[]const u8 = null,
-    pub fn jsonStringify(self: @This(), w: anytype) !void {
-        try w.beginObject();
-        try w.objectField("kind");
-        try w.write(self.kind);
-        try w.objectField("message");
-        try w.write(self.message);
-        if (self.root) |root| {
-            try w.objectField("root");
-            try w.write(root);
-        }
-        try w.endObject();
-    }
 };
 const Response = struct {
     protocol: u32 = 1,
     display_module: bool = false,
     status: []const u8 = "ok",
-    definitions: std.ArrayList(Definition) = .empty,
-    diagnostics: std.ArrayList(Diagnostic) = .empty,
-    events: std.ArrayList(Event) = .empty,
+    definitions: []const analysis.Definition = &.{},
     failure: ?[]const u8 = null,
     dependency_scope: []const u8 = "definitions",
-    binders: std.ArrayList([]const u8) = .empty,
+    binders: []const []const u8 = &.{},
 };
 /// The protocol-1 response being built for one `processSource` call, with its
 /// observation bounds. Compiler callbacks reach it through `Diagnostics.ctx`,
@@ -80,29 +44,29 @@ const ResponseBuilder = struct {
     arena: std.mem.Allocator,
     response: Response = .{},
     user_bytes: u32 = 0,
+    stats: *runner.RequestStats,
     /// An allocation failed inside a callback that cannot return an error.
     failed: bool = false,
-    event_bytes: usize = 0,
-    truncated: bool = false,
-    rich_output: bool = false,
-    value_index: usize = 0,
-    expectations: []const @import("notebook.zig").Expectation = &.{},
+    events: platform.EventBuffer,
+    diagnostic_list: runner.DiagnosticList,
 
-    fn dupe(self: *ResponseBuilder, s: []const u8) []const u8 {
-        return self.arena.dupe(u8, s) catch {
-            self.failed = true;
-            return "";
-        };
+    fn init(arena: std.mem.Allocator, stats: *runner.RequestStats) ResponseBuilder {
+        return .{ .arena = arena, .stats = stats, .events = .{ .arena = arena }, .diagnostic_list = .{ .arena = arena } };
     }
     /// The request observer; the notebook pipeline sets its `root` per execution.
     fn observer(self: *ResponseBuilder) platform.Observer {
-        return .{ .ctx = self, .emit = observe };
+        return self.events.observer();
     }
     fn diagnostics(self: *ResponseBuilder) runner.Diagnostics {
-        return .{ .ctx = self, .vtable = &diag_vtable };
+        return self.diagnostic_list.diagnostics();
     }
     fn analyzer(self: *ResponseBuilder) runner.Analyzer {
         return .{ .ctx = self, .call = analyze };
+    }
+    fn setAnalysis(self: *ResponseBuilder, result: *const analysis.Analysis) void {
+        self.response.definitions = result.definitions;
+        self.response.binders = result.binders;
+        self.response.dependency_scope = @tagName(result.dependency_scope);
     }
     fn serialize(self: *ResponseBuilder, engine: *Engine) ![]u8 {
         var writer: std.Io.Writer.Allocating = .init(gpa);
@@ -111,12 +75,12 @@ const ResponseBuilder = struct {
             .protocol = self.response.protocol,
             .display_module = self.response.display_module,
             .status = self.response.status,
-            .definitions = self.response.definitions.items,
+            .definitions = self.response.definitions,
             .dependency_scope = self.response.dependency_scope,
-            .binders = self.response.binders.items,
-            .diagnostics = self.response.diagnostics.items,
-            .events = self.response.events.items,
-            .failure = self.response.failure,
+            .binders = self.response.binders,
+            .diagnostics = self.diagnostic_list.items.items,
+            .events = self.events.events.items,
+            .failure = self.response.failure orelse self.diagnostic_list.failure,
             .packagesRequired = engine.workspace.required.items,
             .workspaceCache = engine.stats,
         }, .{}, &writer.writer);
@@ -129,199 +93,27 @@ const ResponseBuilder = struct {
                 error.CompilationFailed => "diagnostic",
                 else => "runtime_error",
             };
-            if (self.response.failure == null) self.response.failure = self.dupe(@errorName(err));
+            if (self.response.failure == null and self.diagnostic_list.failure == null) self.response.failure = @errorName(err);
             break :code 0;
         };
         if (exit_code != 0) self.response.status = "runtime_error";
-        if (self.failed) return error.OutOfMemory;
+        if (self.failed or self.events.failed or self.diagnostic_list.failed) return error.OutOfMemory;
         return self.serialize(engine);
     }
 };
-fn builderFrom(ctx: ?*anyopaque) *ResponseBuilder {
-    return @ptrCast(@alignCast(ctx orelse unreachable));
-}
-fn observe(ctx: *anyopaque, kind: []const u8, message: []const u8, root: ?[]const u8) void {
+fn analyze(ctx: *anyopaque, env: *can.ModuleEnv, prefix: u32) void {
     const self: *ResponseBuilder = @ptrCast(@alignCast(ctx));
-    const designated = std.mem.eql(u8, kind, "value");
-    const value_limit: usize = if (self.rich_output and self.value_index == 1) 512 * 1024 else 64 * 1024;
-    if (designated) self.value_index += 1;
-    var end = @min(message.len, if (designated) value_limit else @min(@as(usize, 64 * 1024), 256 * 1024 -| self.event_bytes));
-    if (!designated and self.response.events.items.len >= 1000) end = 0;
-    while (end > 0 and end < message.len and message[end] & 0xc0 == 0x80) end -= 1;
-    if (end < message.len and !self.truncated) {
-        self.truncated = true;
-        self.response.events.append(self.arena, .{ .kind = "truncated", .message = "Output truncated: at most 1,000 observations, 256 KiB of observations, and 64 KiB per text result/message (512 KiB for rich data) are retained per root." }) catch {
-            self.failed = true;
-        };
-    }
-    if (end == 0 and message.len > 0 and !designated) return;
-    self.event_bytes += end;
-    self.response.events.append(self.arena, .{ .kind = kind, .message = self.dupe(message[0..end]), .root = if (root) |name| self.dupe(name) else null }) catch {
-        self.failed = true;
-    };
-}
-fn writeFailure(ctx: ?*anyopaque, message: []const u8) void {
-    const self = builderFrom(ctx);
-    self.response.failure = self.dupe(message);
-}
-fn emitReport(ctx: ?*anyopaque, _: std.mem.Allocator, report: *reporting.Report) void {
-    const self = builderFrom(ctx);
-    var writer: std.Io.Writer.Allocating = .init(self.arena);
-    defer writer.deinit();
-    reporting.renderReport(report, &writer.writer, .markdown) catch {
+    const result = self.arena.create(analysis.Analysis) catch {
         self.failed = true;
         return;
     };
-    const loc = report.getRegionInfo();
-    var filename: ?[]const u8 = null;
-    for (report.document.elements.items) |element| {
-        const file = switch (element) {
-            .source_code_region => |r| r.filename,
-            .source_code_with_underlines => |r| r.display_region.filename,
-            .source_code_multi_region => |r| r.filename,
-            else => null,
-        };
-        if (file) |name| {
-            filename = self.dupe(name);
-            break;
-        }
-    }
-    self.response.diagnostics.append(self.arena, .{
-        .title = self.dupe(report.title),
-        .severity = if (report.severity.isError()) "error" else "warning",
-        .message = self.dupe(writer.written()),
-        .filename = filename,
-        .location = if (loc) |r| .{
-            .start_line = r.start_line_idx,
-            .start_column = r.start_col_idx,
-            .end_line = r.end_line_idx,
-            .end_column = r.end_col_idx,
-        } else null,
-    }) catch {
+    result.* = analysis.analyze(self.arena, env, prefix, self.user_bytes, &.{}) catch {
         self.failed = true;
+        return;
     };
+    self.stats.analyses += 1;
+    self.setAnalysis(result);
 }
-fn analyze(ctx: *anyopaque, env: *can.ModuleEnv, prefix: u32) void {
-    const self: *ResponseBuilder = @ptrCast(@alignCast(ctx));
-    analyzeFallible(self, env, prefix) catch {
-        self.failed = true;
-    };
-}
-fn analyzeFallible(self: *ResponseBuilder, env: *can.ModuleEnv, prefix: u32) !void {
-    const defs = env.store.sliceDefs(env.all_defs);
-    var patterns: std.AutoHashMapUnmanaged(can.CIR.Pattern.Idx, can.CIR.Def.Idx) = .{};
-    var binders: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
-    var binder_stack: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
-    for (defs) |idx| {
-        binders.clearRetainingCapacity();
-        try can.DependencyGraph.appendPatternBinders(env, env.store.getDef(idx).pattern, &binders, &binder_stack, self.arena);
-        for (binders.items) |binder| try patterns.put(self.arena, binder, idx);
-        const d = env.store.getDef(idx);
-        const r = env.store.getExprRegion(d.expr);
-        if (r.start.offset >= prefix and r.end.offset <= prefix + self.user_bytes and env.store.getPattern(d.pattern) != .assign) self.response.dependency_scope = "module";
-    }
-    const tags = env.store.nodes.items.items(.tag);
-    for (tags, 0..) |tag, i| {
-        const r = env.store.regions.items.items[i];
-        if (r.start.offset < prefix or r.end.offset > prefix + self.user_bytes) continue;
-        // User-defined dispatch/defaults need checked-template dependencies, which
-        // this pinned adapter does not expose. Never guess those edges.
-        switch (tag) {
-            .statement_nominal_decl, .statement_alias_decl, .statement_where_alias_decl, .expr_associated_lookup_local, .expr_associated_lookup_resolved => self.response.dependency_scope = "module",
-            .pattern_identifier, .pattern_var_identifier, .pattern_as => {
-                const p = env.store.getPattern(@fromBackingInt(@intCast(i)));
-                const ident = switch (p) {
-                    .assign => |v| v.ident,
-                    .var_assign => |v| v.ident,
-                    .as => |v| v.ident,
-                    else => unreachable,
-                };
-                try self.response.binders.append(self.arena, self.dupe(env.getIdent(ident)));
-            },
-            else => {},
-        }
-    }
-    var refs: std.AutoHashMapUnmanaged(can.CIR.Def.Idx, void) = .{};
-    var stack: std.ArrayList(can.CIR.Expr.Idx) = .empty;
-    var defaults: std.AutoHashMapUnmanaged(can.CIR.Expr.Idx, void) = .{};
-    for (defs) |idx| {
-        const def = env.store.getDef(idx);
-        const pattern = env.store.getPattern(def.pattern);
-        if (pattern != .assign) continue;
-        const name_region = env.store.getPatternRegion(def.pattern);
-        const expr_region = env.store.getExprRegion(def.expr);
-        if (name_region.start.offset < prefix or expr_region.end.offset > prefix + self.user_bytes) continue;
-        const name = env.getIdent(pattern.assign.ident);
-        if (std.mem.findScalar(u8, name, '.') != null) self.response.dependency_scope = "module";
-        refs.clearRetainingCapacity();
-        try can.DependencyGraph.collectNameReferences(env, &patterns, def.expr, &refs, &stack, &defaults, self.arena);
-        var deps: std.ArrayList([]const u8) = .empty;
-        // Source order is deterministic; references include uncalled lambda bodies.
-        for (defs) |other| if (refs.contains(other)) {
-            const p = env.store.getPattern(env.store.getDef(other).pattern);
-            if (p == .assign) try deps.append(self.arena, self.dupe(env.getIdent(p.assign.ident))) else self.response.dependency_scope = "module";
-        };
-        var occurrences: std.ArrayList(Region) = .empty;
-        var rename_safe = true;
-        for (tags, 0..) |tag, i| {
-            if (tag == .expr_var) {
-                const e: can.CIR.Expr.Idx = @fromBackingInt(@intCast(i));
-                if (env.store.getExpr(e).e_lookup_local.pattern_idx != def.pattern) continue;
-                const r = env.store.getExprRegion(e);
-                if (r.start.offset < prefix or r.end.offset > prefix + self.user_bytes) continue;
-                if (std.mem.eql(u8, env.common.source[r.start.offset..r.end.offset], name)) {
-                    try occurrences.append(self.arena, .{ .start = r.start.offset - prefix, .end = r.end.offset - prefix });
-                } else rename_safe = false;
-            } else if (tag == .record_field) {
-                const field = env.store.getRecordField(@fromBackingInt(@intCast(i)));
-                const e = env.store.getExpr(field.value);
-                // A shorthand field also names a public record label. Refuse
-                // rename until an explicit shorthand expansion is available.
-                if (e == .e_lookup_local and e.e_lookup_local.pattern_idx == def.pattern) rename_safe = false;
-            }
-        }
-        var tw = try runner.scratchTypeWriter(env, self.arena);
-        defer tw.deinit();
-        try tw.write(can.ModuleEnv.varFrom(idx), .one_line);
-        try self.response.definitions.append(self.arena, .{
-            .name = self.dupe(name),
-            .type = self.dupe(tw.get()),
-            .region = .{ .start = name_region.start.offset - prefix, .end = expr_region.end.offset - prefix },
-            .name_region = .{ .start = name_region.start.offset - prefix, .end = name_region.end.offset - prefix },
-            .dependencies = deps.items,
-            .references = occurrences.items,
-            .rename_safe = rename_safe,
-        });
-    }
-    // Tests are real checked statement roots rather than generated bindings.
-    // Expose their resolved references to the same reactive graph as outputs.
-    for (self.expectations) |expectation| {
-        for (env.store.sliceStatements(env.all_statements)) |idx| {
-            const statement = env.store.getStatement(idx);
-            if (statement != .s_expect) continue;
-            const region = env.store.getStatementRegion(idx);
-            if (region.start.offset < prefix or region.start.offset - prefix < expectation.start or region.start.offset - prefix >= expectation.end) continue;
-            refs.clearRetainingCapacity();
-            try can.DependencyGraph.collectNameReferences(env, &patterns, statement.s_expect.body, &refs, &stack, &defaults, self.arena);
-            var deps: std.ArrayList([]const u8) = .empty;
-            for (defs) |other| if (refs.contains(other)) {
-                const pattern = env.store.getPattern(env.store.getDef(other).pattern);
-                if (pattern == .assign) try deps.append(self.arena, self.dupe(env.getIdent(pattern.assign.ident))) else self.response.dependency_scope = "module";
-            };
-            try self.response.definitions.append(self.arena, .{
-                .name = self.dupe(expectation.root),
-                .type = "Bool",
-                .region = .{ .start = expectation.start, .end = expectation.end },
-                .name_region = .{ .start = expectation.start, .end = expectation.start },
-                .dependencies = deps.items,
-                .references = &.{},
-                .rename_safe = false,
-            });
-            break;
-        }
-    }
-}
-const diag_vtable: runner.Diagnostics.VTable = .{ .write = writeFailure, .emitReport = emitReport };
 
 /// Serve one top-level request. The response is owned by the page allocator
 /// (the WASM allocator in the browser).
@@ -350,7 +142,7 @@ const Compiler = struct {
 fn processSource(engine: *Engine, bytes: []const u8) ![]u8 {
     var arena_impl = std.heap.ArenaAllocator.init(gpa);
     defer arena_impl.deinit();
-    var builder: ResponseBuilder = .{ .arena = arena_impl.allocator() };
+    var builder: ResponseBuilder = .init(arena_impl.allocator(), &engine.stats);
     const arena = builder.arena;
     const parsed = std.json.parseFromSlice(Request, arena, bytes, .{ .allocate = .alloc_always }) catch {
         builder.response.status = "protocol_error";
@@ -368,55 +160,31 @@ fn processSource(engine: *Engine, bytes: []const u8) ![]u8 {
         try engine.workspace.put(path, file.source, false);
     }
     builder.user_bytes = req.user_bytes;
-    builder.rich_output = req.rich_output;
-    var extras: std.ArrayList(runner.ExtraFile) = .empty;
-    try extras.appendSlice(arena, req.modules);
-    var trusted_display = true;
-    var supplied_display = false;
-    for (req.modules) |module| if (std.mem.eql(u8, module.name, "Display")) {
-        supplied_display = true;
-        trusted_display = std.mem.eql(u8, module.content, @embedFile("Display.roc"));
-    };
-    if (!supplied_display) {
-        const display_path = try std.mem.concat(arena, u8, &.{ engine.paths.extras_prefix, "Display.roc" });
-        const io = engine.workspace.io(arena);
-        const display_source = io.readFile(display_path, arena) catch null;
-        if (display_source) |content| {
-            trusted_display = std.mem.eql(u8, content, @embedFile("Display.roc"));
-            try extras.append(arena, .{ .name = "Display", .content = content });
-        } else try extras.append(arena, .{ .name = "Display", .content = @embedFile("Display.roc") });
-    }
-    // Only the checked, unaliased import of our bundled nominal type opts in.
-    // A local type called Display or a different supplied module stays ordinary.
-    if (trusted_display) {
-        const facts = try @import("syntax.zig").roc(arena, req.source[0..req.user_bytes]);
-        for (facts.statements) |statement| if (std.mem.eql(u8, statement.kind, "import")) {
-            var count: usize = 0;
-            var name: []const u8 = "";
-            for (facts.tokens) |token| if (token.start >= statement.start and token.end <= statement.end) {
-                if (count == 1) name = req.source[@intCast(token.start)..@intCast(token.end)];
-                count += 1;
-            };
-            if (count == 2 and std.mem.eql(u8, name, "Display")) builder.response.display_module = true;
-        };
-    }
-    if (is_wasm) try compiled_builtins.decompress();
-    if (req.notebook) |notebook| {
-        builder.expectations = notebook.expectations;
-        return builder.finish(engine, @import("notebook.zig").run(engine, .{
-            .source = req.source,
-            .app_header = req.app_header,
-            .extras = extras.items,
-            .paths = engine.paths,
-            .metadata = notebook,
+    builder.events.rich = req.rich_output;
+    const modules = try runner.programModules(arena, engine.workspace.io(arena), engine.paths.extras_prefix, req.modules, req.source[0..req.user_bytes]);
+    builder.response.display_module = modules.rich_support;
+    try runner.prepareBuiltins();
+    if (req.notebook) |metadata| {
+        var analyzed: ?*const analysis.Analysis = null;
+        const outcome = notebook.run(engine, .{
+            .inputs = .{
+                .program = req.source,
+                .app_header = req.app_header,
+                .extras = modules.extras,
+                .roots = metadata.roots,
+                .expectations = metadata.expectations,
+                .rich_support = modules.rich_support,
+                .paths = engine.paths,
+                .roc_target = runner.hostRocTarget(),
+            },
+            .metadata = metadata,
             .root = req.root,
-            .rich_support = builder.response.display_module,
-            .target_usize = if (is_wasm) .u32 else .native,
-            .roc_target = if (is_wasm) .wasm32 else @import("roc_target").RocTarget.detectNative(),
             .diagnostics = builder.diagnostics(),
-            .analyze = builder.analyzer(),
             .observer = builder.observer(),
-        }));
+            .analysis = &analyzed,
+        });
+        if (analyzed) |result| builder.setAnalysis(result);
+        return builder.finish(engine, outcome);
     }
     const runtime_buffer = try gpa.alignedAlloc(u8, .@"16", 256 * 1024 * 1024);
     defer gpa.free(runtime_buffer);
@@ -430,14 +198,14 @@ fn processSource(engine: *Engine, bytes: []const u8) ![]u8 {
         .source = req.source,
         .app_header = req.app_header,
         .root_name = req.root,
-        .extras = extras.items,
+        .extras = modules.extras,
         .diagnostics = builder.diagnostics(),
         .analyze = builder.analyzer(),
         .observer = builder.observer(),
         .args = req.args,
         .check_only = req.check_only,
-        .target_usize = if (is_wasm) .u32 else .native,
-        .roc_target = if (is_wasm) .wasm32 else @import("roc_target").RocTarget.detectNative(),
+        .target_usize = runner.host_target_usize,
+        .roc_target = runner.hostRocTarget(),
     }));
 }
 

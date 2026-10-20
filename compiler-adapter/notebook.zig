@@ -13,24 +13,36 @@ const host = @import("platform.zig");
 const workspace = @import("workspace.zig");
 const image = @import("image.zig");
 const Engine = @import("engine_state.zig").Engine;
+const dependency = @import("analysis.zig");
 const A = std.mem.Allocator;
 const gpa = if (builtin.cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator;
-pub const Expectation = struct { root: []const u8, start: u32, end: u32, cell: u64 = 0 };
+pub const Expectation = dependency.Expectation;
+pub const Module = engine.ExtraFile;
 pub const Metadata = struct { expectations: []const Expectation = &.{}, roots: []const []const u8, runtime_roots: []const []const u8 = &.{}, isolate_errors: bool = false };
-pub const Options = struct {
-    source: []const u8,
+/// Everything that determines the retained revision. Hashed once per request.
+pub const Inputs = struct {
+    /// The user program: notebook cells only, without `main!`.
+    program: []const u8,
+    /// The user app header (packages); may be empty.
     app_header: []const u8,
+    /// Supplied modules plus Display (`engine.programModules`).
     extras: []const engine.ExtraFile,
-    paths: engine.Paths,
-    metadata: Metadata,
-    root: ?[]const u8,
+    /// Every possible output and test root, in document order.
+    roots: []const []const u8,
+    /// Test roots with their byte spans in `program`.
+    expectations: []const Expectation,
+    /// Trusted `import Display` detected (`engine.programModules`).
     rich_support: bool,
-    target_usize: base.target.TargetUsize,
+    paths: engine.Paths,
+    target_usize: base.target.TargetUsize = engine.host_target_usize,
     roc_target: @import("roc_target").RocTarget,
+};
+/// One root's execution against a prepared revision.
+const Execution = struct {
+    root: []const u8,
+    target_usize: base.target.TargetUsize,
+    /// Receives the interpreter's runtime error message as the root failure.
     diagnostics: engine.Diagnostics,
-    analyze: engine.Analyzer,
-    /// The request observer; `run` attributes each execution to its root.
-    observer: host.Observer,
 };
 const Label = struct { root: []const u8, text: []const u8, value: []const u8, rich: bool = false };
 /// A retained revision, owned by `Engine.revision`.
@@ -54,6 +66,19 @@ pub const State = struct {
     image: ?image.Image = null,
     entry_names: []const []const u8 = &.{},
     cache_reported: compile.CacheStats = .{},
+    /// Length of the user program after `prefix`.
+    user_bytes: u32 = 0,
+    analysis_cache: ?dependency.Analysis = null,
+
+    /// The dependency analysis of this revision, computed on first use.
+    pub fn analysis(self: *State, stats: *engine.RequestStats) !*const dependency.Analysis {
+        if (self.analysis_cache == null) {
+            const app = self.build.?.getAppSemanticData().?;
+            self.analysis_cache = try dependency.analyze(self.revision_arena.allocator(), app.env, self.prefix, self.user_bytes, self.expectations);
+            stats.analyses += 1;
+        }
+        return &self.analysis_cache.?;
+    }
 
     fn deinit(self: *State) void {
         if (self.image) |*flat| flat.deinit(gpa);
@@ -77,23 +102,23 @@ pub const State = struct {
         defer scratch.deinit();
         for (self.reports) |module| for (module.reports) |*report| diag.emitReport(scratch.allocator(), report);
     }
-    fn prepare(self: *State, eng: *Engine, opts: Options) !void {
+    fn prepare(self: *State, eng: *Engine, opts: Inputs) !void {
         const a = self.revision_arena.allocator();
-        const expectations = try a.dupe(Expectation, opts.metadata.expectations);
+        const expectations = try a.dupe(Expectation, opts.expectations);
         for (expectations) |*expectation| expectation.root = try a.dupe(u8, expectation.root);
         self.expectations = expectations;
         self.expectation_expressions = try a.alloc(can.CIR.Expr.Idx, expectations.len);
         var output_count: usize = 0;
-        for (opts.metadata.roots) |root| if (!isExpectation(opts.metadata, root)) {
+        for (opts.roots) |root| if (!isExpectation(opts.expectations, root)) {
             output_count += 1;
         };
         self.labels = try a.alloc(Label, output_count);
         var source_hash: [32]u8 = undefined;
-        std.crypto.hash.sha2.Sha256.hash(opts.source, &source_hash, .{});
+        std.crypto.hash.sha2.Sha256.hash(opts.program, &source_hash, .{});
         const hash_text = std.fmt.bytesToHex(source_hash, .lower);
         var output_index: usize = 0;
-        for (opts.metadata.roots) |root| {
-            if (isExpectation(opts.metadata, root)) continue;
+        for (opts.roots) |root| {
+            if (isExpectation(opts.expectations, root)) continue;
             self.labels[output_index] = .{
                 .root = try a.dupe(u8, root),
                 .text = try std.fmt.allocPrint(a, "roclet_{s}_text_{s}", .{ hash_text, root }),
@@ -116,9 +141,10 @@ pub const State = struct {
         }
         try header.writer.writeAll(" }\n\nimport pf.Echo\n\n");
         self.prefix = @intCast(header.written().len);
+        self.user_bytes = @intCast(opts.program.len);
         var source: std.Io.Writer.Allocating = .init(a);
         try source.writer.writeAll(header.written());
-        try source.writer.writeAll(opts.source);
+        try source.writer.writeAll(opts.program);
         try source.writer.writeAll("\n\nmain! = |_args| Ok({})\necho! = |message| Echo.line!(message)\n");
         for (self.labels) |label| try source.writer.print("\n{s} = || Str.inspect({s})\n{s} = || {s}\n", .{ label.text, label.root, label.value, label.root });
         if (self.wire_name) |wire| try source.writer.print("\n{s} = |value| Display.to_wire(value)\n", .{wire});
@@ -135,7 +161,7 @@ pub const State = struct {
         build.defer_post_check = true;
         build.setPostCheckPublicationMode(.none);
         build.compile_time_root_event_callback = .{ .context = &self.capture, .notify = engine.DebugCapture.observe };
-        const owned_user_source = source.written()[self.prefix..][0..opts.source.len];
+        const owned_user_source = source.written()[self.prefix..][0..opts.program.len];
         build.setSyntheticRootSourceMappingWithLineOffset(std.fs.path.basename(opts.paths.app_abs), owned_user_source, self.prefix, @intCast(std.mem.count(u8, header.written(), "\n")));
         const cache = try a.create(compile.CacheManager);
         cache.* = compile.CacheManager.init(a, .{ .cache_dir = "/cache", .roc_ctx = fs.io() }, fs.io());
@@ -258,8 +284,8 @@ pub const State = struct {
         for (self.entry_names, 0..) |actual, i| if (std.mem.eql(u8, actual, name)) return @intCast(i);
         return error.EntrypointNotFound;
     }
-    fn execute(self: *State, std_io: std.Io, opts: Options, observer: host.Observer) !u8 {
-        const root = opts.root.?;
+    fn execute(self: *State, std_io: std.Io, opts: Execution, observer: host.Observer) !u8 {
+        const root = opts.root;
         var label: ?Label = null;
         for (self.labels) |candidate| if (std.mem.eql(u8, candidate.root, root)) {
             label = candidate;
@@ -294,7 +320,7 @@ pub const State = struct {
         if (expectation != null) {
             var passed: u8 = 0;
             _ = interpreter.runEntrypoint(&view, try self.ordinal(root), null, @ptrCast(&passed)) catch |err| {
-                observer.observe("test_failed", switch (err) {
+                observer.observe(.test_failed, switch (err) {
                     error.Crash => interpreter.getCrashMessage(),
                     error.ExpectErr => "An error propagated from the expect block",
                     else => interpreter.getRuntimeErrorMessage() orelse @errorName(err),
@@ -302,14 +328,14 @@ pub const State = struct {
                 return 1;
             };
             const ok = passed != 0 and !environment.inline_expect_failed;
-            observer.observe(if (ok) "test_passed" else "test_failed", if (ok) "Expectation passed" else "Expectation evaluated to False");
+            observer.observe(if (ok) .test_passed else .test_failed, if (ok) "Expectation passed" else "Expectation evaluated to False");
             return if (ok) 0 else 1;
         }
         const selected = label.?;
         var text: host.RocStr = undefined;
         _ = interpreter.runEntrypoint(&view, try self.ordinal(selected.text), null, @ptrCast(&text)) catch |err| return reportRuntime(&interpreter, opts.diagnostics, observer, err);
         defer text.decref(&ops);
-        observer.observe("value", text.asSlice());
+        observer.observe(.value, text.asSlice());
         if (selected.rich) {
             const value_ordinal = try self.ordinal(selected.value);
             const proc = view.store.getProcSpec(view.platform_entrypoints[value_ordinal].root_proc);
@@ -319,14 +345,14 @@ pub const State = struct {
             var wire: host.RocStr = undefined;
             _ = interpreter.runEntrypoint(&view, try self.ordinal(self.wire_name.?), value.ptr, @ptrCast(&wire)) catch |err| return reportRuntime(&interpreter, opts.diagnostics, observer, err);
             defer wire.decref(&ops);
-            observer.observe("value", wire.asSlice());
+            observer.observe(.value, wire.asSlice());
         }
         return if (environment.inline_expect_failed) 1 else 0;
     }
 };
-/// Run one notebook request against the engine's retained revision, preparing
-/// a new revision when the input key changed.
-pub fn run(eng: *Engine, opts: Options) !u8 {
+/// The engine's retained revision for `opts`, preparing a new one when the
+/// input key changed. Counts a `prepared_hits` when the retained one is reused.
+fn revision(eng: *Engine, opts: Inputs) !*State {
     const key = try inputKey(eng, opts);
     if (eng.revision != null and !std.mem.eql(u8, &eng.revision.?.key, &key)) {
         eng.revision.?.destroy();
@@ -340,20 +366,346 @@ pub fn run(eng: *Engine, opts: Options) !u8 {
         state.capture.allocator = state.revision_arena.allocator();
         errdefer state.deinit();
         try state.prepare(eng, opts);
+        // Preparing may install package bundles into the workspace; key the
+        // retained revision by the workspace it was actually built against.
         state.key = try inputKey(eng, opts);
         eng.revision = state;
     }
-    const state = eng.revision.?;
+    return eng.revision.?;
+}
+
+/// Options of the protocol-1 raw `notebook` request (the M0 `cells` adapter).
+pub const Options = struct {
+    inputs: Inputs,
+    metadata: Metadata,
+    root: ?[]const u8,
+    diagnostics: engine.Diagnostics,
+    /// The request observer; `run` attributes each execution to its root.
+    observer: host.Observer,
+    /// Receives the revision's dependency analysis when the check passes.
+    analysis: *?*const dependency.Analysis,
+};
+/// Run one raw notebook request against the engine's retained revision.
+pub fn run(eng: *Engine, opts: Options) !u8 {
+    const state = try revision(eng, opts.inputs);
     defer state.reportCache(&eng.stats);
     state.emitReports(opts.diagnostics);
     if (state.failed or (state.constant_failures and !opts.metadata.isolate_errors)) {
         for (opts.metadata.runtime_roots) |root| try state.capture.replay(state.build.?, root, opts.observer.forRoot(root));
         return error.CompilationFailed;
     }
-    opts.analyze.run(state.build.?.getAppSemanticData().?.env, state.prefix);
-    if (opts.root == null) return 0;
+    opts.analysis.* = try state.analysis(&eng.stats);
+    const root = opts.root orelse return 0;
     eng.stats.executions += 1;
-    return state.execute(eng.workspace.std_io, opts, opts.observer.forRoot(opts.root));
+    return state.execute(eng.workspace.std_io, .{ .root = root, .target_usize = opts.inputs.target_usize, .diagnostics = opts.diagnostics }, opts.observer.forRoot(root));
+}
+
+// --- Typed document evaluation ---
+
+pub const Region = dependency.Region;
+/// A checked definition attributed to the cell whose byte range contains it.
+pub const Definition = struct {
+    name: []const u8,
+    type: []const u8,
+    region: Region,
+    cell: ?[]const u8 = null,
+    name_region: ?Region = null,
+    dependencies: []const []const u8 = &.{},
+    references: []const Region = &.{},
+    rename_safe: bool = false,
+};
+pub const Event = struct { kind: host.EventKind, message: []const u8, root: []const u8, region: ?Region = null };
+pub const TestResult = struct { root: []const u8, passed: bool, message: []const u8 };
+pub const RootError = struct { root: []const u8, status: []const u8, failure: ?[]const u8 };
+pub const Value = struct {
+    root: []const u8,
+    text: []const u8,
+    /// The parsed Display wire of a rich root; absent when the wire was
+    /// truncated or malformed (the text result is kept).
+    display: ?std.json.Value = null,
+    pub fn jsonStringify(self: @This(), w: anytype) !void {
+        try w.beginObject();
+        try w.objectField("root");
+        try w.write(self.root);
+        try w.objectField("text");
+        try w.write(self.text);
+        if (self.display) |display| {
+            try w.objectField("display");
+            try w.write(display);
+        }
+        try w.endObject();
+    }
+};
+/// The protocol-1 evaluation result; fields in wire order.
+pub const Evaluation = struct {
+    protocol: u32 = 1,
+    requestId: []const u8 = "cli-1",
+    documentRevision: u64 = 1,
+    inputRevision: u64 = 0,
+    workerGeneration: u64 = 1,
+    status: []const u8 = "ok",
+    definitions: []const Definition = &.{},
+    dependency_scope: []const u8 = "module",
+    binders: []const []const u8 = &.{},
+    root_errors: []const RootError = &.{},
+    evaluated_roots: []const []const u8 = &.{},
+    values: []const Value = &.{},
+    tests: []const TestResult = &.{},
+    events: []const Event = &.{},
+    diagnostics: []const engine.Diagnostic = &.{},
+    failure: ?[]const u8 = null,
+};
+/// A byte range of the user program that definitions are attributed to.
+pub const CellRange = struct { key: []const u8, start: usize, end: usize };
+pub const Request = struct {
+    requestId: []const u8 = "cli-1",
+    documentRevision: u64 = 1,
+    inputRevision: u64 = 0,
+    workerGeneration: u64 = 1,
+    program: []const u8,
+    app_header: []const u8 = "",
+    /// Supplied modules, without the bundled Display module.
+    modules: []const engine.ExtraFile = &.{},
+    /// Every possible output and test root.
+    roots: []const []const u8,
+    expectations: []const Expectation = &.{},
+    cells: []const CellRange,
+    /// Roots whose compile-time observations are reported when checking fails.
+    failure_roots: []const []const u8 = &.{},
+    isolate_errors: bool = false,
+};
+pub const source_limit = 1024 * 1024;
+
+/// One request's view of the retained revision: checked once, analysed once
+/// per revision, then any number of roots executed against the same image.
+pub const Checked = struct {
+    eng: *Engine,
+    arena: A,
+    request: Request,
+    /// Null when checking failed or the request was rejected after checking.
+    state: ?*State,
+    rich_support: bool = false,
+    target_usize: base.target.TargetUsize = engine.host_target_usize,
+    evaluation: Evaluation,
+    values: std.ArrayList(Value) = .empty,
+    failures: std.ArrayList(RootError) = .empty,
+    evaluated_roots: std.ArrayList([]const u8) = .empty,
+    events: std.ArrayList(Event) = .empty,
+    tests: std.ArrayList(TestResult) = .empty,
+
+    /// Execute `roots` in order, each in a fresh interpreter. Without
+    /// `isolate_errors` the first failing output ends the evaluation and
+    /// discards the values gathered so far; failing tests never do.
+    pub fn evaluate(self: *Checked, roots: []const []const u8) !void {
+        try validateRoots(roots);
+        const state = self.state orelse return;
+        const result = &self.evaluation;
+        for (roots) |root| if (!self.defines(root)) {
+            result.status = "diagnostic";
+            result.failure = try std.fmt.allocPrint(self.arena, "Unknown output root: {s}", .{root});
+            self.state = null;
+            return;
+        };
+        for (roots) |root| {
+            try self.evaluated_roots.append(self.arena, root);
+            result.evaluated_roots = self.evaluated_roots.items;
+            var rich = false;
+            if (self.rich_support) for (result.definitions) |definition| {
+                if (std.mem.eql(u8, definition.name, root) and std.mem.eql(u8, definition.type, "Display")) rich = true;
+            };
+            var events: host.EventBuffer = .{ .arena = self.arena, .rich = rich };
+            var diagnostics: engine.DiagnosticList = .{ .arena = self.arena };
+            self.eng.stats.executions += 1;
+            const outcome = state.execute(self.eng.workspace.std_io, .{ .root = root, .target_usize = self.target_usize, .diagnostics = diagnostics.diagnostics() }, events.observer().forRoot(root));
+            var status: []const u8 = "ok";
+            var failure: ?[]const u8 = null;
+            const exit_code = outcome catch |err| code: {
+                status = "runtime_error";
+                failure = diagnostics.failure orelse @errorName(err);
+                break :code 0;
+            };
+            if (exit_code != 0) {
+                status = "runtime_error";
+                failure = diagnostics.failure;
+            }
+            if (events.failed or diagnostics.failed) return error.OutOfMemory;
+            const ok = std.mem.eql(u8, status, "ok");
+            if (isExpectation(self.request.expectations, root)) {
+                var passed = ok;
+                var message: []const u8 = if (passed) "Expectation passed" else failure orelse status;
+                for (events.events.items) |event| switch (event.kind) {
+                    .test_passed, .test_failed => {
+                        passed = event.kind == .test_passed;
+                        message = event.message;
+                    },
+                    else => try self.events.append(self.arena, .{ .kind = event.kind, .message = event.message, .root = root }),
+                };
+                try self.tests.append(self.arena, .{ .root = root, .passed = passed, .message = message });
+                result.tests = self.tests.items;
+                result.events = self.events.items;
+                if (!passed) try self.failures.append(self.arena, .{ .root = root, .status = "test_failed", .failure = message });
+                // Assertion failures do not discard independent notebook results.
+                continue;
+            }
+            var wire: ?[]const u8 = null;
+            var text: ?[]const u8 = null;
+            var value_count: usize = 0;
+            for (events.events.items) |event| {
+                if (event.kind == .value) {
+                    if (value_count == 0) text = event.message else wire = event.message;
+                    value_count += 1;
+                } else try self.events.append(self.arena, .{ .kind = event.kind, .message = event.message, .root = root });
+            }
+            result.events = self.events.items;
+            if (!ok) {
+                result.status = status;
+                result.failure = failure;
+                if (!self.request.isolate_errors) return self.stop();
+                try self.failures.append(self.arena, .{ .root = root, .status = status, .failure = failure });
+                continue;
+            }
+            if (value_count != @as(usize, if (rich) 2 else 1)) {
+                result.status = "runtime_error";
+                result.failure = "Expected exactly one designated result; platform effects are unsupported";
+                if (!self.request.isolate_errors) return self.stop();
+                try self.failures.append(self.arena, .{ .root = root, .status = result.status, .failure = result.failure });
+                continue;
+            }
+            const display = if (rich and wire != null) std.json.parseFromSliceLeaky(std.json.Value, self.arena, wire.?, .{ .allocate = .alloc_always }) catch null else null;
+            // A truncated/invalid rich payload never discards the already evaluated text.
+            try self.values.append(self.arena, .{ .root = root, .text = text.?, .display = display });
+        }
+        result.values = self.values.items;
+        result.root_errors = self.failures.items;
+        if (self.failures.items.len > 0) result.status = "partial";
+    }
+    /// An atomic failure: no values or root errors, no further roots.
+    fn stop(self: *Checked) void {
+        self.state = null;
+    }
+    fn defines(self: *Checked, name: []const u8) bool {
+        for (self.evaluation.definitions) |definition| if (std.mem.eql(u8, definition.name, name)) return true;
+        return false;
+    }
+};
+
+/// Check `request` against the engine's retained revision (preparing a new
+/// one when its inputs changed) and analyse it. Rejected snapshots return an
+/// error; compiler failures are reported in `evaluation`.
+pub fn checkDocument(eng: *Engine, arena: A, request: Request) !Checked {
+    for (request.roots, 0..) |root, i| {
+        if (!identifier(root, false)) return error.InvalidRoot;
+        for (request.roots[0..i]) |previous| if (std.mem.eql(u8, previous, root)) return error.DuplicateRoot;
+    }
+    for (request.modules, 0..) |module, i| {
+        if (!identifier(module.name, true)) return error.InvalidModule;
+        for (request.modules[0..i]) |previous| if (std.mem.eql(u8, previous.name, module.name)) return error.DuplicateModule;
+    }
+    if (request.program.len >= source_limit) return error.SourceTooLarge;
+    var checked: Checked = .{ .eng = eng, .arena = arena, .request = request, .state = null, .evaluation = .{
+        .requestId = request.requestId,
+        .documentRevision = request.documentRevision,
+        .inputRevision = request.inputRevision,
+        .workerGeneration = request.workerGeneration,
+        .dependency_scope = "definitions",
+    } };
+    const result = &checked.evaluation;
+    try engine.prepareBuiltins();
+    const modules = try engine.programModules(arena, eng.workspace.io(arena), eng.paths.extras_prefix, request.modules, request.program);
+    checked.rich_support = modules.rich_support;
+    var diagnostics: engine.DiagnosticList = .{ .arena = arena };
+    const inputs: Inputs = .{
+        .program = request.program,
+        .app_header = request.app_header,
+        .extras = modules.extras,
+        .roots = request.roots,
+        .expectations = request.expectations,
+        .rich_support = modules.rich_support,
+        .paths = eng.paths,
+        .roc_target = engine.hostRocTarget(),
+    };
+    checked.target_usize = inputs.target_usize;
+    const state = revision(eng, inputs) catch |err| {
+        result.status = failureStatus(err);
+        result.failure = diagnostics.failure orelse @errorName(err);
+        return checked;
+    };
+    state.reportCache(&eng.stats);
+    state.emitReports(diagnostics.diagnostics());
+    result.diagnostics = diagnostics.items.items;
+    if (state.failed or (state.constant_failures and !request.isolate_errors)) {
+        var events: host.EventBuffer = .{ .arena = arena };
+        var replayed = true;
+        for (request.failure_roots) |root| state.capture.replay(state.build.?, root, events.observer().forRoot(root)) catch |err| {
+            result.status = "runtime_error";
+            result.failure = diagnostics.failure orelse @errorName(err);
+            replayed = false;
+            break;
+        };
+        if (replayed) {
+            result.status = "diagnostic";
+            result.failure = diagnostics.failure orelse "CompilationFailed";
+        }
+        if (events.failed or diagnostics.failed) return error.OutOfMemory;
+        const fallback: []const u8 = if (request.failure_roots.len > 0) request.failure_roots[0] else "";
+        const captured = try arena.alloc(Event, events.events.items.len);
+        for (captured, events.events.items) |*out, event| out.* = .{ .kind = event.kind, .message = event.message, .root = event.root orelse fallback };
+        result.events = captured;
+        return checked;
+    }
+    const analyzed = try state.analysis(&eng.stats);
+    if (diagnostics.failed) return error.OutOfMemory;
+    const definitions = try arena.alloc(Definition, analyzed.definitions.len);
+    for (definitions, analyzed.definitions) |*out, definition| {
+        out.* = .{
+            .name = definition.name,
+            .type = definition.type,
+            .region = definition.region,
+            .name_region = definition.name_region,
+            .dependencies = definition.dependencies,
+            .references = definition.references,
+            .rename_safe = definition.rename_safe,
+        };
+        for (request.cells) |cell| if (definition.region.start >= cell.start and definition.region.end <= cell.end) {
+            out.cell = cell.key;
+            break;
+        };
+    }
+    result.definitions = definitions;
+    result.dependency_scope = @tagName(analyzed.dependency_scope);
+    result.binders = analyzed.binders;
+    var names: std.StringHashMapUnmanaged(void) = .empty;
+    for (definitions) |definition| {
+        if ((try names.getOrPut(arena, definition.name)).found_existing) {
+            result.status = "diagnostic";
+            result.failure = try std.fmt.allocPrint(arena, "Duplicate notebook binding: {s}", .{definition.name});
+            return checked;
+        }
+    }
+    checked.state = state;
+    return checked;
+}
+
+/// Protocol-1 status of a failed check or execution.
+fn failureStatus(err: anytype) []const u8 {
+    return switch (err) {
+        error.CompilationFailed => "diagnostic",
+        else => "runtime_error",
+    };
+}
+fn validateRoots(roots: []const []const u8) !void {
+    for (roots, 0..) |root, i| {
+        if (!identifier(root, false)) return error.InvalidRoot;
+        for (roots[0..i]) |previous| if (std.mem.eql(u8, previous, root)) return error.DuplicateRoot;
+    }
+}
+pub fn identifier(name: []const u8, module: bool) bool {
+    if (name.len == 0) return false;
+    if (module) {
+        if (!std.ascii.isUpper(name[0])) return false;
+    } else if (!std.ascii.isLower(name[0])) return false;
+    for (name[1..]) |c| if (!std.ascii.isAlphanumeric(c) and c != '_') return false;
+    return true;
 }
 fn appendRoot(a: A, env: *can.ModuleEnv, exported: []const check.CheckedArtifact.RootRequest, name: []const u8, roots: *std.ArrayList(check.CheckedArtifact.RootRequest), names: *std.ArrayList([]const u8)) !void {
     for (exported) |request| {
@@ -369,27 +721,27 @@ fn appendRoot(a: A, env: *can.ModuleEnv, exported: []const check.CheckedArtifact
 }
 fn reportRuntime(interpreter: *eval.LirInterpreter, diagnostics: engine.Diagnostics, observer: host.Observer, err: (eval.LirInterpreter.Error || error{EntrypointNotFound})) error{EvaluationFailed} {
     switch (err) {
-        error.Crash => observer.observe("crashed", interpreter.getCrashMessage()),
+        error.Crash => observer.observe(.crashed, interpreter.getCrashMessage()),
         else => if (interpreter.getRuntimeErrorMessage()) |message| diagnostics.write(message),
     }
     return error.EvaluationFailed;
 }
 
-fn inputKey(eng: *Engine, opts: Options) ![32]u8 {
+fn inputKey(eng: *Engine, opts: Inputs) ![32]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
     const field = workspace.hashField;
     field(&hash, "roclet-notebook-v1");
-    field(&hash, opts.source);
+    field(&hash, opts.program);
     field(&hash, opts.app_header);
     field(&hash, opts.paths.app_abs);
     field(&hash, &.{ @intFromBool(opts.rich_support), @intCast(@backingInt(opts.target_usize)) });
     field(&hash, "roots");
     var count: [8]u8 = undefined;
-    std.mem.writeInt(u64, &count, opts.metadata.roots.len, .little);
+    std.mem.writeInt(u64, &count, opts.roots.len, .little);
     hash.update(&count);
-    for (opts.metadata.roots) |root| field(&hash, root);
+    for (opts.roots) |root| field(&hash, root);
     field(&hash, "expectations");
-    for (opts.metadata.expectations) |expectation| {
+    for (opts.expectations) |expectation| {
         field(&hash, expectation.root);
         var span: [8]u8 = undefined;
         std.mem.writeInt(u32, span[0..4], expectation.start, .little);
@@ -411,7 +763,7 @@ fn inputKey(eng: *Engine, opts: Options) ![32]u8 {
     return key;
 }
 
-fn isExpectation(metadata: Metadata, root: []const u8) bool {
-    for (metadata.expectations) |expectation| if (std.mem.eql(u8, expectation.root, root)) return true;
+fn isExpectation(expectations: []const Expectation, root: []const u8) bool {
+    for (expectations) |expectation| if (std.mem.eql(u8, expectation.root, root)) return true;
     return false;
 }

@@ -159,3 +159,137 @@ test "a revision's image is reported and grows its buffer only when it must" {
     try std.testing.expectEqual(@as(i64, 0), reused.counter("image_bytes"));
     try std.testing.expectEqual(@as(i64, 0), reused.counter("image_retries"));
 }
+
+const notebook = bridge.notebook;
+
+/// A typed document request over `program`: every `out_*` binding is an
+/// output root, and the single `expect` statement is the test root.
+fn typedRequest(a: std.mem.Allocator, program: []const u8, roots: []const []const u8, isolate_errors: bool) !notebook.Request {
+    var expectations: []const notebook.Expectation = &.{};
+    if (std.mem.find(u8, program, "expect")) |start| {
+        const end = std.mem.findScalarPos(u8, program, start, '\n') orelse program.len;
+        expectations = try a.dupe(notebook.Expectation, &.{.{ .root = "roclet_expect_1", .start = @intCast(start), .end = @intCast(end) }});
+    }
+    return .{
+        .program = program,
+        .roots = roots,
+        .expectations = expectations,
+        .cells = try a.dupe(notebook.CellRange, &.{.{ .key = "document", .start = 0, .end = program.len }}),
+        .isolate_errors = isolate_errors,
+    };
+}
+
+test "typed evaluation checks, analyses and lowers once for every root" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const program = "a = 1\n\nout_1 = a + 1\n\nout_2 = {\n    dbg a\n    a + 2\n}\n\nexpect a == 1\n";
+    const roots: []const []const u8 = &.{ "out_1", "out_2", "roclet_expect_1" };
+    engine.beginRequest();
+    var checked = try notebook.checkDocument(&engine, arena.allocator(), try typedRequest(arena.allocator(), program, roots, false));
+    try std.testing.expectEqualStrings("ok", checked.evaluation.status);
+    try std.testing.expectEqualStrings("definitions", checked.evaluation.dependency_scope);
+    try checked.evaluate(roots);
+    const result = checked.evaluation;
+    try std.testing.expect(!platform.rocOpsActive());
+    try std.testing.expectEqualStrings("ok", result.status);
+    try std.testing.expectEqual(@as(u64, 1), engine.stats.frontend_builds);
+    try std.testing.expectEqual(@as(u64, 1), engine.stats.lowerings);
+    try std.testing.expectEqual(@as(u64, 1), engine.stats.analyses);
+    try std.testing.expectEqual(@as(u64, 3), engine.stats.executions);
+    try std.testing.expectEqual(@as(u64, 0), engine.stats.prepared_hits);
+    try std.testing.expectEqual(roots.len, result.evaluated_roots.len);
+    for (roots, result.evaluated_roots) |expected, actual| try std.testing.expectEqualStrings(expected, actual);
+    try std.testing.expectEqual(@as(usize, 2), result.values.len);
+    try std.testing.expectEqualStrings("2.0", result.values[0].text);
+    try std.testing.expectEqualStrings("3.0", result.values[1].text);
+    try std.testing.expectEqual(@as(usize, 1), result.tests.len);
+    try std.testing.expect(result.tests[0].passed);
+    try std.testing.expectEqual(@as(usize, 1), result.events.len);
+    try std.testing.expectEqual(platform.EventKind.dbg, result.events[0].kind);
+    try std.testing.expectEqualStrings("out_2", result.events[0].root);
+    for (result.definitions) |definition| try std.testing.expectEqualStrings("document", definition.cell.?);
+
+    // A second request against the same inputs reuses the revision and its analysis.
+    engine.beginRequest();
+    var again = try notebook.checkDocument(&engine, arena.allocator(), try typedRequest(arena.allocator(), program, roots, false));
+    try again.evaluate(roots[0..1]);
+    try std.testing.expectEqualStrings("ok", again.evaluation.status);
+    try std.testing.expectEqual(@as(u64, 0), engine.stats.frontend_builds);
+    try std.testing.expectEqual(@as(u64, 0), engine.stats.lowerings);
+    try std.testing.expectEqual(@as(u64, 0), engine.stats.analyses);
+    try std.testing.expectEqual(@as(u64, 1), engine.stats.executions);
+    try std.testing.expectEqual(@as(u64, 1), engine.stats.prepared_hits);
+}
+
+test "typed evaluation isolates a crashing root or fails the revision" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const program = "out_good = 42\n\nout_bad = {\n    crash \"boom\"\n    0\n}\n";
+    const roots: []const []const u8 = &.{ "out_good", "out_bad" };
+    var isolated = try notebook.checkDocument(&engine, arena.allocator(), try typedRequest(arena.allocator(), program, roots, true));
+    try isolated.evaluate(roots);
+    try std.testing.expectEqualStrings("partial", isolated.evaluation.status);
+    try std.testing.expectEqual(@as(usize, 1), isolated.evaluation.values.len);
+    try std.testing.expectEqualStrings("out_good", isolated.evaluation.values[0].root);
+    try std.testing.expectEqual(@as(usize, 1), isolated.evaluation.root_errors.len);
+    try std.testing.expectEqualStrings("out_bad", isolated.evaluation.root_errors[0].root);
+    try std.testing.expectEqualStrings("runtime_error", isolated.evaluation.root_errors[0].status);
+
+    // Without isolation a constant crash fails the whole revision: no values.
+    var request = try typedRequest(arena.allocator(), program, roots, false);
+    request.failure_roots = roots;
+    var atomic = try notebook.checkDocument(&engine, arena.allocator(), request);
+    try atomic.evaluate(roots);
+    try std.testing.expectEqualStrings("diagnostic", atomic.evaluation.status);
+    try std.testing.expectEqual(@as(usize, 0), atomic.evaluation.values.len);
+    try std.testing.expectEqual(@as(usize, 0), atomic.evaluation.evaluated_roots.len);
+    try std.testing.expectEqual(@as(usize, 0), atomic.evaluation.definitions.len);
+}
+
+test "event buffer keeps protocol-1 observation bounds" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var many: platform.EventBuffer = .{ .arena = a };
+    for (0..1001) |_| many.observe(.dbg, "x", "out_1");
+    // 1,000 observations, then the single marker; the 1,001st is dropped.
+    try std.testing.expectEqual(@as(usize, 1001), many.events.items.len);
+    try std.testing.expectEqual(platform.EventKind.truncated, many.events.items[1000].kind);
+    for (many.events.items[0..1000]) |event| try std.testing.expectEqualStrings("out_1", event.root.?);
+    // Designated values are never dropped, even past the event limit.
+    many.observe(.value, "42", "out_1");
+    try std.testing.expectEqualStrings("42", many.events.items[1001].message);
+
+    var long: platform.EventBuffer = .{ .arena = a };
+    const message = try a.alloc(u8, 70 * 1024);
+    @memset(message, 'a');
+    long.observe(.dbg, message, null);
+    try std.testing.expectEqual(platform.EventKind.truncated, long.events.items[0].kind);
+    try std.testing.expectEqual(@as(usize, 64 * 1024), long.events.items[1].message.len);
+    long.observe(.dbg, message, null);
+    try std.testing.expectEqual(@as(usize, 3), long.events.items.len);
+
+    // A cut never splits a UTF-8 sequence: "é" straddles the 64 KiB boundary.
+    var utf8: platform.EventBuffer = .{ .arena = a };
+    const accented = try a.alloc(u8, 64 * 1024 + 1);
+    @memset(accented, 'a');
+    accented[64 * 1024 - 1] = 0xc3;
+    accented[64 * 1024] = 0xa9;
+    utf8.observe(.dbg, accented, null);
+    try std.testing.expectEqual(@as(usize, 64 * 1024 - 1), utf8.events.items[1].message.len);
+    try std.testing.expect(std.unicode.utf8ValidateSlice(utf8.events.items[1].message));
+
+    // A rich root's second designated value (its Display wire) may use 512 KiB.
+    var rich: platform.EventBuffer = .{ .arena = a, .rich = true };
+    const wire = try a.alloc(u8, 600 * 1024);
+    @memset(wire, 'w');
+    rich.observe(.value, wire[0 .. 70 * 1024], null);
+    rich.observe(.value, wire, null);
+    try std.testing.expectEqual(@as(usize, 64 * 1024), rich.events.items[1].message.len);
+    try std.testing.expectEqual(@as(usize, 512 * 1024), rich.events.items[2].message.len);
+    try std.testing.expectEqual(@as(usize, 3), rich.events.items.len);
+}

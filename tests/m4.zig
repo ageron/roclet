@@ -19,6 +19,16 @@ fn equal(a: std.mem.Allocator, expected: V, actual: V) !void {
         return error.M4Mismatch;
     }
 }
+/// One dependency analysis per checked request, however many roots it runs
+/// (each native call is a fresh engine, so its revision is always new).
+fn expectAnalysedOnce(response: V) !void {
+    const expected: i64 = if (response.object.get("graph") != null) 1 else 0;
+    const actual = get(get(response, "workspaceCache"), "analyses").integer;
+    if (actual != expected) {
+        std.debug.print("Expected {d} analyses, got {d}\n", .{ expected, actual });
+        return error.M4AnalysisCount;
+    }
+}
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
     const args = try init.minimal.args.toSlice(a);
@@ -34,15 +44,18 @@ pub fn main(init: std.process.Init) !void {
         var request = try value(a, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = get(w, "before"), .isolateErrors = true });
         if (w.object.get("modules")) |m| try request.object.put(a, "modules", m);
         const before = try suite.call(try std.mem.concat(a, u8, &.{ name, "/before" }), request);
+        try expectAnalysedOnce(before);
         try equal(a, try value(a, "ok"), get(before, "status"));
         try request.object.put(a, "source", get(w, "after"));
         if (w.object.get("afterModules")) |m| try request.object.put(a, "modules", m);
         const full = try suite.call(try std.mem.concat(a, u8, &.{ name, "/full" }), request);
+        try expectAnalysedOnce(full);
         var available: std.ArrayList(V) = .empty;
         for (get(get(before, "evaluation"), "values").array.items) |v| try available.append(a, get(v, "root"));
         const graph = get(before, "graph");
         try request.object.put(a, "reactivity", try value(a, .{ .known = true, .previous = graph, .current = graph, .available = available.items, .roots = &[_]V{}, .force = &[_]V{} }));
         const selective = try suite.call(try std.mem.concat(a, u8, &.{ name, "/selective" }), request);
+        try expectAnalysedOnce(selective);
         try equal(a, get(full, "status"), get(selective, "status"));
         if (selective.object.get("graph") == null) continue;
         const plan = get(selective, "plan");

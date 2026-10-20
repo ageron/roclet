@@ -69,11 +69,137 @@ pub const Diagnostics = struct {
     }
 };
 
+/// A rendered compiler report, serialised as a protocol-1 diagnostic.
+pub const Diagnostic = struct {
+    title: []const u8,
+    severity: []const u8,
+    message: []const u8,
+    filename: ?[]const u8 = null,
+    location: ?struct { start_line: u32, start_column: u32, end_line: u32, end_column: u32 } = null,
+};
+
+/// Collects one request's diagnostics: every report rendered as Markdown, and
+/// the last free-form message as the request `failure`.
+pub const DiagnosticList = struct {
+    arena: Allocator,
+    items: std.ArrayList(Diagnostic) = .empty,
+    failure: ?[]const u8 = null,
+    /// An allocation failed inside a callback that cannot return an error.
+    failed: bool = false,
+
+    pub fn diagnostics(self: *DiagnosticList) Diagnostics {
+        return .{ .ctx = self, .vtable = &list_vtable };
+    }
+    const list_vtable: Diagnostics.VTable = .{ .write = writeFailure, .emitReport = renderReport };
+    fn from(ctx: ?*anyopaque) *DiagnosticList {
+        return @ptrCast(@alignCast(ctx orelse unreachable));
+    }
+    fn dupe(self: *DiagnosticList, bytes: []const u8) []const u8 {
+        return self.arena.dupe(u8, bytes) catch {
+            self.failed = true;
+            return "";
+        };
+    }
+    fn writeFailure(ctx: ?*anyopaque, message: []const u8) void {
+        const self = from(ctx);
+        self.failure = self.dupe(message);
+    }
+    fn renderReport(ctx: ?*anyopaque, _: Allocator, report: *reporting.Report) void {
+        const self = from(ctx);
+        var writer: std.Io.Writer.Allocating = .init(self.arena);
+        defer writer.deinit();
+        reporting.renderReport(report, &writer.writer, .markdown) catch {
+            self.failed = true;
+            return;
+        };
+        const loc = report.getRegionInfo();
+        var filename: ?[]const u8 = null;
+        for (report.document.elements.items) |element| {
+            const file = switch (element) {
+                .source_code_region => |r| r.filename,
+                .source_code_with_underlines => |r| r.display_region.filename,
+                .source_code_multi_region => |r| r.filename,
+                else => null,
+            };
+            if (file) |name| {
+                filename = self.dupe(name);
+                break;
+            }
+        }
+        self.items.append(self.arena, .{
+            .title = self.dupe(report.title),
+            .severity = if (report.severity.isError()) "error" else "warning",
+            .message = self.dupe(writer.written()),
+            .filename = filename,
+            .location = if (loc) |r| .{
+                .start_line = r.start_line_idx,
+                .start_column = r.start_col_idx,
+                .end_line = r.end_line_idx,
+                .end_column = r.end_col_idx,
+            } else null,
+        }) catch {
+            self.failed = true;
+        };
+    }
+};
+
 /// A user-supplied module file (e.g. `Greeting.roc`).
 pub const ExtraFile = struct {
     name: []const u8,
     content: []const u8,
 };
+
+/// The modules a program compiles against, and whether it may use rich output.
+pub const ProgramModules = struct { extras: []const ExtraFile, rich_support: bool };
+
+/// Add the bundled `Display` module unless the request or the workspace
+/// supplies one, and decide rich output support once per request: only the
+/// checked, unaliased `import Display` of the byte-identical bundled module
+/// opts in. A local type called Display or a different module stays ordinary.
+pub fn programModules(arena: Allocator, workspace_io: Io, extras_prefix: []const u8, supplied: []const ExtraFile, user_source: []const u8) !ProgramModules {
+    const bundled = @embedFile("Display.roc");
+    var extras: std.ArrayList(ExtraFile) = .empty;
+    try extras.appendSlice(arena, supplied);
+    var trusted_display = true;
+    var supplied_display = false;
+    for (supplied) |module| if (std.mem.eql(u8, module.name, "Display")) {
+        supplied_display = true;
+        trusted_display = std.mem.eql(u8, module.content, bundled);
+    };
+    if (!supplied_display) {
+        const display_path = try std.mem.concat(arena, u8, &.{ extras_prefix, "Display.roc" });
+        const display_source = workspace_io.readFile(display_path, arena) catch null;
+        if (display_source) |content| {
+            trusted_display = std.mem.eql(u8, content, bundled);
+            try extras.append(arena, .{ .name = "Display", .content = content });
+        } else try extras.append(arena, .{ .name = "Display", .content = bundled });
+    }
+    var rich_support = false;
+    if (trusted_display) {
+        const facts = try @import("syntax.zig").roc(arena, user_source);
+        for (facts.statements) |statement| if (std.mem.eql(u8, statement.kind, "import")) {
+            var count: usize = 0;
+            var name: []const u8 = "";
+            for (facts.tokens) |token| if (token.start >= statement.start and token.end <= statement.end) {
+                if (count == 1) name = user_source[@intCast(token.start)..@intCast(token.end)];
+                count += 1;
+            };
+            if (count == 2 and std.mem.eql(u8, name, "Display")) rich_support = true;
+        };
+    }
+    return .{ .extras = extras.items, .rich_support = rich_support };
+}
+
+/// The engine's own execution target: wasm32 in the browser, the host natively.
+pub const host_target_usize: base.target.TargetUsize = if (@import("builtin").cpu.arch == .wasm32) .u32 else .native;
+pub fn hostRocTarget() RocTarget {
+    return if (comptime @import("builtin").cpu.arch == .wasm32) .wasm32 else RocTarget.detectNative();
+}
+
+/// Decode the embedded builtins before the first compilation (WASM only).
+pub fn prepareBuiltins() !void {
+    if (comptime @import("builtin").cpu.arch == .wasm32) try @import("compiled_builtins").decompress();
+}
 
 fn countNewlines(bytes: []const u8) u32 {
     var count: u32 = 0;
@@ -385,7 +511,7 @@ fn runEchoView(
             return error.EvaluationFailed;
         },
         error.Crash => {
-            if (observer) |sink| sink.observe("crashed", interpreter.getCrashMessage());
+            if (observer) |sink| sink.observe(.crashed, interpreter.getCrashMessage());
             return error.EvaluationFailed;
         },
         error.ComptimeExhaustiveness => {
@@ -725,7 +851,7 @@ pub const DebugCapture = struct {
                         }
                     }
                 }
-                if (include) if (observer) |sink| sink.observe("dbg", event.message);
+                if (include) if (observer) |sink| sink.observe(.dbg, event.message);
                 break;
             }
         }
@@ -743,13 +869,15 @@ pub const RequestStats = struct {
     image_bytes: u64 = 0,
     /// Image buffer doublings this request (see image.zig).
     image_retries: u64 = 0,
+    /// Dependency analyses computed (at most one per revision or script run).
+    analyses: u64 = 0,
     pub fn jsonStringify(self: @This(), w: anytype) !void {
         try w.beginObject();
         inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |name| {
             try w.objectField(name);
             try w.write(@field(self.cache, name));
         }
-        inline for (.{ "frontend_builds", "lowerings", "executions", "prepared_hits", "image_bytes", "image_retries" }) |name| {
+        inline for (.{ "frontend_builds", "lowerings", "executions", "prepared_hits", "image_bytes", "image_retries", "analyses" }) |name| {
             try w.objectField(name);
             try w.write(@field(self, name));
         }
