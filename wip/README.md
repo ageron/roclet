@@ -125,7 +125,7 @@ deferred to one final validation pass when the PR is ready.
 | 06 steps A–D (JS, tests, build wiring), G | Merged (`plan/06a-retire-legacy-js`) |
 | 04 engine struct | Merged (`plan/04-engine-struct`) |
 | 01 typed pipeline | In progress |
-| 05 image buffer (notebook.zig; `runEcho` after 01) | In progress |
+| 05 image buffer, steps 1–5, 7, 8 | Merged (`plan/05-image-buffer`); step 6 (`runEcho`) waits for 01 |
 | 02, 03, 06 steps E–F | Not started |
 
 ### Deferred final validation (LLVM)
@@ -140,3 +140,12 @@ deferred to one final validation pass when the PR is ready.
   `js_echo` branch now reads `ops.env`); `test-engine` under LLVM ReleaseFast;
   workspaceCache counters unchanged in the benchmark (1 frontend build, 1
   lowering, 2 executions per warm edit).
+- Plan 05: first LLVM WASM link and run of the image path (`rawAlloc` on the
+  wasm allocator, 1 MiB first buffer, `roclet_options` import);
+  `zig build test -Dimage-initial-bytes=65536`; `zig build -Doptimize=Debug`
+  then `zig-out/bin/roclet run demos/04-meeting-windows.roc` (expect ok, six
+  values, two passing tests); benchmark `imageRetriesMedian == 0`, warm Wall
+  Area `memoryBytesMedian` at most half the baseline measured at `4cd70fb`,
+  the 256 MiB `maxWallMemoryBytes` bound (chosen without a browser
+  measurement), timings within 10 %; add a memory column to the
+  `docs/compiler-workspace.md` measurements table.
