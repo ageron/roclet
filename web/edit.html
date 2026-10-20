@@ -21,8 +21,7 @@
   try { const saved = localStorage.getItem(key); if (allowed.includes(saved)) preference = saved; } catch {}
   const apply = () => {
     document.documentElement.dataset.theme = preference === 'system' ? (system.matches ? 'dark' : 'light') : preference;
-    const picker = document.getElementById('theme');
-    if (picker) picker.value = preference;
+    for (const button of document.querySelectorAll('#theme button[data-theme]')) button.setAttribute('aria-pressed', button.dataset.theme === preference);
   };
   apply();
   system.addEventListener('change', apply);
@@ -34,8 +33,10 @@
   addEventListener('DOMContentLoaded', () => {
     document.getElementById('startup-reload').onclick = () => location.reload();
     apply();
-    document.getElementById('theme').addEventListener('change', event => {
-      preference = event.target.value; apply();
+    document.getElementById('theme').addEventListener('click', event => {
+      const button = event.target.closest('button[data-theme]');
+      if (!button) return;
+      preference = button.dataset.theme; apply();
       try { localStorage.setItem(key, preference); } catch {}
     });
   });
@@ -63,7 +64,9 @@
 .header-menus > .popover > summary { padding:.2rem .5rem; font-size:.82rem; }
 .header-menus .menu-panel { left:0; right:auto; top:calc(100% + 5px); }
 .run-actions { grid-column:3; grid-row:1; display:flex; align-items:center; justify-content:flex-end; gap:.6rem; white-space:nowrap; } #run { color:var(--accent); } .auto-label { font-size:.8rem; color:var(--muted); display:flex; align-items:center; gap:.35rem; } input[type=checkbox] { accent-color:var(--accent); } .stop { color:var(--error); border-color:var(--error); }
-.popover { position:relative; } summary { list-style:none; font-size:.87rem; white-space:nowrap; } summary::-webkit-details-marker { display:none; } .menu-panel { position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:254px; padding:.45rem; background:var(--page); border:1px solid var(--line); border-radius:9px; box-shadow:0 8px 30px #3520431c; font-size:.85rem; } .menu-panel button,.menu-panel a,.menu-panel .file-label { display:flex; width:100%; text-align:left; justify-content:space-between; align-items:center; padding:.6rem .7rem; text-decoration:none; } .menu-panel label { display:block; padding:.6rem .7rem; color:var(--muted); } .menu-panel select { margin-top:.4rem; width:100%; max-width:100%; } select { background:var(--page); color:inherit; border:1px solid var(--line); border-radius:5px; padding:.4rem; } .menu-panel p { color:var(--muted); line-height:1.55; font-size:.78rem; margin:.6rem .7rem; } .menu-divider { border-top:1px solid var(--line); margin:.3rem; } .file-label { position:relative; cursor:pointer; } .file-label:focus-within { outline:2px solid var(--focus); } .file-label input { position:absolute; width:1px; height:1px; opacity:0; } button[aria-pressed=true] { color:var(--accent); background:var(--hover); }
+.popover { position:relative; } summary { list-style:none; font-size:.87rem; white-space:nowrap; } summary::-webkit-details-marker { display:none; } .menu-panel { position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:254px; display:flex; flex-direction:column; gap:2px; padding:8px; max-height:calc(100dvh - 90px); overflow-y:auto; overscroll-behavior:contain; background:var(--page); border:1px solid var(--line); border-radius:9px; box-shadow:0 8px 30px #3520431c; font-size:.85rem; } .menu-panel button,.menu-panel a,.menu-panel .file-label { display:flex; width:100%; text-align:left; justify-content:space-between; align-items:center; padding:.6rem .7rem; text-decoration:none; } .menu-panel label { display:block; padding:.6rem .7rem; color:var(--muted); } .menu-panel select { margin-top:.4rem; width:100%; max-width:100%; } select { background:var(--page); color:inherit; border:1px solid var(--line); border-radius:5px; padding:.4rem; } .menu-panel p { color:var(--muted); line-height:1.55; font-size:.78rem; margin:.6rem .7rem; } .menu-divider { border-top:1px solid var(--line); margin:.3rem; } .file-label { position:relative; cursor:pointer; } .file-label:focus-within { outline:2px solid var(--focus); } .file-label input { position:absolute; width:1px; height:1px; opacity:0; } button[aria-pressed=true] { color:var(--accent); background:var(--hover); }
+.menu-group { padding:.4rem .7rem; } .menu-label { display:block; margin-bottom:.5rem; color:var(--muted); font-size:.78rem; }
+.menu-choices { display:flex; gap:4px; } .menu-panel .menu-choices button { flex:1; justify-content:center; min-width:0; padding:.45rem .35rem; }
 .shell { max-width:980px; margin:0 auto; padding:1rem 4rem 4rem; } .document-status { display:flex; align-items:baseline; justify-content:space-between; gap:1rem; color:var(--muted); font-size:.75rem; min-height:32px; padding:.3rem 0 .4rem 42px; } .error { color:var(--error); } #notice { background:var(--warning); border-radius:6px; padding:.8rem 1rem; margin:.5rem 0 1rem 42px; font-size:.9rem; } #document-diagnostics { margin-left:42px; }
 .cell { --cell-gap:10px; position:relative; display:grid; grid-template-columns:32px minmax(0,1fr) 30px; gap:var(--cell-gap); margin-right:calc(-30px - var(--cell-gap)); scroll-margin:110px; outline:none; }
 .cell-body { position:relative; min-width:0; border:1px solid transparent; border-radius:7px; background:var(--surface); } .cell.markdown-cell .cell-body { background:transparent; } .cell:hover .cell-body { border-color:var(--line); } .cell.selected .cell-body { border-color:var(--focus); } .cell.command-selected .cell-body { border-color:var(--selection-border); box-shadow:inset 3px 0 var(--selection-border); background:var(--selected); } .cell:focus-visible .cell-body { outline:2px solid var(--selection-border); outline-offset:2px; }
@@ -73,6 +76,7 @@ textarea { resize:vertical; border:0; display:block; width:100%; padding:1rem 1.
 .insertion { margin-left:42px; height:32px; display:flex; align-items:center; justify-content:center; gap:.35rem; position:relative; } .insertion::before { content:''; height:1px; background:var(--line); position:absolute; left:0; right:0; top:50%; opacity:0; } .insertion button { position:relative; background:var(--page); font-size:.73rem; color:var(--muted); padding:.16rem .5rem; opacity:0; } .insertion:hover button,.insertion:focus-within button,.insertion:hover::before,.insertion:focus-within::before { opacity:1; } .insertion:last-child { margin-top:.3rem; height:42px; } .insertion:last-child button { opacity:1; } .insertion button:hover { background:var(--hover); }
 .markdown { color:var(--text); line-height:1.7; overflow-wrap:anywhere; } .markdown h1,.markdown h2,.markdown h3 { font-weight:650; letter-spacing:-.03em; line-height:1.25; } .markdown h1 { font-size:1.85rem; } .markdown h2 { font-size:1.45rem; } .markdown blockquote { margin:1rem 0; border-left:3px solid var(--line); padding-left:1rem; } .markdown pre { background:var(--surface); padding:1rem; border-radius:5px; } .markdown code { font-family:ui-monospace,monospace; background:var(--code-bg); } .markdown table { border-collapse:collapse; font-size:.9rem; max-width:100%; display:block; overflow:auto; } .markdown td,.markdown th { border:1px solid var(--line); padding:.4rem .65rem; }
 footer { display:flex; justify-content:space-between; align-items:center; gap:1rem; margin:1.5rem 0 0 42px; font-size:.75rem; color:var(--muted); min-height:32px; } .quiet { color:var(--muted); font-size:.75rem; } #selection-status { min-height:1rem; } dialog { color:inherit; border:1px solid var(--line); border-radius:12px; padding:1.6rem; max-width:650px; width:calc(100% - 32px); max-height:85vh; overflow:auto; box-shadow:0 16px 70px #35204320; } dialog::backdrop { background:#30203a30; } .dialog-title { display:flex; justify-content:space-between; align-items:center; gap:1rem; } .dialog-title h2 { font-size:1.3rem; font-weight:600; margin:0; letter-spacing:-.025em; } dialog p { font-size:.86rem; line-height:1.6; color:var(--muted); } .shortcuts { display:grid; grid-template-columns:145px 1fr; font-size:.85rem; line-height:1.5; } .shortcuts dt,.shortcuts dd { padding:.45rem 0; border-bottom:1px solid var(--line); margin:0; } .shortcuts dt { font:12px/1.8 ui-monospace,monospace; } #generated { padding-top:1.2rem; } .sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
+#recent-list { display:flex; flex-direction:column; gap:4px; } .recent-entry { display:flex; align-items:center; justify-content:space-between; gap:1rem; width:100%; padding:.8rem; text-align:left; } .recent-entry > span { min-width:0; overflow-wrap:anywhere; } .recent-entry strong { display:block; font-size:.9rem; font-weight:600; } .recent-entry small { display:block; margin-top:.3rem; color:var(--muted); font-size:.75rem; } .recent-entry[aria-current="true"] { background:var(--surface); }
 .result-block[data-stale="true"] pre { color:var(--muted); }
 .result-block.value > pre { display:inline-block; vertical-align:top; max-width:calc(100% - 1.4rem); }
 .output-spinner { display:inline-block; width:11px; height:11px; margin:.3rem 0 0 .5rem; vertical-align:top; border:1.5px solid var(--line); border-top-color:var(--muted); border-radius:50%; visibility:hidden; }
@@ -124,8 +128,8 @@ dialog { background:var(--page); }
     <button id="download">Download a copy <kbd>⌘ / Ctrl S</kbd></button>
     <button id="project-files">Project files…</button>
     <button id="share">Export & share…</button><button id="offline">Offline & storage…</button>
-    <label>File format<select id="format"><option value="roc">Roc</option><option value="markdown">Markdown</option></select></label>
-    <label>Recent documents<select id="recent" aria-label="Recent documents"></select></label>
+    <button id="recent">Open recent…</button>
+    <div class="menu-divider"></div><div class="menu-group"><span class="menu-label" id="format-label">File format</span><div id="format" class="menu-choices" role="group" aria-labelledby="format-label"><button data-format="roc" aria-pressed="true">Roc</button><button data-format="markdown" aria-pressed="false">Markdown</button></div></div>
     <p>Drafts are saved in this browser. Downloads are separate copies.</p>
   </div></details>
   <details class="popover" id="edit-menu"><summary aria-label="Edit menu">Edit</summary><div class="menu-panel">
@@ -135,7 +139,7 @@ dialog { background:var(--page); }
   <details class="popover" id="view-menu"><summary aria-label="View menu">View</summary><div class="menu-panel">
     <button id="notebook-view" aria-pressed="true">Notebook view</button><button id="source-view" aria-pressed="false">Source view</button>
     <button id="preview">View runnable Roc</button>
-    <div class="menu-divider"></div><label>Theme<select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <div class="menu-divider"></div><div class="menu-group"><span class="menu-label" id="theme-label">Theme</span><div id="theme" class="menu-choices" role="group" aria-labelledby="theme-label"><button data-theme="system" aria-pressed="true">System</button><button data-theme="light" aria-pressed="false">Light</button><button data-theme="dark" aria-pressed="false">Dark</button></div></div>
   </div></details>
   <details class="popover" id="help-menu"><summary aria-label="Help menu">Help</summary><div class="menu-panel">
     <button id="shortcuts">Keyboard shortcuts <kbd>?</kbd></button>
@@ -149,10 +153,11 @@ dialog { background:var(--page); }
   <details id="app-header" class="app-header"><summary><strong>App header</strong><span>Packages & imports</span></summary><div id="app-header-source" class="app-header-editor"></div></details>
   <section id="notebook" aria-label="Notebook cells" tabindex="-1" aria-describedby="navigation-help"><div id="cells"></div></section>
   <section id="source-pane" hidden><div class="source-heading"><p id="raw-help">Complete editable source</p><button id="back-notebook">← Notebook</button></div><div id="source" class="raw"></div></section>
-  <footer><span id="selection-status" role="status"></span><button id="help" class="quiet">Keyboard shortcuts <kbd>?</kbd></button></footer>
+  <footer><span id="selection-status" role="status"></span></footer>
   <p id="navigation-help" class="sr-only">Escape selects a cell. Arrow keys move between cells; Shift plus arrows extends the selection. Enter edits. Use your usual copy, cut and paste shortcuts for selected cells.</p>
 </main>
 </div>
+<dialog id="recent-dialog" aria-labelledby="recent-title"><div class="dialog-title"><h2 id="recent-title">Recent notebooks</h2><button data-close aria-label="Close recent notebooks">×</button></div><p id="recent-status" role="status">Notebooks saved in this browser.</p><div id="recent-list"></div></dialog>
 <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title"><div class="dialog-title"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button data-close aria-label="Close keyboard shortcuts">×</button></div>
   <p>Inside a cell, type and select text as usual. Press <kbd>Esc</kbd> to select the whole cell.</p>
   <dl class="shortcuts"><dt>Enter</dt><dd>Edit the selected cell</dd><dt>↑ / ↓</dt><dd>Select previous / next cell</dd><dt>Shift ↑ / ↓</dt><dd>Extend or shrink the cell selection</dd><dt>⌘ / Ctrl A</dt><dd>Select all cells</dd><dt>⌘ / Ctrl C, X, V</dt><dd>Copy, cut, paste cells after the selection</dd><dt>A / B</dt><dd>Insert code above / below the selection</dd><dt>Delete / Backspace</dt><dd>Delete selected cells (undoable)</dd><dt>⌘ / Ctrl Enter</dt><dd>Run the current cell</dd><dt>Shift Enter</dt><dd>Run, then select the next cell</dd><dt>Alt Enter</dt><dd>Insert below, then run the current cell</dd><dt>⌘ / Ctrl Z</dt><dd>Undo (add Shift to redo)</dd><dt>⌘ / Ctrl S</dt><dd>Download a copy</dd><dt>?</dt><dd>Show this help in cell selection mode</dd></dl>

@@ -429,16 +429,47 @@ async function refreshLibrary() {
   try {
     const records = (await store.list()).filter(validDraft);
     if (token !== libraryToken) return;
-    $('recent').replaceChildren();
-    for (const record of records) { const option = document.createElement('option'); option.value = record.id; option.textContent = record.title || 'Untitled'; option.selected = record.id === notebook.state.id; $('recent').append(option); }
-  } catch { /* The persistent save-status message already explains the failure. */ }
+    $('recent-list').replaceChildren();
+    $('recent-status').textContent = records.length ? 'Notebooks saved in this browser.' : 'No notebooks have been saved in this browser yet.';
+    const dates = new Intl.DateTimeFormat(undefined, {dateStyle:'medium',timeStyle:'short'});
+    for (const record of records) {
+      const current = record.id === notebook.state.id, title = record.title || 'Untitled';
+      const entry = button('', async () => {
+        try {
+          $('recent-list').inert = true;
+          if (record.id !== notebook.state.id) {
+            $('recent-status').textContent = 'Opening notebook…';
+            const saved = await store.get(record.id);
+            if (!validDraft(saved)) throw new Error('This notebook is no longer available in this browser.');
+            await notebook.replace(saved);
+          }
+          $('recent-dialog').close();
+          if (notebook.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus();
+        } catch (error) { $('recent-status').textContent = error.message; }
+        finally { $('recent-list').inert = false; }
+      }, `Open notebook: ${title}`);
+      entry.className = 'recent-entry'; entry.dataset.notebookId = record.id;
+      if (current) entry.setAttribute('aria-current', 'true');
+      const description = document.createElement('span'), name = document.createElement('strong'), modified = document.createElement('small');
+      name.textContent = title;
+      const modifiedAt = new Date(record.updatedAt);
+      modified.textContent = Number.isFinite(modifiedAt.getTime()) ? dates.format(modifiedAt) : 'Saved in this browser';
+      description.append(name, modified); entry.append(description);
+      if (current) { const label = document.createElement('small'); label.textContent = 'Current'; entry.append(label); }
+      $('recent-list').append(entry);
+    }
+  } catch {
+    if (token !== libraryToken) return;
+    $('recent-list').replaceChildren(); $('recent-status').textContent = 'Recent notebooks are unavailable in this browser.';
+  }
 }
 function reflect(reason) {
   if (!notebook?.state) return;
   const s = notebook.state;
   if ($('title').value !== s.title) $('title').value = s.title;
   document.title = `Roclet: ${s.title || 'Untitled'}`;
-  $('auto').checked = s.autoRun; $('format').value = s.format;
+  $('auto').checked = s.autoRun;
+  for (const button of $('format').querySelectorAll('[data-format]')) button.setAttribute('aria-pressed', button.dataset.format === s.format);
   $('stop').hidden = !/Running|Saving before|Preparing document/.test(notebook.status);
   if ($('stop').hidden && document.activeElement === $('stop')) $('run').focus({preventScroll:true});
   const status = notebook.diagnosticsDeferred && /^(Needs attention|Run failed · no current results)/.test(notebook.status) ? 'Editing · results pending' : notebook.status;
@@ -481,7 +512,21 @@ function bind() {
   $('title').oninput = () => notebook.change(s => { s.title = $('title').value; }, {group:'title',source:notebook.state.sourceCurrent,reason:'edit'});
   $('notebook-view').onclick = () => perform(async () => { await notebook.mode('notebook'); if (notebook.state.mode === 'notebook') focusCell(selection.focus); });
   $('source-view').onclick = () => perform(async () => { await notebook.mode('source'); sourceEditor.focus(); });
-  $('format').onchange = () => perform(async () => { await notebook.format($('format').value); reflect('document'); });
+  let changingFormat = false;
+  $('format').onclick = event => {
+    const target = event.target.closest('button[data-format]');
+    if (!target || changingFormat || target.dataset.format === notebook.state.format) return;
+    changingFormat = true;
+    for (const button of $('format').querySelectorAll('[data-format]')) button.disabled = true;
+    void perform(async () => {
+      try { await notebook.format(target.dataset.format); }
+      finally {
+        changingFormat = false;
+        for (const button of $('format').querySelectorAll('[data-format]')) button.disabled = false;
+        reflect('document');
+      }
+    });
+  };
   $('run').onclick = () => perform(() => notebook.run()); $('stop').onclick = () => notebook.stop();
   $('auto').onchange = () => notebook.setAuto($('auto').checked);
   $('app-header').ontoggle=()=>{
@@ -494,7 +539,14 @@ function bind() {
   $('recovery-copy').onclick=()=>perform(()=>notebook.recoveryCopy());
   $('new').onclick = () => perform(async () => { await notebook.replace(newDraft()); editCell(selection.focus); });
   $('rich-example').onclick=()=>perform(async()=>{const response=await fetch('../fixtures/documents/rich-outputs.roc');if(!response.ok) throw new Error('Example unavailable; rebuild the offline distribution.');await notebook.open(await response.text(),'Rich outputs.roc');closeMenus();});
-  $('recent').onchange = () => perform(async () => { if($('recent').value===notebook.state.id) return; const record = await store.get($('recent').value); if (validDraft(record)) await notebook.replace(record); });
+  $('recent').onclick = () => {
+    closeMenus(); $('recent-list').replaceChildren(); $('recent-status').textContent = 'Loading notebooks…';
+    $('recent-dialog').showModal(); void refreshLibrary();
+  };
+  $('recent-dialog').onclose = () => {
+    const focused = document.activeElement;
+    if (focused === document.body || focused === $('recent') || $('recent-dialog').contains(focused)) $('document-menu').querySelector('summary').focus({preventScroll:true});
+  };
   $('open').onchange = () => perform(async () => { const file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>20*1024*1024) throw new Error('Roclet bundles are limited to 20 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await notebook.replace(record);notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await notebook.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); if (notebook.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); });
   $('preview').onclick = () => perform(async () => { const result = await notebook.inspect('export', 'roc'); $('generated').textContent = result.source; closeMenus(); $('generated-dialog').showModal(); });
   const showProjectFile = path => {
@@ -544,7 +596,7 @@ function bind() {
   $('find').onclick=findNotebook;$('find-query').oninput=updateFind;
   $('back-notebook').onclick = $('notebook-view').onclick;
   const help = () => { closeMenus(); $('shortcuts-dialog').showModal(); };
-  $('help').onclick = help; $('shortcuts').onclick = help;
+  $('shortcuts').onclick = help;
   document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());
   document.addEventListener('click', event => {
     const menu = event.target.closest('details.popover'); closeMenus(menu);
