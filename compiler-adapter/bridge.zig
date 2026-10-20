@@ -156,16 +156,8 @@ fn processDocument(engine: *Engine, value: std.json.Value) ![]u8 {
     var storage = std.heap.ArenaAllocator.init(gpa);
     defer storage.deinit();
     const a = storage.allocator();
-    const request = try document.Request.fromValue(a, value, engine.previous_graph, try engine.workspace.contentIdentity(a));
+    const request = try document.Request.fromValue(a, value, try engine.workspace.contentIdentity(a));
     const response = try document.process(engine, a, request);
-    if (response == .document) if (response.document.graph) |graph| {
-        var writer: std.Io.Writer.Allocating = .init(engine.gpa);
-        errdefer writer.deinit();
-        try std.json.Stringify.value(graph, .{}, &writer.writer);
-        const owned = try writer.toOwnedSlice();
-        if (engine.previous_graph) |old| engine.gpa.free(old);
-        engine.previous_graph = owned;
-    };
     return encode(Envelope{ .response = response, .stats = engine.stats, .required = engine.workspace.required.items });
 }
 /// A document response with the engine's `workspaceCache` and `packagesRequired` appended.

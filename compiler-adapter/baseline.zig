@@ -109,7 +109,7 @@ pub const Baseline = struct {
     /// The planner input for `current` against this baseline. `previous` is
     /// copied into `a` because the plan may name definitions only it has.
     /// Evicts over-limit entries first, so they are simply re-evaluated.
-    pub fn planInput(self: *Baseline, a: A, current: frontend.Graph, roots: []const S, force: []const S) !frontend.Reactive {
+    pub fn planInput(self: *Baseline, a: A, current: frontend.Graph, roots: []const S, force: []const S) !frontend.PlanInput {
         self.trim();
         const snapshot = self.graph orelse return .{ .current = current, .roots = roots, .force = force };
         const available = try a.alloc(S, self.entries.count());

@@ -31,11 +31,13 @@ pub const DraftCell = struct { kind: S, source: S, attributes: S = "", outputs: 
 pub const Draft = struct { supplied: bool = false, preamble: S = "", metadata: S = "", cells: []const DraftCell = &.{} };
 pub const Definition = struct { name: S, fingerprint: S, dependencies: []const S = &.{} };
 pub const Graph = struct { context: S = "", scope: S = "module", definitions: []const Definition = &.{} };
-pub const Reactive = struct { known: bool = false, previous: Graph = .{}, current: Graph = .{}, available: []const S = &.{}, roots: []const S = &.{}, force: []const S = &.{} };
+/// The planner's input. The engine fills `known`, `previous` and `available`
+/// from its baseline (`baseline.zig`); requests only name forced roots.
+pub const PlanInput = struct { known: bool = false, previous: Graph = .{}, current: Graph = .{}, available: []const S = &.{}, roots: []const S = &.{}, force: []const S = &.{} };
 pub const Explanation = struct { root: S, reason: S, dependencies: []const S };
 pub const Plan = struct { changed: []const S = &.{}, evaluate: []const S = &.{}, reused: []const S = &.{}, explanations: []const Explanation = &.{} };
 pub const MetadataField = struct { key: S, value: S };
-pub const Input = struct { compact: bool = false, reactivity: Reactive = .{}, metadata_fields: []const MetadataField = &.{}, phase: S, format: S, target: S, source: S, facts: syntax.Facts = .{}, blocks: []const syntax.Block = &.{}, model: Model = .{}, draft: Draft = .{} };
+pub const Input = struct { compact: bool = false, reactivity: PlanInput = .{}, metadata_fields: []const MetadataField = &.{}, phase: S, format: S, target: S, source: S, facts: syntax.Facts = .{}, blocks: []const syntax.Block = &.{}, model: Model = .{}, draft: Draft = .{} };
 pub const Mapping = struct { generated_start: u64, generated_end: u64, source_start: u64, source_end: u64, cell: u64 };
 pub const Result = struct { plan: Plan = .{}, status: S = "ok", model: Model, draft: Draft, source: S = "", program: S = "", execution: S = "", roots: []const S = &.{}, expectations: []const Expectation = &.{}, mappings: []const Mapping = &.{} };
 fn eq(x: S, y: S) bool {
@@ -737,7 +739,7 @@ fn definitionEqual(old: []const Definition, new: []const Definition, name: S) bo
         ni += 1;
     }
 }
-pub fn plan(a: A, input: Reactive) !Plan {
+pub fn plan(a: A, input: PlanInput) !Plan {
     var names: Strings = .empty;
     for (input.current.definitions) |d| if (!has(names.items, d.name)) try names.append(a, d.name);
     for (input.previous.definitions) |d| if (!has(names.items, d.name)) try names.append(a, d.name);

@@ -111,9 +111,15 @@ export interface DocumentRequest {
   draft?: DocumentDraft;
   /** evaluate only: force the output and top-level expects in this cell; the whole module is checked. */
   selectedCell?: number;
-  /** Evaluate only invalidated/forced roots. Prior strings are never execution inputs. */
-  /** Persistent browser engines may omit the confirmed baseline graphs. */
-  reactivity?: {known: boolean; previous?: DependencyGraph; current?: DependencyGraph; roots: string[]; available: string[]; force: string[]};
+  /** analyze/evaluate: participate in the engine-owned reactive baseline.
+   *  Present (even `{}`): plan against the graph of the engine's last
+   *  participating request, evaluate only invalidated or forced roots, return
+   *  every root's value, test and events with `reused`, then commit. Absent:
+   *  stateless, every root evaluated, the baseline neither read nor written.
+   *  `reset` forgets the baseline first. Retained presentations are never
+   *  execution inputs. The removed members `known`, `previous`, `current`,
+   *  `available` and `roots` are rejected with `protocol_error`. */
+  reactivity?: {force?: string[]; reset?: boolean};
   forceAll?: boolean;
   isolateErrors?: boolean;
   /** Return typed MD4C rendering events for prose; never executable HTML. */
@@ -198,10 +204,14 @@ export interface DocumentResponse {
   mappings: { generated_start: number; generated_end: number; source_start: number; source_end: number; cell: number }[];
   evaluation?: {
     status: string;
-    events: { kind: string; message: string; root?: string; cell?: number | null; sequence?: number }[];
+    /** analyze/evaluate entries carry `reused`: the presentation was retained
+     *  from an earlier participating request (root in `plan.reused`). With
+     *  `reactivity`, values, tests and events cover every current root, in
+     *  root order; `evaluated_roots` and `root_errors` cover this request only. */
+    events: { kind: string; message: string; root?: string; cell?: number | null; sequence?: number; reused?: boolean }[];
     /** evaluate returns separate designated values and root-attributed observations. */
-    values?: { root: string; text: string; display?: DisplayValue }[];
-    tests?: Response['tests'];
+    values?: { root: string; text: string; display?: DisplayValue; reused?: boolean }[];
+    tests?: (Response['tests'][number] & {cell?: number; start?: number; end?: number; location?: {line: number; column: number}; scope?: 'cell' | 'source'; reused?: boolean})[];
     diagnostics: unknown[];
     definitions: unknown[];
     dependency_scope?: 'definitions' | 'module';

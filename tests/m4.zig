@@ -62,38 +62,6 @@ fn reactive(a: A, request: V, reactivity: anytype) !V {
     return copy;
 }
 
-/// The legacy shape: the caller holds the previous graph and the results.
-fn legacy(a: A, suite: *docs.Suite, workload: Workload) !void {
-    const name = workload.name;
-    const before = try suite.call(try std.mem.concat(a, u8, &.{ name, "/before" }), workload.before);
-    try expectAnalysedOnce(before);
-    try equal(a, workload.status(), get(before, "status"));
-    const full = try suite.call(try std.mem.concat(a, u8, &.{ name, "/full" }), workload.after);
-    try expectAnalysedOnce(full);
-    var available: std.ArrayList(V) = .empty;
-    for (get(get(before, "evaluation"), "values").array.items) |v| try available.append(a, get(v, "root"));
-    for (get(get(before, "evaluation"), "tests").array.items) |t| if (get(t, "passed").bool) try available.append(a, get(t, "root"));
-    const graph = get(before, "graph");
-    const request = try reactive(a, workload.after, .{ .known = true, .previous = graph, .current = graph, .available = available.items, .roots = &[_]V{}, .force = workload.force(a) });
-    const selective = try suite.call(try std.mem.concat(a, u8, &.{ name, "/selective" }), request);
-    try expectAnalysedOnce(selective);
-    try equal(a, get(full, "status"), get(selective, "status"));
-    if (selective.object.get("graph") == null) return;
-    const plan = get(selective, "plan");
-    try equal(a, get(workload.w, "evaluate"), get(plan, "evaluate"));
-    try equal(a, get(workload.w, "reused"), get(plan, "reused"));
-    // Reassemble *presentation* values and compare with the clean run.
-    var merged: std.ArrayList(V) = .empty;
-    for (get(full, "roots").array.items) |r| {
-        const result = if (has(get(plan, "reused"), r.string)) before else selective;
-        for (get(get(result, "evaluation"), "values").array.items) |v| {
-            if (std.mem.eql(u8, get(v, "root").string, r.string)) try merged.append(a, v);
-        }
-    }
-    try equal(a, try withoutReused(a, get(get(full, "evaluation"), "values")), try withoutReused(a, try value(a, merged.items)));
-    try equal(a, get(plan, "evaluate"), get(get(selective, "evaluation"), "evaluated_roots"));
-}
-
 /// The engine-owned baseline: `before` and `selective` participate in one
 /// process; the stateless `full` run is the reference.
 fn engine(a: A, suite: *docs.Suite, workload: Workload) !void {
@@ -153,7 +121,6 @@ pub fn main(init: std.process.Init) !void {
         try after.object.put(a, "source", get(w, "after"));
         if (w.object.get("afterModules")) |m| try after.object.put(a, "modules", m);
         const workload: Workload = .{ .name = name, .w = w, .before = before, .after = after };
-        try legacy(a, &suite, workload);
         try engine(a, &suite, workload);
     }
     const manifest_path = try std.fs.path.join(a, &.{ root, "artifacts/manifest.json" });

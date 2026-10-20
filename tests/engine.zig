@@ -492,3 +492,21 @@ test "a failed root is retried and reset forgets the baseline" {
     try expectPlan(reset, "reused", &.{});
     try expectRoots("out_good ", reset.evaluation("values"));
 }
+
+test "a caller-held baseline is rejected and leaves the engine baseline alone" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    var first = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells, .reactivity = Participation{} });
+    defer first.deinit();
+    const graph = engine.baseline.graph.?;
+    inline for (.{ "known", "previous", "current", "available", "roots" }) |name| {
+        const bytes = try bridge.process(&engine, "{\"operation\":\"document\",\"action\":\"evaluate\",\"source\":\"# %%\\n1\",\"reactivity\":{\"" ++ name ++ "\":[]}}");
+        defer response_allocator.free(bytes);
+        var rejected: Response = .{ .parsed = try std.json.parseFromSlice(V, std.testing.allocator, bytes, .{}) };
+        defer rejected.deinit();
+        try std.testing.expectEqualStrings("protocol_error", rejected.field("status").string);
+        try std.testing.expect(rejected.field("evaluation") == .null);
+    }
+    try std.testing.expectEqual(graph, engine.baseline.graph.?);
+    try std.testing.expectEqual(@as(usize, 2), engine.baseline.entries.count());
+}

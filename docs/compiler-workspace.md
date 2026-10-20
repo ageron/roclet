@@ -55,7 +55,8 @@ the document syntax model between internal compiler stages. The compiler receive
 source slices directly. Changed project files and binary compiler-cache entries
 use byte-oriented WASM entry points. Compact notebook responses omit unused
 intermediate syntax, duplicate source, and export encodings. Subsequent requests
-also omit the worker's already confirmed dependency graph.
+carry no dependency graph at all: the engine keeps the reactive baseline and
+returns complete results with `reused` flags.
 
 Inside the engine there is no JSON at all. The request is parsed once at the
 boundary and the response serialised once; the document layer reaches the
@@ -81,7 +82,7 @@ Every run is one frontend build, one lowering and one analysis. Small notebooks
 are dominated by fixed costs; the gap grows with the number of roots.
 
 Each worker owns one compiler engine instance. All mutable adapter state (the
-virtual filesystem, live compiler cache, retained revision, confirmed graph and
+virtual filesystem, live compiler cache, retained revision, reactive baseline and
 request counters) belongs to that engine rather than to module globals, and
 observations are attributed through a request-scoped observer that carries its
 root. Native hosts and the in-process `zig build test-engine` suite can hold
@@ -125,7 +126,8 @@ root executions. Wall Area transferred no project-file bytes. The module edit
 transferred only the changed Geometry source (84 bytes at the median); unchanged
 Materials source was not resent. Wall Area's original UI request was 1,502 bytes
 at the median; retaining the confirmed graph in the worker reduced the JSON sent
-to WASM to 687 bytes. These request/response byte counts exclude separate file
+to WASM to 687 bytes (since then requests carry no graph at all; not remeasured
+here). These request/response byte counts exclude separate file
 and cache streams.
 
 First Wall Area request startup was 609.2 ms. First multi-module request startup

@@ -47,9 +47,9 @@ pub const Request = struct {
     pub const Draft = union(enum) { absent, malformed, value: frontend.Draft };
     pub const Context = struct { preamble: []const u8, metadata: []const u8 };
     pub const SelectedCell = union(enum) { index: i64, invalid };
-    /// `legacy` carries a caller-held previous graph and `available` roots;
-    /// `participate` reads and updates the engine's own baseline.
-    pub const Reactivity = union(enum) { absent, malformed, legacy: frontend.Reactive, participate: Participation };
+    /// `participate` reads and updates the engine's own baseline; `legacy`
+    /// is a caller-held baseline, which is rejected.
+    pub const Reactivity = union(enum) { absent, malformed, legacy, participate: Participation };
     pub const Participation = struct {
         force: []const []const u8 = &.{},
         /// Forget the engine baseline before planning.
@@ -64,10 +64,8 @@ pub const Request = struct {
         json: []const u8 = "[]",
     };
 
-    /// Read a parsed request object. `previous_graph` (the engine's last
-    /// confirmed graph) fills a legacy `reactivity.previous` when the client
-    /// omits it.
-    pub fn fromValue(a: A, request: V, previous_graph: ?[]const u8, workspace_fingerprint: []const u8) !Request {
+    /// Read a parsed request object.
+    pub fn fromValue(a: A, request: V, workspace_fingerprint: []const u8) !Request {
         const object = request.object;
         const format = string(request, "format", "roc");
         var result: Request = .{
@@ -97,16 +95,10 @@ pub const Request = struct {
             const legacy = raw == .object and for (legacy_reactivity) |key| {
                 if (raw.object.get(key) != null) break true;
             } else false;
-            if (!legacy) {
-                if (std.json.parseFromValueLeaky(Participation, a, raw, .{ .ignore_unknown_fields = true })) |participation| {
-                    result.reactivity = .{ .participate = participation };
-                } else |_| {}
-            } else if (std.json.parseFromValueLeaky(frontend.Reactive, a, raw, .{ .ignore_unknown_fields = true })) |parsed| {
-                var reactive = parsed;
-                if (raw.object.get("previous") == null) if (previous_graph) |graph| {
-                    reactive.previous = try std.json.parseFromSliceLeaky(frontend.Graph, a, graph, .{ .ignore_unknown_fields = true });
-                };
-                result.reactivity = .{ .legacy = reactive };
+            if (legacy) {
+                result.reactivity = .legacy;
+            } else if (std.json.parseFromValueLeaky(Participation, a, raw, .{ .ignore_unknown_fields = true })) |participation| {
+                result.reactivity = .{ .participate = participation };
             } else |_| {}
         }
         if (object.get("modules")) |modules| {
@@ -118,8 +110,7 @@ pub const Request = struct {
         }
         return result;
     }
-    /// Members of a caller-held baseline (the request shape before the engine
-    /// owned it).
+    /// Members of a caller-held baseline, from before the engine owned it.
     const legacy_reactivity = [_][]const u8{ "known", "previous", "current", "available", "roots" };
     fn string(o: V, key: []const u8, fallback: []const u8) []const u8 {
         const v = if (o == .object) o.object.get(key) else null;
@@ -166,8 +157,8 @@ pub const Document = struct {
     compact: bool,
     result: frontend.Result,
     diagnostics: []ModelDiagnostic = &.{},
-    /// The checked dependency graph, retained by the bridge as the next
-    /// request's `reactivity.previous`.
+    /// The checked dependency graph; a participating request commits it to
+    /// the engine baseline.
     graph: ?Graph = null,
     evaluation: ?Evaluation = null,
     rendering: []const Rendering = &.{},
@@ -282,38 +273,15 @@ const DocumentEvaluation = struct {
     diagnostics: []const @import("engine.zig").Diagnostic,
     failure: ?[]const u8,
 };
-/// `reused` is null only for legacy reactive requests, which never merge.
-const Event = struct {
-    kind: @import("platform.zig").EventKind,
-    message: []const u8,
-    root: []const u8,
-    region: ?notebook.Region = null,
-    sequence: usize,
-    cell: ?usize,
-    reused: ?bool = null,
-    pub fn jsonStringify(self: Event, w: anytype) !void {
-        try w.beginObject();
-        inline for (.{ "kind", "message", "root", "region", "sequence", "cell" }) |name| {
-            try w.objectField(name);
-            try w.write(@field(self, name));
-        }
-        try writeReused(w, self.reused);
-        try w.endObject();
-    }
-};
-fn writeReused(w: anytype, reused: ?bool) !void {
-    if (reused) |flag| {
-        try w.objectField("reused");
-        try w.write(flag);
-    }
-}
+/// `reused`: the presentation is retained from an earlier request.
+const Event = struct { kind: @import("platform.zig").EventKind, message: []const u8, root: []const u8, region: ?notebook.Region = null, sequence: usize, cell: ?usize, reused: bool };
 const Placement = struct { cell: u64, start: u64, end: u64, location: Location, scope: []const u8 };
 const TestResult = struct {
     root: []const u8,
     passed: bool,
     message: []const u8,
     placement: ?Placement = null,
-    reused: ?bool = null,
+    reused: bool,
     pub fn jsonStringify(self: TestResult, w: anytype) !void {
         try w.beginObject();
         inline for (.{ "root", "passed", "message" }) |name| {
@@ -324,7 +292,8 @@ const TestResult = struct {
             try w.objectField(name);
             try w.write(@field(placement, name));
         };
-        try writeReused(w, self.reused);
+        try w.objectField("reused");
+        try w.write(self.reused);
         try w.endObject();
     }
 };
@@ -334,7 +303,7 @@ const Value = struct {
     display: ?V = null,
     /// Rendered Markdown of a `markdown` display, written as its `events`.
     markdown: ?[]const syntax.MarkdownEvent = null,
-    reused: ?bool = null,
+    reused: bool,
     pub fn jsonStringify(self: Value, w: anytype) !void {
         try w.beginObject();
         try w.objectField("root");
@@ -357,7 +326,8 @@ const Value = struct {
                 try w.endObject();
             } else try w.write(display);
         }
-        try writeReused(w, self.reused);
+        try w.objectField("reused");
+        try w.write(self.reused);
         try w.endObject();
     }
 };
@@ -426,6 +396,7 @@ fn packageRocExport(a: A, source: []const u8) ![]const u8 {
 /// allocated in `a` (or borrowed from `request`).
 pub fn process(engine: *Engine, a: A, request: Request) !Response {
     switch (request.reactivity) {
+        .legacy => return .reject("reactivity.known, previous, current, available and roots are not accepted; the engine keeps the baseline"),
         .participate => |participation| if (participation.reset) engine.baseline.clear(),
         else => {},
     }
@@ -560,10 +531,9 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
             document.graph = graph;
             try document.put(a, .graph);
             const current = graph.planned();
-            var reactivity: frontend.Reactive = switch (request.reactivity) {
-                .absent => .{},
+            var reactivity: frontend.PlanInput = switch (request.reactivity) {
+                .absent, .legacy => .{},
                 .malformed => return error.MalformedReactivity,
-                .legacy => |value| value,
                 .participate => |participation| try engine.baseline.planInput(a, current, roots, participation.force),
             };
             reactivity.current = current;
@@ -587,10 +557,9 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
         }
         var reused_roots: std.StringHashMapUnmanaged(void) = .empty;
         if (merging) for (result.plan.reused) |root| try reused_roots.put(a, root, {});
-        const legacy = request.reactivity == .legacy;
         const events = try a.alloc(Event, outcomes.events.len);
         for (events, outcomes.events, 0..) |*out, event, sequence| {
-            out.* = .{ .kind = event.kind, .message = event.message, .root = event.root, .region = event.region, .sequence = sequence, .cell = null, .reused = if (legacy) null else reused_roots.contains(event.root) };
+            out.* = .{ .kind = event.kind, .message = event.message, .root = event.root, .region = event.region, .sequence = sequence, .cell = null, .reused = reused_roots.contains(event.root) };
             for (cells, 0..) |cell, index| {
                 var matches = eql(cell.output, event.root);
                 for (cell.expectations) |expectation| if (eql(expectation, event.root)) {
@@ -604,7 +573,7 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
         }
         const tests = try a.alloc(TestResult, outcomes.tests.len);
         for (tests, outcomes.tests) |*out, test_result| {
-            out.* = .{ .root = test_result.root, .passed = test_result.passed, .message = test_result.message, .reused = if (legacy) null else reused_roots.contains(test_result.root) };
+            out.* = .{ .root = test_result.root, .passed = test_result.passed, .message = test_result.message, .reused = reused_roots.contains(test_result.root) };
             for (result.expectations) |expectation| if (eql(expectation.root, test_result.root)) {
                 const index = expectation.cell;
                 const start = expectation.start;
@@ -627,7 +596,7 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
         }
         const values = try a.alloc(Value, outcomes.values.len);
         for (values, outcomes.values) |*out, output| {
-            out.* = .{ .root = output.root, .text = output.text, .display = output.display, .reused = if (legacy) null else reused_roots.contains(output.root) };
+            out.* = .{ .root = output.root, .text = output.text, .display = output.display, .reused = reused_roots.contains(output.root) };
             if (output.display) |display| {
                 if (display == .object and eql(Request.string(display, "kind", ""), "markdown")) {
                     out.markdown = try syntax.renderMarkdown(a, Request.string(display, "content", ""));

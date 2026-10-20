@@ -19,7 +19,7 @@ included in `ROC-LICENSE`.
 
 All mutable adapter state belongs to an explicit `Engine` (`engine_state.zig`):
 the virtual workspace and compiler artifact store, `packagesRequired`, the
-retained checked/lowered notebook revision, the last confirmed dependency graph,
+retained checked/lowered notebook revision, the reactive baseline,
 the synthetic or native source paths, and the `workspaceCache` counters.
 `bridge.process(&engine, request)` serves one top-level request and starts with
 `engine.beginRequest()`, which clears `packagesRequired` and the counters. A
@@ -151,8 +151,8 @@ module-wide diagnostics. Inline expects keep their existing compiler semantics.
 
 Assertions use the same resolved definition dependencies and reactive planner as
 outputs. Run all forces every assertion; Run cell forces all assertions in that
-cell. Passing statuses can be reused for unchanged dependencies, with source
-locations remapped to the current revision. Test-only cells and notebooks work
+cell. Passing statuses can be reused for unchanged dependencies; the engine
+locates reused tests in the current revision. Test-only cells and notebooks work
 without output roots. Top-level expects in the App header are diagnosed explicitly;
 move them into code cells to execute them.
 
@@ -213,9 +213,47 @@ corruption recovery, and offline verified-package restoration.
 The live virtual compiler-artifact store has its own 24 MiB / 512-entry LRU
 budget; editable files and package inputs are not evicted as compiler artifacts.
 
-The compiler retains its previous dependency graph. The transport omits an
-unchanged confirmed graph on subsequent requests; explicit alternate baselines
-remain supported. Changes to workspace files participate in reactive invalidation.
+## Reactive baseline
+
+The engine owns the reactive baseline (`baseline.zig`, an `Engine` field that
+outlives revisions): the dependency graph of the last participating request
+and, per root, the presentation (value, test outcome, events) of that root's
+last successful evaluation in this engine. Requests never carry graphs.
+
+- `reactivity` present (even `{}`): the request participates. The planner
+  (`document_frontend.plan`) compares the current graph with the baseline graph:
+  a root is reused when the module context and scope are unchanged, every
+  definition in its dependency closure has the same fingerprint and
+  dependencies, it is not forced (`force`, `forceAll`, `selectedCell`) and the
+  baseline holds a successful presentation for it. The response is complete:
+  `evaluation.values`, `tests` and `events` list every current root in root
+  order, the retained presentation for `plan.reused` roots and the fresh one
+  otherwise, each with `reused`. Cell attribution, test locations, event
+  `sequence` and Markdown rendering are computed for the current revision.
+  `analyze` returns retained presentations too. `evaluated_roots` and
+  `root_errors` describe this request only.
+- After a participating request whose check succeeded, the engine keeps the
+  presentations of reused roots, stores fresh successful ones (a value, or a
+  passed test) and drops the rest (failed roots, roots an `analyze` did not run,
+  roots no longer in the document). A request whose check fails leaves the
+  baseline unchanged.
+- `reactivity: {reset: true}` forgets the baseline first. The notebook sends it
+  for the first reactive request of a different document.
+- `reactivity` absent: stateless. Every root is evaluated, the baseline is
+  neither read nor written, and entries carry `reused: false` (parity replays,
+  rename candidate checks).
+- The removed caller-held members `known`, `previous`, `current`, `available`
+  and `roots` are rejected with `protocol_error`.
+- Memory only: never persisted, never imported, never Roc values. Retained
+  presentations are capped at 64 MiB; above that the least recently stored are
+  evicted before the next participating request plans, and simply re-evaluated.
+- A restarted worker (Stop, timeout, trap, cancelled package load) has a fresh
+  engine and no baseline, so its first run evaluates every root once.
+
+`roclet --bridge a.json b.json ...` serves a sequence with one engine, one
+response per line; `tests/m4.zig` records before/selective/full sequences so the
+browser replay sees the same engine state. Changes to workspace files
+participate in reactive invalidation through the graph's module context.
 
 ## WASM byte operations
 
