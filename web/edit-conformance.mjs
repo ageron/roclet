@@ -152,7 +152,9 @@ try {
   const both = {values:[['out_a','11.0'],['out_b','7.0']],events:[[0,'out_a','10.0'],[1,'out_b','5.0']]};
   await recovered.run(1);assert.deepEqual(observations(),both);
   result = await recovered.run(0);
-  assert.deepEqual(result.evaluation.values.map(v=>v.root),['out_a'], 'The worker still evaluates only the requested output');
+  // Responses list every current value; the worker evaluates only the requested output.
+  assert.deepEqual(result.evaluation.evaluated_roots,['out_a']);
+  assert.deepEqual(result.evaluation.values.map(v=>[v.root,v.reused]),[['out_a',false],['out_b',true]]);
   assert.deepEqual(observations(),both);
   await recovered.run(1); await recovered.run(0); await recovered.run(2);
   assert.deepEqual(observations(),both); assert.match(recovered.status,/2 results/);
