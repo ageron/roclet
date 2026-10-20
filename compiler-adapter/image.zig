@@ -38,7 +38,7 @@ pub const Image = struct {
     attempts: u8,
 
     pub fn deinit(self: *Image, gpa: std.mem.Allocator) void {
-        gpa.free(self.buffer);
+        freeBuffer(gpa, self.buffer);
         self.* = undefined;
     }
 
@@ -76,10 +76,10 @@ fn buildWith(gpa: std.mem.Allocator, limits: Limits, source: anytype) Error!Imag
     var attempts: u8 = 0;
     while (true) {
         attempts += 1;
-        const buffer = try gpa.alignedAlloc(u8, .@"16", capacity);
+        const buffer = try allocBuffer(gpa, capacity);
         var fba = std.heap.FixedBufferAllocator.init(buffer);
         const header, const program = copyInto(&fba, buffer, source) catch |err| {
-            gpa.free(buffer);
+            freeBuffer(gpa, buffer);
             switch (err) {
                 error.OutOfMemory => {
                     if (capacity >= limits.max_bytes) return error.ImageTooLarge;
@@ -90,11 +90,23 @@ fn buildWith(gpa: std.mem.Allocator, limits: Limits, source: anytype) Error!Imag
             }
         };
         program.fillHeader(header, fba.end_index) catch |err| {
-            gpa.free(buffer);
+            freeBuffer(gpa, buffer);
             return err;
         };
         return .{ .buffer = buffer, .header = header, .size = fba.end_index, .attempts = attempts };
     }
+}
+
+// Raw calls skip the safe-mode `undefined` fill on alloc and free, which
+// would touch, and natively commit, every page of a buffer the image may use
+// only part of.
+fn allocBuffer(gpa: std.mem.Allocator, len: usize) error{OutOfMemory}![]align(16) u8 {
+    const ptr = gpa.rawAlloc(len, .@"16", @returnAddress()) orelse return error.OutOfMemory;
+    return @alignCast(ptr[0..len]);
+}
+
+fn freeBuffer(gpa: std.mem.Allocator, buffer: []align(16) u8) void {
+    gpa.rawFree(buffer, .@"16", @returnAddress());
 }
 
 /// The header comes first, as in the compiler's own `publishLirImage`.
