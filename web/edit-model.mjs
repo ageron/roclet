@@ -63,7 +63,7 @@ function mergeCheckedResults(previous, result, state) {
 
 // Browser-owned edit history, persistence and worker lifecycle. Parsing, output
 // selection, lowering and encoding are exclusively the shared Roc document core.
-export class Studio {
+export class Notebook {
   constructor(bytes, store, { session = new DocumentSession(bytes), debounce = 550, timeout = 15000, onChange = () => {} } = {}) {
     this.store = store; this.session = session; this.debounce = debounce; this.timeout = timeout; this.onChange = onChange;
     this.state = null; this.result = null; this.history = []; this.future = []; this.views = new Map();

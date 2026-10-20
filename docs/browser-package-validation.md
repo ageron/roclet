@@ -37,7 +37,7 @@ In another terminal:
 
 ```sh
 node tools/browser-check.mjs --base-url http://127.0.0.1:4179 \
-  --page web/studio.html --script tools/browser-package-probe.mjs
+  --page web/edit.html --script tools/browser-package-probe.mjs
 ```
 
 The expected report is `result: "pass", passed: true`. This probe also attempts
@@ -79,7 +79,7 @@ the failed test keeps all independent tables visible, then restores it.
 
 ```sh
 node tools/browser-check.mjs --base-url http://127.0.0.1:4179 \
-  --page 'web/studio.html?example=meeting-windows' \
+  --page 'web/edit.html?example=meeting-windows' \
   --script tools/browser-time-probe.mjs \
   --screenshot /tmp/roclet-time.png
 ```
@@ -95,7 +95,7 @@ To exercise the separate-host deployment pattern:
 ./zig-out/bin/roclet-serve . 4180 --proxy-only
 node tools/browser-check.mjs \
   --package-endpoint http://127.0.0.1:4180/api/packages/ \
-  --page 'web/studio.html?example=meeting-windows' \
+  --page 'web/edit.html?example=meeting-windows' \
   --script tools/browser-time-probe.mjs
 ```
 

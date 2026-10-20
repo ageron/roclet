@@ -30,7 +30,7 @@
   assert(JSON.stringify(rows('out_candidates'))===JSON.stringify(expected.slice(1)),'Earlier booking did not remove the first candidate');
   assert(text('out_recommendation').includes('Book 15 Jun 2026, 12:30–13:15 UTC.'),'Recommendation did not move to 12:30–13:15');
   const changed={candidates:rows('out_candidates'),recommendation:text('out_recommendation')};
-  $('stop').click();await run();assert(rows('out_candidates').length===2,'Studio worker restart failed');
+  $('stop').click();await run();assert(rows('out_candidates').length===2,'Notebook worker restart failed');
   replace(bookingEditor,bookingSource);replace(settingsEditor,settingsSource.replace('meeting_minutes = 45','meeting_minutes = 90'));await run();
   assert(JSON.stringify(rows('out_candidates'))===JSON.stringify([expected[1]]),'90-minute review should leave one candidate');
   const ninetyMinutes={candidates:rows('out_candidates'),recommendation:text('out_recommendation')};

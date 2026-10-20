@@ -4,21 +4,21 @@ import { snapshot } from './fixtures.mjs';
 import { projectFiles } from '../web/project-files.mjs';
 
 test('project modules preserve raw source editing and undo as one notebook change', async () => {
-  const { Studio, newDraft, requestFor, validDraft } = await import('../web/studio-model.mjs');
+  const { Notebook, newDraft, requestFor, validDraft } = await import('../web/edit-model.mjs');
   const session = { invalidate() {}, stop() {} };
-  const studio = new Studio(null, {save:async()=>{}}, {session,debounce:60000});
-  studio.state = newDraft(); studio.state.autoRun=false; studio.state.sourceCurrent=true; studio.state.source='out_1 = Geometry.area';
-  studio.result = {status:'ok'};
-  studio.setProjectFile('Geometry.roc','module [area]\narea = 15');
-  assert.equal(studio.result,null);
-  assert.equal(studio.state.sourceCurrent,true);
-  assert.equal(requestFor(studio.state,'evaluate').source,'out_1 = Geometry.area');
-  assert.deepEqual(requestFor(studio.state,'evaluate').files,[{path:'/workspace/Geometry.roc',source:'module [area]\narea = 15'}]);
-  studio.setProjectFile('Geometry.roc','module [area]\narea = 24');
-  studio.undo();assert.equal(studio.state.files[0].source,'module [area]\narea = 15');
-  studio.removeProjectFile('Geometry.roc');assert.deepEqual(studio.state.files,[]);
-  assert.equal(validDraft({...studio.state,files:[{path:'../outside.roc',source:''}]}),false);
-  studio.dispose();
+  const notebook = new Notebook(null, {save:async()=>{}}, {session,debounce:60000});
+  notebook.state = newDraft(); notebook.state.autoRun=false; notebook.state.sourceCurrent=true; notebook.state.source='out_1 = Geometry.area';
+  notebook.result = {status:'ok'};
+  notebook.setProjectFile('Geometry.roc','module [area]\narea = 15');
+  assert.equal(notebook.result,null);
+  assert.equal(notebook.state.sourceCurrent,true);
+  assert.equal(requestFor(notebook.state,'evaluate').source,'out_1 = Geometry.area');
+  assert.deepEqual(requestFor(notebook.state,'evaluate').files,[{path:'/workspace/Geometry.roc',source:'module [area]\narea = 15'}]);
+  notebook.setProjectFile('Geometry.roc','module [area]\narea = 24');
+  notebook.undo();assert.equal(notebook.state.files[0].source,'module [area]\narea = 15');
+  notebook.removeProjectFile('Geometry.roc');assert.deepEqual(notebook.state.files,[]);
+  assert.equal(validDraft({...notebook.state,files:[{path:'../outside.roc',source:''}]}),false);
+  notebook.dispose();
 });
 
 test('project paths cannot replace the notebook or escape a portable project', () => {
@@ -36,7 +36,7 @@ test('portable bundles retain project sources once and reject modified members',
   const display=utf8('module []'),displayHash=await sha256(display),originalFetch=globalThis.fetch;
   globalThis.fetch=async()=>new Response(display);
   try {
-    const compiler={compilerCommit:'test-compiler',artifacts:{'roclet.wasm':{sha256:'test-wasm'}},inputs:{'library/Display.roc':displayHash}};
+    const compiler={compilerCommit:'test-compiler',artifacts:{'roclet.wasm':{sha256:'test-wasm'}},inputs:{'package/Display.roc':displayHash}};
     const capture={document:{schema:1,title:'Project',format:'roc',preamble:'app [main!] {}',metadata:'',source:'',sourceCurrent:false,mode:'notebook',cells:[{kind:'code',source:'Geometry.area',attributes:'',outputs:[]}],files:[{path:'Geometry.roc',source:'module [area]\narea = 15'}]},source:'Geometry.area',snapshots:[],events:[],compiler:{commit:'test-compiler',wasmSha256:'test-wasm',displaySha256:displayHash},createdAt:'test'};
     const files=await bundleFiles(capture);
     assert.equal(text(files.get('project/Geometry.roc')),'module [area]\narea = 15');

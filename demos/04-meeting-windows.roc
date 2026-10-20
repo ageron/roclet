@@ -1,7 +1,8 @@
 app [] {
+    roclet: "https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst",
     time: "https://github.com/lukewilliamboswell/roc-time/releases/download/0.2.0/roc-time-7QH5VBiCwDLu3UkizpgB3FESJitahxR82Vgg2bWkJvHL.tar.zst",
 }
-import Display
+import roclet.Display
 import time.ExactInterval
 import time.OffsetTimestamp
 import time.EnglishGregorian

@@ -98,6 +98,9 @@ pub const Paths = struct {
 
 /// Inputs to `runEcho`. See field doc comments for the contract on each.
 pub const CachedProgram = struct { allocator: Allocator, bytes: ?[]u8 = null };
+pub fn isEmbeddedDisplayPackage(shorthand: []const u8, spec: []const u8) bool {
+    return std.mem.eql(u8, shorthand, "roclet") and std.mem.eql(u8, spec, std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n"));
+}
 pub const RunOptions = struct {
     app_header: []const u8 = "",
     root_name: ?[]const u8 = null,
@@ -157,6 +160,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         try @import("workspace.zig").global.put("/internal/header.roc", opts.app_header, false);
         const header = compile.app_header.parseAppHeader(opts.fallback_io, allocator, allocator, "/internal/header.roc") catch null;
         if (header) |parsed_header| for (parsed_header.non_platform_packages) |package| {
+            if (isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
             try header_writer.writer.print(", {s}: ", .{package.shorthand});
             try std.json.Stringify.value(package.spec, .{}, &header_writer.writer);
         };

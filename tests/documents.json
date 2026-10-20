@@ -1825,7 +1825,7 @@
     }
   },
   {
-    "name": "studio: wall permutation 0",
+    "name": "notebook: wall permutation 0",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -1875,7 +1875,7 @@
     }
   },
   {
-    "name": "studio: wall permutation 1",
+    "name": "notebook: wall permutation 1",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -1925,7 +1925,7 @@
     }
   },
   {
-    "name": "studio: wall permutation 2",
+    "name": "notebook: wall permutation 2",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -1975,7 +1975,7 @@
     }
   },
   {
-    "name": "studio: wall permutation 3",
+    "name": "notebook: wall permutation 3",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -2025,7 +2025,7 @@
     }
   },
   {
-    "name": "studio: wall permutation 4",
+    "name": "notebook: wall permutation 4",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -2075,7 +2075,7 @@
     }
   },
   {
-    "name": "studio: wall permutation 5",
+    "name": "notebook: wall permutation 5",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -2125,7 +2125,7 @@
     }
   },
   {
-    "name": "studio: selected cell checks whole module",
+    "name": "notebook: selected cell checks whole module",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -2174,7 +2174,7 @@
     }
   },
   {
-    "name": "studio: definition-only selection produces no result",
+    "name": "notebook: definition-only selection produces no result",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -2214,7 +2214,7 @@
     }
   },
   {
-    "name": "studio: deleted name cannot expose old values",
+    "name": "notebook: deleted name cannot expose old values",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -2229,7 +2229,7 @@
     }
   },
   {
-    "name": "studio: nested debug keeps order and root",
+    "name": "notebook: nested debug keeps order and root",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -2261,7 +2261,7 @@
     }
   },
   {
-    "name": "studio: compile-time failure retains debug without designated values",
+    "name": "notebook: compile-time failure retains debug without designated values",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -2289,7 +2289,7 @@
     }
   },
   {
-    "name": "studio: comment-only code retains its kind",
+    "name": "notebook: comment-only code retains its kind",
     "request": {
       "operation": "document",
       "action": "compose",
@@ -2329,7 +2329,7 @@
     }
   },
   {
-    "name": "studio: unfinished cell does not swallow later cells",
+    "name": "notebook: unfinished cell does not swallow later cells",
     "request": {
       "operation": "document",
       "action": "compose",
@@ -2368,7 +2368,7 @@
     }
   },
   {
-    "name": "studio: literal Markdown marker survives draft",
+    "name": "notebook: literal Markdown marker survives draft",
     "request": {
       "operation": "document",
       "action": "compose",
@@ -2397,7 +2397,7 @@
     }
   },
   {
-    "name": "studio: inline snapshots do not duplicate in draft",
+    "name": "notebook: inline snapshots do not duplicate in draft",
     "request": {
       "operation": "document",
       "action": "parse",
@@ -2411,7 +2411,7 @@
     }
   },
   {
-    "name": "studio: Markdown snapshots do not duplicate in draft",
+    "name": "notebook: Markdown snapshots do not duplicate in draft",
     "request": {
       "operation": "document",
       "action": "parse",
@@ -2425,7 +2425,7 @@
     }
   },
   {
-    "name": "studio: generated conflict blocks reactive evaluation",
+    "name": "notebook: generated conflict blocks reactive evaluation",
     "request": {
       "operation": "document",
       "action": "evaluate",
@@ -2618,6 +2618,98 @@
     }
   },
   {
+    "name": "Roc export supplies a package and executable entry point",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "import Display\n# %%\nDisplay.text(\"hello\")"
+    },
+    "expect": {
+      "status": "ok",
+      "contains": [
+        "https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst",
+        "import roclet.Display",
+        "out_1 = Display.text",
+        "display!(out_1)",
+        "main! = |_args|"
+      ],
+      "normalized_stable": true
+    }
+  },
+  {
+    "name": "Pinned Display package runs offline",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "app [main!] { roclet: \"https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst\" }\nimport roclet.Display\n# %%\nDisplay.markdown(\"# Hi\")"
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "# Hi"
+      ],
+      "display_kinds": [
+        "markdown"
+      ]
+    }
+  },
+  {
+    "name": "Pinned package imports inside cells run offline",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "app [main!] { roclet: \"https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst\" }\n# %%\nimport roclet.Display\nDisplay.text(\"hello\")"
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "hello"
+      ],
+      "display_kinds": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "Export does not rewrite import text in strings or Markdown",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\n# import Display\n# %%\n\"import Display\""
+    },
+    "expect": {
+      "status": "ok",
+      "absent": [
+        "https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst"
+      ],
+      "contains": [
+        "# import Display",
+        "\"import Display\""
+      ]
+    }
+  },
+  {
+    "name": "Invalid types cannot be exported as runnable Roc",
+    "request": {
+      "operation": "document",
+      "action": "export",
+      "format": "roc",
+      "target": "roc",
+      "source": "# %%\n1 + \"two\""
+    },
+    "expect": {
+      "status": "diagnostic"
+    }
+  },
+  {
     "name": "compact execution preserves Unicode results and editor source spans",
     "request": {
       "operation": "document",
@@ -2665,7 +2757,7 @@
     }
   },
   {
-    "name": "studio: isolated constant crash retains an independent value",
+    "name": "notebook: isolated constant crash retains an independent value",
     "request": {
       "operation": "document",
       "action": "evaluate",

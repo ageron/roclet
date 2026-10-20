@@ -1,0 +1,71 @@
+name: Deploy Roclet
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Zig
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(jq -r .zigVersion compiler.lock.json)
+          curl --fail --location --retry 3 https://ziglang.org/download/index.json -o "$RUNNER_TEMP/zig-index.json"
+          url=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].tarball' "$RUNNER_TEMP/zig-index.json")
+          sha=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].shasum' "$RUNNER_TEMP/zig-index.json")
+          curl --fail --location --retry 3 "$url" -o "$RUNNER_TEMP/zig.tar.xz"
+          printf '%s  %s\n' "$sha" "$RUNNER_TEMP/zig.tar.xz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/zig"
+          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        id: compiler
+        with:
+          path: |
+            artifacts
+            .toolchain
+            .zig-cache
+            ~/.cache/zig
+          key: roclet-linux-v1-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'tools/**', 'compiler-adapter/**', 'core/**', 'package/**', 'vendor/**') }}
+      - name: Prepare pinned compiler dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/roc"
+          git -C "$RUNNER_TEMP/roc" remote add origin "$(jq -r .compilerRepository compiler.lock.json)"
+          git -C "$RUNNER_TEMP/roc" fetch --depth=1 origin "$(jq -r .compilerCommit compiler.lock.json)"
+          sh tools/prepare-compiler.sh "$RUNNER_TEMP/roc"
+      - name: Test and package
+        run: |
+          zig build test
+          zig build package
+          unzip -q zig-out/roclet-pages.zip -d _site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

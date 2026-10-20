@@ -34,9 +34,9 @@ architecture; the current native build is tested on macOS Apple Silicon only.
 ./roclet-serve . 4173
 ```
 
-Open <http://127.0.0.1:4173/web/studio.html>. Leave the terminal running while
+Open <http://127.0.0.1:4173/web/edit.html>. Leave the terminal running while
 using the app, or prepare offline use before stopping it. Don't double-click
-`studio.html`: the interactive app needs HTTPS or a localhost server.
+`edit.html`: the interactive app needs HTTPS or a localhost server.
 
 The browser files can also be served by another static web server. The bundled
 native executable is platform-specific; the browser app is WebAssembly.
@@ -61,7 +61,7 @@ compiler checkout. If the required commit is missing, run `git -C ../roc-compile
 The first build needs network access for compiler dependencies, several GiB of
 RAM, and time to compile. No separately installed Roc, Node.js, npm, or Python is required.
 
-Open <http://127.0.0.1:4173/web/studio.html>. To choose another port:
+Open <http://127.0.0.1:4173/web/edit.html>. To choose another port:
 
 ```sh
 zig build serve -- 4174
@@ -79,7 +79,7 @@ zig build test
 zig build package
 ```
 
-Browser checks run separately: open `/web/studio-ui-conformance.html`,
+Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/document-conformance.html`, `/web/m5-conformance.html`, and
 `/web/math-conformance.html` on your local server. `zig build test` does not launch Chrome.
 Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
@@ -116,7 +116,7 @@ The [demos](../demos/README.md) have **Open demo** links for the hosted app.
 For local use, download the source file and open it in Roclet. The
 [meeting-window demo](../demos/04-meeting-windows.roc) uses the released roc-time
 0.2.0 package. With the bundled server running, open
-<http://127.0.0.1:4173/web/studio.html?example=meeting-windows>.
+<http://127.0.0.1:4173/web/edit.html?example=meeting-windows>.
 
 Roclet's native runner accepts notebooks too:
 
@@ -124,22 +124,38 @@ Roclet's native runner accepts notebooks too:
 ./zig-out/bin/roclet run demos/01-reactivity.roc
 ```
 
-To run an exported rich-output notebook with ordinary Roc, put
-[`Display.roc`](../library/Display.roc) beside it. Roclet supplies this module
-itself; Roclet bundles include it automatically.
+Downloaded `.roc` notebooks are ordinary runnable Roc programs, including the demos:
+
+```sh
+roc demos/01-reactivity.roc
+roc demos/02-a-little-data.roc
+```
+
+Final cell expressions become named outputs, and a generated `main!` prints them
+in notebook order. Downloads are checked first; fix reported errors before
+exporting. Browser autosave still keeps unfinished drafts.
+
+Rich-output notebooks import the content-addressed [Display package](../package/README.md).
+Ordinary Roc downloads and caches it on first use; no adjacent `Display.roc` is
+needed. Roclet includes this exact package's implementation in its native and
+browser runtimes, so running notebooks in Roclet still works offline.
 
 ## Hosting on GitHub Pages
 
-The public app is **https://ageron.github.io/roclet/**. GitHub Pages serves the
-built static files from the `gh-pages` branch, with no execution server.
-The source code remains on `main`.
+The public app is **https://ageron.github.io/roclet/**. Every push to `main`
+automatically builds, tests, and deploys the static site through GitHub Actions.
+No execution server is needed. Follow progress under **Actions → Deploy Roclet**;
+a failed build or test leaves the previous deployment online.
 
-To prepare an update, run `zig build package`. The resulting
-`zig-out/roclet-pages.zip` contains the complete static site, including the WASM
-compiler, offline assets, demos, a root redirect, and `.nojekyll`. It excludes
-native executables. Extract it into a clean checkout of the `gh-pages` branch,
-replace the previous site's files, commit, and push that branch. Do not publish
-the source checkout: compiled artifacts are intentionally ignored on `main`.
+The workflow installs the Zig version in `compiler.lock.json` and builds the
+pinned Roc compiler. Compiler artifacts are cached between runs; changes to the
+compiler inputs trigger a fresh build. The first deployment takes longer.
+You can also rerun deployment using **Actions → Deploy Roclet → Run workflow**.
+In **Settings → Pages**, the publishing source must be **GitHub Actions**.
+
+For manual hosting elsewhere, `zig build package` creates
+`zig-out/roclet-pages.zip`. Extract the archive and serve its contents over HTTPS,
+preserving relative paths. It contains the compiler, demos, and offline assets.
 
 ### Package downloads on a static host
 
@@ -171,13 +187,6 @@ service. Browser cache identities retain the original package URLs.
 Set `endpoint` to `null` to download directly from hosts that permit CORS.
 Already verified browser packages can be restored without contacting the service.
 
-In **Settings → Pages**, use **Deploy from a branch → gh-pages → / (root)**.
-Keep HTTPS enabled and preserve all relative paths in the archive.
-Only publish a build you've tested; pushing source changes to `main` does not
-update the hosted site automatically.
 
-After deployment, open the public app in Chrome, try the [demos](../demos/README.md),
-then check offline preparation. Existing offline users must close all Roclet tabs
-and reopen after the update is prepared.
-
-See GitHub's [Pages documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site).
+Existing offline users can prepare the updated version through
+**File → Offline & storage**, then close all Roclet tabs and reopen.

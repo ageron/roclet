@@ -16,7 +16,7 @@ Roclet runs Roc locally through WebAssembly—and keeps working offline.
 
 **[Open Roclet](https://ageron.github.io/roclet/)** — no installation needed.
 
-[Try the rich outputs demo](https://ageron.github.io/roclet/web/studio.html?example=rich-outputs),
+[Try the rich outputs demo](https://ageron.github.io/roclet/web/edit.html?example=rich-outputs),
 change `width`, and see what happens. The [installation guide](docs/installation.md)
 covers offline use and running locally.
 
@@ -59,7 +59,7 @@ zig build
 zig build serve
 ```
 
-Open <http://127.0.0.1:4173/web/studio.html>.
+Open <http://127.0.0.1:4173/web/edit.html>.
 The [installation guide](docs/installation.md) covers the compiler checkout,
 offline use, downloads, and sharing. The [design](design.md) describes where
 Roclet is heading.

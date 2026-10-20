@@ -19,20 +19,20 @@
     "browserUnitTests": 8,
     "nativeWasmDocumentResponses": 180,
     "freshDocumentWorkers": 45,
-    "studioContracts": 13,
+    "notebookContracts": 13,
     "editorUiDesktop": 21,
     "editorUiCompact390px": 21,
     "m3Contracts": 11
   },
   "manual": [
-    "Prepared localhost:4175, stopped its dedicated server, closed and reopened Studio successfully.",
+    "Prepared localhost:4175, stopped its dedicated server, closed and reopened Notebook successfully.",
     "Changed width from 5 to 9 with server unavailable; both outputs and debug recomputed to 27.0 and edit saved locally.",
     "Requested notebook and full interactive-site exports with server unavailable; export status reported two result snapshots.",
     "Independently decoded the browser-generated ZIP, verified its CRCs/member SHA-256 hashes, and ran its Roc source with the packaged native runner.",
     "Imported that browser-generated bundle on a separate prepared origin while its server was unavailable; auto-run remained off, imported values were unverified, manual run reproduced two 15.0 values.",
     "Prepared a new release on localhost:4176 while the previous version was active; UI reported waiting for tabs to close and the old DOM remained unchanged.",
-    "Stopped that server, closed Studio, reopened; observed the new release marker and recovered the saved draft.",
-    "Verified every extracted Studio runtime asset and ZIP CRC; packaged native runner returned named 15.0 outputs and attributed debug for both Roc and Markdown source.",
+    "Stopped that server, closed Notebook, reopened; observed the new release marker and recovered the saved draft.",
+    "Verified every extracted Notebook runtime asset and ZIP CRC; packaged native runner returned named 15.0 outputs and attributed debug for both Roc and Markdown source.",
     "Served the extracted distribution independently on localhost:4177; publication created an editable copy with unverified result/debug snapshots and manual run produced current named results.",
     "Installed preview passed its isolated UI and M3 tests; production browser drafts were not edited by testing."
   ],
@@ -44,7 +44,7 @@
     "Native distribution is macOS ARM64; native nontermination needs a job supervisor timeout."
   ],
   "packages": {
-    "roclet-studio.zip": {
+    "roclet-notebook.zip": {
       "bytes": 17009255,
       "sha256": "a6733f40e23a556a8235801ec4b0e5b51c604022c8ab79a22c9e9e79adf14060"
     },

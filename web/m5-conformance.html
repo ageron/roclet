@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>M5 rich output checks</title><style>body{font:14px/1.5 system-ui;margin:2rem}iframe{width:100%;height:650px;border:1px solid #ddd}pre{white-space:pre-wrap}</style><h1>M5 rich output checks</h1><p id="status">Starting isolated notebook…</p><pre id="log"></pre><iframe title="Isolated rich output test"></iframe><script type="module">
 const frame=document.querySelector('iframe');
-const html=await fetch('./studio.html').then(r=>r.text());
-frame.srcdoc=html.replace('<script type="module">import { startStudio } from "./studio.mjs"; await startStudio();<'+'/script>','<script type="module" src="./m5-conformance.mjs"><'+'/script>');
+const html=await fetch('./edit.html').then(r=>r.text());
+frame.srcdoc=html.replace('<script type="module">import { startNotebook } from "./edit.mjs"; await startNotebook();<'+'/script>','<script type="module" src="./m5-conformance.mjs"><'+'/script>');
 window.addEventListener('message',event=>{if(event.source!==frame.contentWindow || event.origin!==location.origin || !event.data?.rocletM5) return;document.getElementById('status').textContent=event.data.status;document.getElementById('log').textContent=event.data.log;if(event.data.result) document.documentElement.dataset.result=event.data.result;});
 </script></html>

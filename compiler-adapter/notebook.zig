@@ -103,6 +103,7 @@ const State = struct {
             try workspace.global.put("/internal/header.roc", opts.app_header, false);
             const parsed = try compile.app_header.parseAppHeader(workspace.global.io(a), a, a, "/internal/header.roc");
             for (parsed.non_platform_packages) |package| {
+                if (engine.isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
                 try header.writer.print(", {s}: ", .{package.shorthand});
                 try std.json.Stringify.value(package.spec, .{}, &header.writer);
             }

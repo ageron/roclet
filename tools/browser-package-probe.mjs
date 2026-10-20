@@ -1,9 +1,9 @@
-// Run through browser-check.mjs --page web/studio.html --script <this file>.
+// Run through browser-check.mjs --page web/edit.html --script <this file>.
 // The default probes public GitHub URLs. ?package-test=local-mirror explicitly
 // isolates compilation/cache behavior using unchanged, locally served archives.
 (async()=>{
   const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-  const until=async predicate=>{for(let i=0;i<600;i++){if(predicate())return;await pause(100);}throw Error('Timed out waiting for Studio');};
+  const until=async predicate=>{for(let i=0;i<600;i++){if(predicate())return;await pause(100);}throw Error('Timed out waiting for Notebook');};
   const assert=(value,message)=>{if(!value)throw Error(message);};
   const $=id=>document.getElementById(id);
   const urls=[
@@ -56,14 +56,14 @@
   report.status=$('status').textContent;report.diagnostics=$('document-diagnostics').textContent;
   report.studioInitial=values();
   if(!$('status').textContent.startsWith('Current')) {
-    assert(!localMirror,'Mirrored package failed in Studio: '+report.status+' '+report.diagnostics);
+    assert(!localMirror,'Mirrored package failed in Notebook: '+report.status+' '+report.diagnostics);
     return {...report,result:'blocked',passed:false};
   }
-  assert(values()[0]==='Ok(12345)','Studio number mismatch');
-  assert(values()[1]==='Err(ParseError({ message: "unexpected input", offset: 2 }))','Studio error mismatch');
+  assert(values()[0]==='Ok(12345)','Notebook number mismatch');
+  assert(values()[1]==='Err(ParseError({ message: "unexpected input", offset: 2 }))','Notebook error mismatch');
   await enter(source.replace('12345','67890'));await run();
   assert(values()[0]==='Ok(67890)','Edit returned stale output');report.studioEdited=values();
-  $('stop').click();await run();assert(values()[0]==='Ok(67890)','Studio worker restart failed');report.studioWorkerRestart=values();
+  $('stop').click();await run();assert(values()[0]==='Ok(67890)','Notebook worker restart failed');report.studioWorkerRestart=values();
   if(localMirror) {
     const module=path=>JSON.stringify(new URL(path,location.href).href);
     const workerSource=`import{createWasmTransport}from ${module('/compiler-adapter/wasm.mjs')};import{BuildCache,compilerNamespace}from ${module('/web/build-cache.mjs')};import{BrowserPackages}from ${module('/web/packages.mjs')};onmessage=async({data})=>{try{const raw=await createWasmTransport(data.bytes),ns=await compilerNamespace(data.bytes,raw.cacheIdentity());if(!raw.importCache(await new BuildCache(ns).load()))throw Error('Cache restore failed');const p=new BrowserPackages(new BuildCache(ns+':packages'),{fetch:async()=>{throw Error('Network disabled for this worker');}});postMessage({result:await p.evaluate(raw,data.request)});}catch(e){postMessage({error:e.stack});}};`;
@@ -79,8 +79,8 @@
     const csv=await packages.evaluate(raw,{...request,source:csvSource});
     assert(csv.status==='ok',JSON.stringify(csv));
     assert(JSON.stringify(csv.evaluation.values.map(value=>value.text))===JSON.stringify(['Ok(12345)','Ok(["Earth", "Mars"])','Ok(3)']),'Typed CSV values differ');
-    await enter(csvSource);await run();assert(JSON.stringify(values())===JSON.stringify(['Ok(12345)','Ok(["Earth", "Mars"])','Ok(3)']),'Studio CSV values differ');
-    $('stop').click();await run();assert(JSON.stringify(values())===JSON.stringify(['Ok(12345)','Ok(["Earth", "Mars"])','Ok(3)']),'Restarted Studio CSV values differ');
+    await enter(csvSource);await run();assert(JSON.stringify(values())===JSON.stringify(['Ok(12345)','Ok(["Earth", "Mars"])','Ok(3)']),'Notebook CSV values differ');
+    $('stop').click();await run();assert(JSON.stringify(values())===JSON.stringify(['Ok(12345)','Ok(["Earth", "Mars"])','Ok(3)']),'Restarted Notebook CSV values differ');
     const {BuildCache}=await import('/web/build-cache.mjs');await new BuildCache(namespace).save(raw.takeCacheUpdates());
     const offlineCsv=await offlineRequest({...request,source:csvSource});
     assert(offlineCsv.status==='ok' && JSON.stringify(offlineCsv.evaluation.values)===JSON.stringify(csv.evaluation.values),'Offline CSV values differ');

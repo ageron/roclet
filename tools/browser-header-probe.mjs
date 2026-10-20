@@ -27,7 +27,7 @@
   await until(()=>$('status').textContent.startsWith('Current'));
   assert([...document.querySelectorAll('#notebook .cm-content')].map(editorFor).find(cell=>cell.source.includes('out_candidates =')).dom.closest('.cell').querySelectorAll('.value[data-stale="false"] table tbody tr').length===3,'Header run shortcut did not evaluate');
   await until(()=>$('save-status').textContent==='Saved in this browser');
-  const {DraftStore}=await import('/web/studio-store.mjs'),store=new DraftStore();
+  const {DraftStore}=await import('/web/edit-store.mjs'),store=new DraftStore();
   try {assert((await store.list()).some(record=>record.preamble===editor.source),'Header edit was not autosaved');}finally{store.close();}
   $('source-view').click();await until(()=>!$('source-pane').hidden);
   assert($('app-header').hidden,'Header card is repeated in source view');

@@ -48,8 +48,8 @@
     "compilerPermutations": 21,
     "unitTests": 8,
     "workerLifecycle": "pass",
-    "studioContracts": 13,
-    "studio": "pass"
+    "notebookContracts": 13,
+    "notebook": "pass"
   },
   "formatWorkflowTimingsMs": {
     "prepare": 1266,
@@ -59,7 +59,7 @@
     "editedConvert": 87,
     "editedRun": 84
   },
-  "manualStudioChecks": [
+  "manualNotebookChecks": [
     "width edit updates both outputs",
     "dependent cell moved before its inputs",
     "draft restored on reload",
@@ -79,7 +79,7 @@
     "desktopUiContracts": 10,
     "compactUiContracts": 10,
     "compactWidthPx": 390,
-    "existingStudioContracts": 13,
+    "existingNotebookContracts": 13,
     "result": "pass",
     "manualChecks": [
       "native keyboard copy/cut/paste of multiple cells",
@@ -95,7 +95,7 @@
     "desktopUiContracts": 17,
     "compactUiContracts": 17,
     "compactWidthPx": 390,
-    "existingStudioContracts": 13,
+    "existingNotebookContracts": 13,
     "result": "pass",
     "vendoredModules": 14,
     "vendoredJavaScriptBytes": 1166035,

@@ -1,6 +1,6 @@
 import {assert} from './harness.mjs';
 import {DocumentSession} from '../web/document-session.mjs';
-import {newDraft,requestFor} from '../web/studio-model.mjs';
+import {newDraft,requestFor} from '../web/edit-model.mjs';
 const encoder=new TextEncoder();
 const rounded=n=>Math.round(n*1000)/1000;
 const median=values=>rounded([...values].sort((a,b)=>a-b)[Math.floor(values.length/2)]);

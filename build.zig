@@ -66,6 +66,16 @@ pub fn build(b: *std.Build) void {
     b.step("package", "Package the verified offline Roclet and host-platform headless runner").dependOn(&package.step);
     serve.step.dependOn(&offline.step);
 
+    const demo_tests = b.addExecutable(.{ .name = "roclet-runnable-demos", .root_module = b.createModule(.{
+        .root_source_file = b.path("tests/runnable-demos.zig"),
+        .target = b.graph.host,
+        .optimize = .small,
+    }) });
+    const demos = b.addRunArtifact(demo_tests);
+    demos.addArgs(&.{ root, b.option([]const u8, "roc", "Ordinary Roc executable for demo tests") orelse "roc" });
+    demos.has_side_effects = true;
+    b.step("test-demos", "Run published demos with ordinary Roc and the local Display package").dependOn(&demos.step);
+
     const workspace_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("compiler-adapter/workspace.zig"), .target = b.graph.host, .optimize = .safe, .link_libc = true }) });
     inline for (.{ "ctx", "unbundle", "build_options" }) |module| workspace_tests.root_module.addImport(module, roc.module(module));
     const workspace_run = b.addRunArtifact(workspace_tests);
@@ -134,7 +144,8 @@ fn adapter(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.Resolved
     if (target.result.cpu.arch == .wasm32) exe.root_module.addImport("compressed_builtins", compressedBuiltins(b, roc, compiled_builtins));
     exe.root_module.addCSourceFile(.{ .file = b.path("vendor/md4c/md4c.c"), .flags = &.{ "-std=c99", "-O2" } });
     exe.root_module.addIncludePath(b.path("vendor/md4c"));
-    exe.root_module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("library/Display.roc") });
+    exe.root_module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("package/Display.roc") });
+    exe.root_module.addAnonymousImport("display-package-url.txt", .{ .root_source_file = b.path("package/display-package-url.txt") });
     exe.root_module.addAnonymousImport("Document.roc", .{ .root_source_file = b.path("core/Document.roc") });
     return exe;
 }

@@ -1235,7 +1235,7 @@ wrapper alone is insufficient evidence for arbitrary module conversion.
 
 Implemented. See [M1 implementation notes](docs/m1.md) for the pinned format,
 commands, execution limits, and validation results. The format playground is
-available at `/web/formats.html`; the reactive cell editor is at `/web/studio.html`.
+available at `/web/formats.html`; the reactive cell editor is at `/web/edit.html`.
 
 Tasks:
 
@@ -1255,7 +1255,7 @@ never receives a random ID without an explicit request.
 
 ### M2 — Ship a local reactive browser prototype
 
-Implemented at `/web/studio.html`. See [M2 implementation notes](docs/m2.md) for
+Implemented at `/web/edit.html`. See [M2 implementation notes](docs/m2.md) for
 the evaluation, recovery, editor, and rendering limits.
 
 Tasks:

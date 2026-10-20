@@ -1,4 +1,4 @@
-import { makeCell } from './studio-model.mjs';
+import { makeCell } from './edit-model.mjs';
 
 // Ephemeral UI selection: keys never become notebook identifiers.
 export class CellSelection {

@@ -1,0 +1,126 @@
+name: Release package
+
+on:
+  pull_request:
+    paths: ['package/**', 'demos/**', 'fixtures/documents/**', 'tests/runnable-demos.zig', 'tools/update-package-pin.py', 'tests/test-package-pin.py', 'build.zig', '.github/workflows/release-package.yml']
+  push:
+    branches: [main]
+    paths: ['package/**', 'demos/**', 'fixtures/documents/**', 'tests/runnable-demos.zig', 'tools/update-package-pin.py', 'tests/test-package-pin.py', 'build.zig', '.github/workflows/release-package.yml']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (for example 0.1.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'package-release' || format('package-check-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.validate.outputs.release_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: roc-lang/setup-roc@f5a74bf90aa694b43ab4a7cbfdb19273bc6aa697
+        with:
+          version: nightly-new-compiler
+          nightly-tag: nightly-2026-10-06-c34079d
+      - id: validate
+        uses: roc-lang/release-package/actions/validate-release@af2f0cd8662874b825ff3917f4286e793ba18c55
+        with:
+          release_version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+          dry_run: ${{ github.event_name != 'workflow_dispatch' }}
+          github_token: ${{ github.token }}
+      - name: Install pinned Zig
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(jq -r .zigVersion compiler.lock.json)
+          curl --fail --location --retry 3 https://ziglang.org/download/index.json -o "$RUNNER_TEMP/zig-index.json"
+          url=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].tarball' "$RUNNER_TEMP/zig-index.json")
+          sha=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].shasum' "$RUNNER_TEMP/zig-index.json")
+          curl --fail --location --retry 3 "$url" -o "$RUNNER_TEMP/zig.tar.xz"
+          printf '%s  %s\n' "$sha" "$RUNNER_TEMP/zig.tar.xz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/zig"
+          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
+          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+      - name: Prepare pinned compiler dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/roc-source"
+          git -C "$RUNNER_TEMP/roc-source" remote add origin "$(jq -r .compilerRepository compiler.lock.json)"
+          git -C "$RUNNER_TEMP/roc-source" fetch --depth=1 origin "$(jq -r .compilerCommit compiler.lock.json)"
+          sh tools/prepare-compiler.sh "$RUNNER_TEMP/roc-source"
+      - name: Test release metadata updates
+        run: python3 tests/test-package-pin.py
+      - name: Build and test the extracted package with ordinary Roc
+        run: zig build test-demos
+      - name: Collect the tested archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .release/build
+          cp "$(cat artifacts/display-package-test/tested-bundle.txt)" .release/build/
+      - uses: roc-lang/release-package/actions/prepare-bundles@af2f0cd8662874b825ff3917f4286e793ba18c55
+        with:
+          bundle_glob: .release/build/*.tar.zst
+          test_os_json: '["ubuntu-24.04"]'
+      - name: Prepare release notes and pin update
+        env:
+          RELEASE_VERSION: ${{ steps.validate.outputs.release_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive=$(basename "$(cat artifacts/display-package-test/tested-bundle.txt)")
+          url=$(python3 tools/update-package-pin.py --version "$RELEASE_VERSION" --archive "$archive")
+          printf '%s\n' "$archive" > .release/archive.txt
+          printf '# Roclet Display %s\n\nPackage: %s\n\nImport with `import roclet.Display`. Includes text, Markdown, tables and images, with readable plain-text output in ordinary Roc.\n' "$RELEASE_VERSION" "$url" > .release/release-notes.md
+          git diff -- package demos fixtures/documents tests/documents.json > .release/package-pin.patch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: display-release
+          path: .release/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: display-release
+          path: .release
+      - uses: roc-lang/release-package/actions/publish-release@af2f0cd8662874b825ff3917f4286e793ba18c55
+        with:
+          release_version: ${{ needs.build.outputs.version }}
+          github_token: ${{ github.token }}
+          target: ${{ github.sha }}
+      - name: Update the package pin
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: python3 tools/update-package-pin.py --version "$RELEASE_VERSION" --archive "$(cat .release/archive.txt)"
+      - uses: roc-lang/release-package/actions/create-followup-pr@af2f0cd8662874b825ff3917f4286e793ba18c55
+        with:
+          release_version: ${{ needs.build.outputs.version }}
+          paths: package/display-package-url.txt package/README.md demos fixtures/documents/rich-outputs.roc tests/documents.json
+          branch_prefix: codex/display-release
+          base_branch: main
+          commit_message: 'Update Display package to ${{ needs.build.outputs.version }}'
+          pr_body: 'Updates the pinned Display release used by Roclet exports, demos, and offline runtime. The release archive passed ordinary-Roc demo tests before publication.'
+          github_token: ${{ github.token }}

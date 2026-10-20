@@ -1,7 +1,7 @@
 import {zip,unzip,utf8,text} from './archive.mjs';
 import {sha256,verified} from './offline-cache.mjs';
 import {workerSource} from './offline.mjs';
-import {newDraft,makeCell,validDraft} from './studio-model.mjs';
+import {newDraft,makeCell,validDraft} from './edit-model.mjs';
 import {embedMathStyles} from './math-view.mjs';
 import {renderMarkdown} from './markdown-view.mjs';
 import {renderDisplay,normalizeDisplay} from './display-view.mjs';
@@ -10,15 +10,16 @@ export const downloadName = title => (title||'notebook').replace(/[^a-z0-9._ -]/
 export function download(blob,name) {
   const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),5000);
 }
-export async function captureExport(studio,compiler,{results=false,debug=false}={}) {
-  const state=structuredClone(studio.state),current=structuredClone(studio.result);
-  const parsed=await studio.inspect('export');
+export async function captureExport(notebook,compiler,{results=false,debug=false}={}) {
+  const state=structuredClone(notebook.state),current=structuredClone(notebook.result);
+  const parsed=await notebook.inspect('export');
+  if(state.format==='roc' && parsed.status!=='ok') throw new Error('Fix the errors before exporting runnable Roc, or switch to Markdown to save unfinished source.');
   const document={schema:1,title:state.title,format:state.format,preamble:state.preamble??'',metadata:state.metadata??'',source:state.sourceCurrent?state.source:'',sourceCurrent:!!state.sourceCurrent,mode:state.mode,
     files:projectFiles(state.files),
     cells:(state.sourceCurrent?(parsed.draft?.cells??parsed.model.cells):state.cells).map(({kind,source,attributes,outputs})=>({kind,source,attributes:attributes??'',outputs:outputs??[]}))};
   const snapshots=results && ['ok','partial'].includes(current?.status) ? (current.evaluation?.values??[]).map(v=>({cell:current.model.cells.findIndex(c=>c.output===v.root),root:v.root,text:v.text,...(v.display?{display:normalizeDisplay(v.display)}:{})})) : [];
   const events=debug ? (current?.evaluation?.events??[]).map(({cell,root,kind,message})=>({cell,root,kind,message})) : [];
-  return {document,source:parsed.source,model:parsed.model,rendering:parsed.rendering??[],snapshots,events,compiler:{commit:compiler.compilerCommit,wasmSha256:compiler.artifacts['roclet.wasm'].sha256,displaySha256:compiler.inputs['library/Display.roc']},createdAt:new Date().toISOString()};
+  return {document,source:parsed.source,model:parsed.model,rendering:parsed.rendering??[],snapshots,events,compiler:{commit:compiler.compilerCommit,wasmSha256:compiler.artifacts['roclet.wasm'].sha256,displaySha256:compiler.inputs['package/Display.roc']},createdAt:new Date().toISOString()};
 }
 export async function bundleFiles(capture) {
   const sourcePath=capture.document.format==='roc'?'notebook.roc':'notebook.md';
@@ -27,7 +28,6 @@ export async function bundleFiles(capture) {
   const files=new Map([[sourcePath,utf8(capture.source)],['document.json',utf8(JSON.stringify(document))]]);
   for(const file of sources) files.set(`project/${file.path}`,utf8(file.source));
   if(capture.snapshots.length || capture.events.length) files.set('results.json',utf8(JSON.stringify({snapshots:capture.snapshots,events:capture.events,createdAt:capture.createdAt})));
-  const module=await fetch(new URL('../library/Display.roc',import.meta.url));if(!module.ok) throw new Error('Display module is unavailable; rebuild the offline distribution.');const moduleBytes=new Uint8Array(await module.arrayBuffer());if(await sha256(moduleBytes)!==capture.compiler.displaySha256) throw new Error('The Display module changed. Reload Roclet before exporting.');files.set('Display.roc',moduleBytes);
   const entries=[];for(const [path,bytes] of files) entries.push({path,bytes:bytes.length,sha256:await sha256(bytes)});
   files.set('roclet.json',utf8(JSON.stringify({schema:1,type:'roclet-notebook',title:capture.document.title,source:sourcePath,compiler:capture.compiler,createdAt:capture.createdAt,files:entries},null,2)));
   return files;
@@ -43,7 +43,7 @@ export async function importBundle(bytes,compiler) {
     const project=typeof entry.path==='string' && entry.path.startsWith('project/');
     if(project) projectPath(entry.path.slice(8));
     if((!project && !['notebook.roc','notebook.md','document.json','results.json','Display.roc'].includes(entry.path)) || paths.has(entry.path)) throw new Error('Unsupported or duplicate bundle entry.');
-    if(entry.path==='Display.roc' && entry.sha256!==compiler.inputs?.['library/Display.roc']) throw new Error('Bundled Display module does not match this compiler distribution.');
+    if(entry.path==='Display.roc' && entry.sha256!==compiler.inputs?.['package/Display.roc']) throw new Error('Bundled Display module does not match this compiler distribution.');
     paths.add(entry.path);const file=files.get(entry.path);
     if(!file || file.length!==entry.bytes || await sha256(file)!==entry.sha256) throw new Error(`Bundle integrity check failed: ${entry.path}`);
   }
@@ -105,7 +105,7 @@ export async function exportSite(capture,reportOptions={}) {
   files.set('web/offline-release.json',utf8(JSON.stringify(release)));
   files.set('web/offline-worker.mjs',utf8(workerSource(release)));
   const bundle=new Uint8Array(await (await exportBundle(capture)).arrayBuffer());files.set('web/published.roclet.zip',bundle);
-  files.set('index.html',utf8('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Roclet notebook</title><style>body{font:18px/1.6 system-ui;max-width:650px;margin:10vh auto;padding:2rem}a{color:#356e58}</style><h1>Roclet notebook</h1><p><a href="web/studio.html?publication=published.roclet.zip">Open an editable copy in Roclet</a></p><p><a href="report.html">Read the static report</a> · <a href="web/published.roclet.zip" download>Download the Roclet bundle</a></p><p>Run this folder on HTTPS or a localhost static server. All computation stays in your browser.</p></html>'));
+  files.set('index.html',utf8('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Roclet notebook</title><style>body{font:18px/1.6 system-ui;max-width:650px;margin:10vh auto;padding:2rem}a{color:#356e58}</style><h1>Roclet notebook</h1><p><a href="web/edit.html?publication=published.roclet.zip">Open an editable copy in Roclet</a></p><p><a href="report.html">Read the static report</a> · <a href="web/published.roclet.zip" download>Download the Roclet bundle</a></p><p>Run this folder on HTTPS or a localhost static server. All computation stays in your browser.</p></html>'));
   files.set('report.html',new Uint8Array(await (await exportReport(capture,reportOptions)).arrayBuffer()));
   files.set('README.txt',utf8('Serve this extracted directory with any static HTTP server (HTTPS or localhost). Open index.html. No build, Node, accounts, or CDN needed. File URLs are not supported. The editable copy is saved only in the recipient browser. Choose File > Offline & storage > Prepare for offline use before disconnecting. The separate report.html opens directly without a server.\n'));
   // Include the publication in this site's offline release as well.

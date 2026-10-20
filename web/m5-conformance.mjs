@@ -1,10 +1,10 @@
 import {assert} from '../tests/harness.mjs';
-import {startStudio} from './studio.mjs';
+import {startNotebook} from './edit.mjs';
 import {normalizeDisplay,renderDisplay} from './display-view.mjs';
 import {captureExport,exportBundle,importBundle,exportReport} from './sharing.mjs';
 import {unzip,text} from './archive.mjs';
 import {DocumentSession} from './document-session.mjs';
-let studio,session,count=0,log='';
+let notebook,session,count=0,log='';
 const report=message=>{count++;log+=`PASS ${message}\n`;parent.postMessage({rocletM5:true,status:`${count} checks passed…`,log},new URL(document.baseURI).origin);};
 const until=async predicate=>{const start=performance.now();while(!predicate()){if(performance.now()-start>20000) throw new Error('Timed out waiting for UI');await new Promise(r=>setTimeout(r,25));}};
 try {
@@ -38,24 +38,24 @@ try {
   report('Markdown uses the existing parser and safe DOM renderer');
   const rows=Array.from({length:205},(_,i)=>`["${i}"]`).join(',');const bounded=await session.request({operation:'document',action:'evaluate',format:'roc',source:`import Display\n# %%\nDisplay.table(["Index"], [${rows}])`});assert.equal(bounded.status,'ok');assert.equal(bounded.evaluation.values[0].display.rows.length,200);assert.equal(bounded.evaluation.values[0].display.row_count,205);
   report('Roc bounds table previews before crossing the WASM boundary');
-  studio=await startStudio({save:async()=>{},list:async()=>[]});await until(()=>studio.result?.status==='ok');
-  await studio.open(await fetch('../fixtures/documents/rich-outputs.roc').then(r=>r.text()),'Rich outputs.roc');studio.setAuto(false);await studio.run();
-  assert.equal(studio.result.status,'ok');assert.equal(document.querySelectorAll('#cells .rich-output').length,3);assert.equal(document.querySelectorAll('#cells .display-image').length,1);assert.match(document.querySelector('#cells table').textContent,/9007199254740993/);
+  notebook=await startNotebook({save:async()=>{},list:async()=>[]});await until(()=>notebook.result?.status==='ok');
+  await notebook.open(await fetch('../fixtures/documents/rich-outputs.roc').then(r=>r.text()),'Rich outputs.roc');notebook.setAuto(false);await notebook.run();
+  assert.equal(notebook.result.status,'ok');assert.equal(document.querySelectorAll('#cells .rich-output').length,3);assert.equal(document.querySelectorAll('#cells .display-image').length,1);assert.match(document.querySelector('#cells table').textContent,/9007199254740993/);
   await until(()=>document.querySelector('#cells .display-image')?.complete);assert(document.querySelector('#cells .display-image').naturalWidth>0);
-  const original=document.querySelector('#cells table'),index=studio.state.cells.findIndex(c=>c.source.includes('width = 5'));
-  studio.editCell(index,'width = 8\nheight = 3');assert(document.contains(original));assert.equal(original.closest('.result-block').dataset.stale,'true');await studio.run();assert.match(document.querySelector('#cells .markdown').textContent,/Rich outputs|area/);assert(studio.result.evaluation.values.some(v=>v.text.includes('24')));
+  const original=document.querySelector('#cells table'),index=notebook.state.cells.findIndex(c=>c.source.includes('width = 5'));
+  notebook.editCell(index,'width = 8\nheight = 3');assert(document.contains(original));assert.equal(original.closest('.result-block').dataset.stale,'true');await notebook.run();assert.match(document.querySelector('#cells .markdown').textContent,/Rich outputs|area/);assert(notebook.result.evaluation.values.some(v=>v.text.includes('24')));
   report('the real editor renders all rich kinds, retains stale previews and updates reactive values');
-  const mdIndex=studio.state.cells.findIndex(c=>c.source.includes('Display.markdown')),mdSource=studio.state.cells[mdIndex].source;
-  studio.editCell(mdIndex,'Display.text(width.to_str())');await studio.run();assert.equal(document.querySelector('#cells .rich-output > pre').textContent,'8.0');
-  studio.editCell(index,'width = 9\nheight = 3');await studio.run();assert.equal(document.querySelector('#cells .rich-output > pre').textContent,'9.0');
-  studio.editCell(mdIndex,mdSource);await studio.run();
+  const mdIndex=notebook.state.cells.findIndex(c=>c.source.includes('Display.markdown')),mdSource=notebook.state.cells[mdIndex].source;
+  notebook.editCell(mdIndex,'Display.text(width.to_str())');await notebook.run();assert.equal(document.querySelector('#cells .rich-output > pre').textContent,'8.0');
+  notebook.editCell(index,'width = 9\nheight = 3');await notebook.run();assert.equal(document.querySelector('#cells .rich-output > pre').textContent,'9.0');
+  notebook.editCell(mdIndex,mdSource);await notebook.run();
   report('plain-text alternatives update even when the rich envelope stays identical');
-  const capture=await captureExport(studio,compiler,{results:true,debug:true}),bundle=await exportBundle(capture),files=await unzip(await bundle.arrayBuffer());assert(files.has('Display.roc'));assert.match(text(files.get('Display.roc')),/to_inspect/);
-  const imported=await importBundle(await bundle.arrayBuffer(),compiler);assert(imported.record.savedResults.snapshots.some(s=>s.display?.kind==='table'));await studio.replace(imported.record);await until(()=>document.querySelectorAll('#cells .unverified .rich-output').length===3);assert.equal(studio.state.autoRun,false);
+  const capture=await captureExport(notebook,compiler,{results:true,debug:true}),bundle=await exportBundle(capture),files=await unzip(await bundle.arrayBuffer());assert(!files.has('Display.roc'));assert.match(text(files.get('notebook.roc')),/import roclet\.Display/);assert.match(text(files.get('notebook.roc')),/main! =/);
+  const imported=await importBundle(await bundle.arrayBuffer(),compiler);assert(imported.record.savedResults.snapshots.some(s=>s.display?.kind==='table'));await notebook.replace(imported.record);await until(()=>document.querySelectorAll('#cells .unverified .rich-output').length===3);assert.equal(notebook.state.autoRun,false);
   const html=new DOMParser().parseFromString(await (await exportReport(capture)).text(),'text/html');assert(html.querySelector('table'));assert(html.querySelector('img[src^="data:image/png;base64,"]'));assert.equal(html.querySelectorAll('script,[onerror]').length,0);assert.match(html.body.textContent,/9007199254740993/);
-  report('bundles preserve unverified rich snapshots and the Roc module; reports preserve safe rich output');
+  report('bundles preserve unverified rich snapshots and the pinned Display package; reports preserve safe rich output');
   const runnable=await session.request({operation:'document',action:'run',format:'roc',source:'import Display\n# %%\nDisplay.table(["Exact"], [["9007199254740993"]])'});assert.equal(runnable.status,'ok');assert(runnable.evaluation.events.some(e=>e.message.includes('9007199254740993')));
   report('generated display! uses the same readable plain-text representation in script execution');
   parent.postMessage({rocletM5:true,status:`PASS — ${count} M5 rich output contracts`,log,result:'pass'},new URL(document.baseURI).origin);
 } catch(error) {log+=error.stack??error.message;parent.postMessage({rocletM5:true,status:'FAIL',log,result:'fail'},new URL(document.baseURI).origin);}
-finally {studio?.dispose();session?.stop();}
+finally {notebook?.dispose();session?.stop();}

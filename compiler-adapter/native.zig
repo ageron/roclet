@@ -9,8 +9,9 @@ const usage =
     \\       roclet convert FILE --to roc|markdown [--output FILE] [--normalize] [--force] [--allow-relocation]
     \\       roclet --bridge request.json
     \\
-    \\Conversion never executes the notebook. Same-format conversion is byte-exact
-    \\unless --normalize is supplied. Invalid drafts are preserved with diagnostics.
+    \\Conversion never executes the notebook. Roc output is a checked runnable script.
+    \\Markdown same-format conversion is byte-exact unless --normalize is supplied.
+    \\Use --normalize to preserve an invalid draft with diagnostics.
     \\
 ;
 fn stringify(a: std.mem.Allocator, data: anytype) ![]u8 {
@@ -66,12 +67,16 @@ pub fn main(init: std.process.Init) !void {
         try bridge.setNativeSourceDirectory(std.fs.path.dirname(actual) orelse ".");
     }
     if (convert and !is_document) return error.ExpectedDocumentExtension;
-    const request = if (is_document) try stringify(a, .{ .operation = "document", .action = if (normalize) "normalize" else if (std.mem.eql(u8, action, "run")) "evaluate" else action, .format = format, .target = target, .source = bytes }) else bytes;
+    const request = if (is_document) try stringify(a, .{ .operation = "document", .action = if (normalize) "normalize" else if (convert and std.mem.eql(u8, target, "roc")) "export" else if (std.mem.eql(u8, action, "run")) "evaluate" else action, .format = format, .target = target, .source = bytes }) else bytes;
     const result = try bridge.process(request);
     defer std.heap.page_allocator.free(result);
     const parsed = try std.json.parseFromSlice(std.json.Value, a, result, .{});
     const object = parsed.value.object;
     if (convert) {
+        if (!normalize and std.mem.eql(u8, target, "roc") and !std.mem.eql(u8, object.get("status").?.string, "ok")) {
+            try std.Io.File.stderr().writeStreamingAll(init.io, result);
+            std.process.exit(1);
+        }
         const converted = object.get("source") orelse {
             try std.Io.File.stderr().writeStreamingAll(init.io, result);
             std.process.exit(1);

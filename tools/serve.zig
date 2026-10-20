@@ -24,13 +24,14 @@ fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
     var segments = std.mem.splitScalar(u8, relative, '/');
     while (segments.next()) |segment| if (segment.len == 0 or segment[0] == '.') return error.InvalidPath;
     if (std.mem.eql(u8, relative, "LICENSE") or std.mem.eql(u8, relative, "THIRD_PARTY_NOTICES.md")) return gpa.dupe(u8, relative);
-    for ([_][]const u8{ "demos/", "web/", "compiler-adapter/", "core/", "library/", "fixtures/", "tests/", "artifacts/" }) |prefix| {
+    for ([_][]const u8{ "demos/", "web/", "compiler-adapter/", "core/", "package/", "fixtures/", "tests/", "artifacts/" }) |prefix| {
         if (std.mem.startsWith(u8, relative, prefix)) return gpa.dupe(u8, relative);
     }
     return error.InvalidPath;
 }
 fn mime(file: []const u8) []const u8 {
     const ext = std.fs.path.extension(file);
+    if (std.mem.eql(u8, ext, ".png")) return "image/png";
     if (std.mem.eql(u8, ext, ".html")) return "text/html; charset=utf-8";
     if (std.mem.eql(u8, ext, ".mjs") or std.mem.eql(u8, ext, ".js")) return "text/javascript; charset=utf-8";
     if (std.mem.eql(u8, ext, ".css")) return "text/css; charset=utf-8";
@@ -122,7 +123,7 @@ pub fn main(init: std.process.Init) !void {
     defer server.deinit(init.io);
     var group: std.Io.Group = .init;
     defer group.cancel(init.io);
-    std.debug.print("Roclet: http://{s}:{d}/{s}\n", .{ bind, port, if (context.proxy_only) "api/packages/" else "web/studio.html" });
+    std.debug.print("Roclet: http://{s}:{d}/{s}\n", .{ bind, port, if (context.proxy_only) "api/packages/" else "web/edit.html" });
     while (true) {
         const stream = try server.accept(init.io);
         group.concurrent(init.io, handle, .{ init.io, &context, stream }) catch |err| {
@@ -140,7 +141,7 @@ test "static asset paths reject traversal, hidden files, and malformed escapes" 
     defer gpa.free(result);
     try std.testing.expectEqualStrings("web/app.mjs", result);
     try std.testing.expectEqualStrings("application/wasm", mime("artifacts/roclet.wasm"));
-    const display = try assetPath(gpa, "/library/Display.roc");
+    const display = try assetPath(gpa, "/package/Display.roc");
     defer gpa.free(display);
-    try std.testing.expectEqualStrings("library/Display.roc", display);
+    try std.testing.expectEqualStrings("package/Display.roc", display);
 }

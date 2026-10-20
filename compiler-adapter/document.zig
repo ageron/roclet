@@ -50,6 +50,66 @@ fn frontendValue(a: A, result: frontend.Result, compact: bool) !V {
     };
     return value(a, .{ .plan = result.plan, .status = result.status, .model = .{ .format = result.model.format, .preamble = result.model.preamble, .metadata = result.model.metadata, .cells = cells, .diagnostics = result.model.diagnostics }, .program = result.program, .roots = result.roots, .expectations = result.expectations, .mappings = result.mappings });
 }
+// Only the pinned first-party package is supplied by the offline runtime.
+const display_package_url = std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n");
+fn displayDependency(a: A, source: []const u8) !?[]const u8 {
+    const facts = try syntax.roc(a, source);
+    for (facts.tokens, 0..) |token, i| {
+        if (token.start >= facts.header_end) break;
+        if (token.depth == 1 and std.mem.eql(u8, source[@intCast(token.start)..@intCast(token.end)], "roclet") and i + 4 < facts.tokens.len) {
+            const ts = facts.tokens[i + 1 .. i + 5];
+            if (std.mem.eql(u8, ts[0].tag, "OpColon") and std.mem.eql(u8, ts[1].tag, "StringStart") and std.mem.eql(u8, ts[2].tag, "StringPart") and std.mem.eql(u8, ts[3].tag, "StringEnd")) return source[@intCast(ts[2].start)..@intCast(ts[2].end)];
+            return "";
+        }
+    }
+    return null;
+}
+// Parser spans prevent changes inside strings, comments, or Markdown prose.
+fn displayImports(a: A, source: []const u8, packaged: bool) ![]const u8 {
+    const facts = try syntax.roc(a, source);
+    var edits: std.ArrayList(u8) = .empty;
+    var cursor: usize = 0;
+    for (facts.statements) |stmt| {
+        if (!std.mem.eql(u8, stmt.kind, "import")) continue;
+        var tokens: std.ArrayList(syntax.Token) = .empty;
+        for (facts.tokens) |token| if (token.start >= stmt.start and token.end <= stmt.end) try tokens.append(a, token);
+        const ts = tokens.items;
+        if (ts.len < 2) continue;
+        const start: usize = @intCast(ts[1].start);
+        const end: usize = @intCast(ts[1].end);
+        if (packaged and std.mem.eql(u8, source[start..end], "Display")) {
+            try edits.appendSlice(a, source[cursor..start]);
+            try edits.appendSlice(a, "roclet.");
+            cursor = start;
+        } else if (!packaged and ts.len >= 3 and std.mem.eql(u8, source[start..end], "roclet") and std.mem.eql(u8, source[@intCast(ts[2].start)..@intCast(ts[2].end)], ".Display")) {
+            // Keep byte positions identical for diagnostics and dependency spans.
+            try edits.appendSlice(a, source[cursor..start]);
+            try edits.appendNTimes(a, ' ', @intCast(ts[2].start + 1 - start));
+            cursor = @intCast(ts[2].start + 1);
+        }
+    }
+    try edits.appendSlice(a, source[cursor..]);
+    return edits.toOwnedSlice(a);
+}
+fn packageRocExport(a: A, source: []const u8) ![]const u8 {
+    const rewritten = try displayImports(a, source, true);
+    if (std.mem.eql(u8, source, rewritten)) return source;
+    if (try displayDependency(a, source)) |url| {
+        if (!std.mem.eql(u8, url, display_package_url)) return error.ConflictingRocletPackage;
+        return rewritten;
+    }
+    const facts = try syntax.roc(a, rewritten);
+    // The document core supplies the app header. Insert into its dependency record.
+    var opening: ?usize = null;
+    for (facts.tokens) |token| {
+        if (token.start >= facts.header_end) break;
+        if (token.depth == 0 and std.mem.eql(u8, token.tag, "OpenCurly")) opening = @intCast(token.end);
+    }
+    const at = opening orelse return error.MissingAppDependencies;
+    const closing: usize = @intCast(facts.header_end - 1);
+    const comma = if (std.mem.trim(u8, rewritten[at..closing], " \t\r\n").len == 0) "" else ",";
+    return std.fmt.allocPrint(a, "{s} roclet: \"{s}\"{s}{s}", .{ rewritten[0..at], display_package_url, comma, rewritten[at..] });
+}
 fn finishCompact(result: *V) void {
     _ = result.object.swapRemove("program");
     for (fieldArray(result.object.get("model").?, "cells")) |*cell| _ = cell.object.swapRemove("source_map");
@@ -131,6 +191,15 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
     const app_header = model.preamble[0..@intCast(@min(input.facts.header_end, model.preamble.len))];
     var result = try frontendValue(a, try frontend.run(a, input), compact);
     try result.object.put(a, "protocol", .{ .integer = 1 });
+    if (try displayDependency(a, model.preamble)) |url| {
+        if (std.mem.eql(u8, url, display_package_url)) {
+            inline for (.{ "program", "execution" }) |key| try result.object.put(a, key, .{ .string = try displayImports(a, string(result, key, ""), false) });
+        }
+    }
+    if (std.mem.eql(u8, string(result, "status", ""), "ok") and std.mem.eql(u8, target, "roc") and (std.mem.eql(u8, action, "export") or std.mem.eql(u8, action, "normalize") or (std.mem.eql(u8, action, "convert") and !std.mem.eql(u8, format, target)))) {
+        try result.object.put(a, "source", .{ .string = try packageRocExport(a, string(result, "source", "")) });
+    }
+
     if ((std.mem.eql(u8, action, "evaluate") or std.mem.eql(u8, action, "analyze")) and std.mem.eql(u8, string(result, "status", ""), "ok")) {
         const program = string(result, "program", "");
         var all_roots = result.object.get("roots").?;
@@ -241,9 +310,10 @@ pub fn process(gpa: A, bytes: []const u8, evaluate: anytype, _: anytype) ![]u8 {
         try result.object.put(a, "evaluation", evaluation);
         try result.object.put(a, "status", evaluation.object.get("status").?);
     }
-    if ((std.mem.eql(u8, action, "check") or std.mem.eql(u8, action, "run")) and std.mem.eql(u8, string(result, "status", ""), "ok")) {
+    const check_export = std.mem.eql(u8, action, "export") and std.mem.eql(u8, target, "roc");
+    if ((std.mem.eql(u8, action, "check") or std.mem.eql(u8, action, "run") or check_export) and std.mem.eql(u8, string(result, "status", ""), "ok")) {
         const execution = string(result, "execution", "");
-        const checked = try evaluate(try json(a, .{ .protocol = 1, .source = execution, .user_bytes = execution.len, .check_only = std.mem.eql(u8, action, "check"), .app_header = app_header, .modules = request.object.get("modules") orelse try value(a, &[_]V{}) }));
+        const checked = try evaluate(try json(a, .{ .protocol = 1, .source = execution, .user_bytes = execution.len, .check_only = check_export or std.mem.eql(u8, action, "check"), .app_header = app_header, .modules = request.object.get("modules") orelse try value(a, &[_]V{}) }));
         defer gpa.free(checked);
         const evaluation = try std.json.parseFromSliceLeaky(V, a, checked, .{ .allocate = .alloc_always });
         try mapDiagnostics(a, &result, evaluation, source, execution);
