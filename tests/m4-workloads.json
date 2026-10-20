@@ -265,5 +265,81 @@
         "content": "Other := [].{ value = 9 }"
       }
     ]
+  },
+  {
+    "name": "associated-item-change",
+    "before": "# %%\nConfig := [].{ scale = 3 }\nout_scaled = 2 * Config.scale\n# %%\nout_other = 7\n",
+    "after": "# %%\nConfig := [].{ scale = 4 }\nout_scaled = 2 * Config.scale\n# %%\nout_other = 7\n",
+    "evaluate": [
+      "out_scaled"
+    ],
+    "reused": [
+      "out_other"
+    ]
+  },
+  {
+    "name": "alias-change",
+    "before": "# %%\nMeters : F64\nd : Meters\nd = 5\nout_d = d\n# %%\nout_other = 7\n",
+    "after": "# %%\nMeters : Dec\nd : Meters\nd = 5\nout_d = d\n# %%\nout_other = 7\n",
+    "evaluate": [
+      "out_d"
+    ],
+    "reused": [
+      "out_other"
+    ]
+  },
+  {
+    "name": "nominal-type-added-unrelated",
+    "before": "# %%\nout_a = 1\n# %%\nout_b = 2\n",
+    "after": "# %%\nPoint := { x : F64, y : F64 }\nout_a = 1\n# %%\nout_b = 2\n",
+    "evaluate": [],
+    "reused": [
+      "out_a",
+      "out_b"
+    ]
+  },
+  {
+    "name": "nominal-type-changed-dependents-only",
+    "before": "# %%\nPoint := { x : F64, y : F64 }\np = Point.{ x: 1, y: 2 }\nout_p = p\n# %%\nout_other = 7\n",
+    "after": "# %%\nPoint := { x : Dec, y : F64 }\np = Point.{ x: 1, y: 2 }\nout_p = p\n# %%\nout_other = 7\n",
+    "evaluate": [
+      "out_p"
+    ],
+    "reused": [
+      "out_other"
+    ]
+  },
+  {
+    "name": "dynamic-dispatch-conservative",
+    "before": "# %%\nShape := [Circle(F64)].{ area = |s| match s { Circle(r) => r * r } }\ns = Shape.Circle(2)\nout_area = s.area()\n# %%\nout_other = 7\n",
+    "after": "# %%\nShape := [Circle(F64)].{ area = |s| match s { Circle(r) => r * r * 3 } }\ns = Shape.Circle(2)\nout_area = s.area()\n# %%\nout_other = 7\n",
+    "evaluate": [
+      "out_area"
+    ],
+    "reused": [
+      "out_other"
+    ]
+  },
+  {
+    "name": "record-default-change",
+    "before": "# %%\nfallback = 3\nPoint := { x : F64, y : F64 ?? fallback }\np : Point\np = { x: 1 }\nout_p = p.y\n# %%\nout_other = 7\n",
+    "after": "# %%\nfallback = 4\nPoint := { x : F64, y : F64 ?? fallback }\np : Point\np = { x: 1 }\nout_p = p.y\n# %%\nout_other = 7\n",
+    "evaluate": [
+      "out_p"
+    ],
+    "reused": [
+      "out_other"
+    ]
+  },
+  {
+    "name": "polymorphic-dispatch",
+    "before": "# %%\nShape := [Circle(F64)].{ area = |s| match s { Circle(r) => r * r } }\nOther := [Square(F64)].{ side = |s| match s { Square(x) => x } }\nmeasure = |shape| shape.area()\nc = Shape.Circle(2)\nout_area = measure(c)\n# %%\nout_side = Other.Square(3).side()\n",
+    "after": "# %%\nShape := [Circle(F64)].{ area = |s| match s { Circle(r) => r * r * 3 } }\nOther := [Square(F64)].{ side = |s| match s { Square(x) => x } }\nmeasure = |shape| shape.area()\nc = Shape.Circle(2)\nout_area = measure(c)\n# %%\nout_side = Other.Square(3).side()\n",
+    "evaluate": [
+      "out_area"
+    ],
+    "reused": [
+      "out_side"
+    ]
   }
 ]

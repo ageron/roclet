@@ -24,8 +24,9 @@ pub const Definition = struct {
     references: []const Region,
     rename_safe: bool,
 };
-/// `module` when a user definition's dependencies cannot be read reliably from
-/// checked CIR (destructuring, nominal declarations, qualified names, ...).
+/// `module` when the checked module cannot yield a trustworthy graph: its
+/// strict-demand relation is not ready, or a reference never settled import
+/// resolution. Neither happens after a successful check; both are defensive.
 pub const DependencyScope = enum { definitions, module };
 /// A top-level `expect` root, with its byte span in the user program.
 pub const Expectation = struct { root: []const u8, start: u32, end: u32, cell: u64 = 0 };
@@ -59,10 +60,15 @@ pub const Analysis = struct {
 const Facts = struct {
     values: std.AutoArrayHashMapUnmanaged(CIR.Def.Idx, void) = .empty,
     types: std.AutoArrayHashMapUnmanaged(CIR.Statement.Idx, void) = .empty,
+    /// Declarations of local nominal receivers of method dispatch.
+    dispatch: std.AutoArrayHashMapUnmanaged(CIR.Statement.Idx, void) = .empty,
     imports: std.AutoArrayHashMapUnmanaged(CIR.Import.Idx, void) = .empty,
     identities: std.AutoArrayHashMapUnmanaged(base.ModuleIdentity.Idx, void) = .empty,
     /// A reference whose import resolution never settled.
     pending: bool = false,
+    /// Method dispatch whose receiver type is not a concrete nominal type
+    /// (a type variable): it may reach any local type's methods.
+    dynamic: bool = false,
 };
 /// A graph node's source span (absolute offsets) and its facts slot.
 const Owner = struct { start: u32, end: u32, slot: usize };
@@ -74,7 +80,7 @@ fn inside(region: base.Region, start: u32, end: u32) bool {
 /// Record what checked node `i` refers to.
 fn collect(a: A, env: *can.ModuleEnv, tag: can.CIR.Node.Tag, i: usize, patterns: *const std.AutoHashMapUnmanaged(CIR.Pattern.Idx, CIR.Def.Idx), facts: *Facts) !void {
     switch (tag) {
-        .expr_var, .expr_external_lookup, .expr_nominal, .expr_nominal_external, .expr_associated_lookup_local, .expr_associated_lookup, .expr_associated_lookup_resolved, .expr_type_method_call, .expr_type_dispatch_call, .expr_type_dispatch_call_dispatcher, .expr_derived_method, .expr_deferred_import_ref, .expr_deferred_nominal_external => {
+        .expr_var, .expr_external_lookup, .expr_nominal, .expr_nominal_external, .expr_associated_lookup_local, .expr_associated_lookup, .expr_associated_lookup_resolved, .expr_type_method_call, .expr_type_dispatch_call, .expr_type_dispatch_call_dispatcher, .expr_derived_method, .expr_deferred_import_ref, .expr_deferred_nominal_external, .expr_method_call, .expr_dispatch_call, .expr_method_eq, .expr_interpolation => {
             switch (env.store.getExpr(@fromBackingInt(@intCast(i)))) {
                 .e_lookup_local => |e| if (patterns.get(e.pattern_idx)) |def| try facts.values.put(a, def, {}),
                 .e_lookup_external => |e| try facts.imports.put(a, e.module_idx, {}),
@@ -88,8 +94,12 @@ fn collect(a: A, env: *can.ModuleEnv, tag: can.CIR.Node.Tag, i: usize, patterns:
                 .e_type_method_call => |e| try facts.types.put(a, e.type_dispatch_stmt, {}),
                 .e_type_dispatch_call => |e| switch (e.owner) {
                     .statement => |statement| try facts.types.put(a, statement, {}),
-                    .dispatcher => {},
+                    .dispatcher => |owner| try dispatch(a, env, owner, facts),
                 },
+                .e_method_call => |e| try dispatch(a, env, can.ModuleEnv.varFrom(e.receiver), facts),
+                .e_dispatch_call => |e| try dispatch(a, env, can.ModuleEnv.varFrom(e.receiver), facts),
+                .e_method_eq => |e| try dispatch(a, env, can.ModuleEnv.varFrom(e.lhs), facts),
+                .e_interpolation => |e| if (e.dispatcher_var) |owner| try dispatch(a, env, owner, facts),
                 .e_derived_method => |e| try facts.types.put(a, e.owner, {}),
                 .e_deferred_import_ref => facts.pending = true,
                 else => {},
@@ -117,6 +127,34 @@ fn collect(a: A, env: *can.ModuleEnv, tag: can.CIR.Node.Tag, i: usize, patterns:
         },
         else => {},
     }
+}
+
+/// The local type whose method a dispatch on a receiver of type `owner`
+/// selects. A builtin or imported nominal receiver adds nothing: such values
+/// reach the node through definitions that refer to their module (or through
+/// the compiler identity in the context). Any other receiver is dynamic.
+fn dispatch(a: A, env: *can.ModuleEnv, owner: anytype, facts: *Facts) !void {
+    var current = owner;
+    while (true) switch (env.types.resolveVar(current).desc.content) {
+        .alias => |alias| current = env.types.getAliasBackingVar(alias),
+        .structure => |flat| switch (flat) {
+            .nominal_type => |nominal| {
+                if (nominal.origin_module != env.self_module_identity) return;
+                const declaration = nominal.sourceDecl();
+                if (!declaration.present) {
+                    facts.dynamic = true;
+                    return;
+                }
+                try facts.dispatch.put(a, @fromBackingInt(declaration.statement), {});
+                return;
+            },
+            else => return,
+        },
+        else => {
+            facts.dynamic = true;
+            return;
+        },
+    };
 }
 
 /// The slot of the innermost owner whose span holds `[start, end)`. Owners
@@ -161,10 +199,7 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
     for (tags, 0..) |tag, i| {
         const r = env.store.regions.items.items[i];
         if (r.start.offset < prefix or r.end.offset > user_end) continue;
-        // User-defined dispatch/defaults need checked-template dependencies, which
-        // this pinned adapter does not expose. Never guess those edges.
         switch (tag) {
-            .statement_nominal_decl, .statement_alias_decl, .statement_where_alias_decl, .expr_associated_lookup_local, .expr_associated_lookup_resolved => scope = .module,
             .pattern_identifier, .pattern_var_identifier, .pattern_as => {
                 const p = env.store.getPattern(@fromBackingInt(@intCast(i)));
                 const ident = switch (p) {
@@ -260,6 +295,8 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
     var module_names: std.AutoArrayHashMapUnmanaged(base.ModuleIdentity.Idx, []const u8) = .empty;
     var modules: std.StringArrayHashMapUnmanaged(std.ArrayList(u8)) = .empty;
     for (facts) |*f| {
+        // The builtin modules record no import identity; the compiler
+        // identity in the context covers them.
         for (f.imports.keys()) |import| if (env.importIdentity(import)) |identity| {
             try f.identities.put(arena, identity, {});
         };
@@ -479,7 +516,11 @@ fn setDependencies(
         const slot = node_defs.get(idx) orelse continue;
         if (!std.mem.eql(u8, nodes[slot].name, node.name)) try appendNew(a, &deps, nodes[slot].name);
     };
-    for (type_decls.keys(), type_decls.values()) |statement, slot| if (facts.types.contains(statement)) {
+    var dynamic = facts.dynamic;
+    for (facts.dispatch.keys()) |statement| if (!type_decls.contains(statement)) {
+        dynamic = true;
+    };
+    for (type_decls.keys(), type_decls.values()) |statement, slot| if (dynamic or facts.types.contains(statement) or facts.dispatch.contains(statement)) {
         if (!std.mem.eql(u8, nodes[slot].name, node.name)) try appendNew(a, &deps, nodes[slot].name);
     };
     var module_deps: std.ArrayList([]const u8) = .empty;

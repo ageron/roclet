@@ -533,6 +533,8 @@ test "the checked graph has type, associated item and module nodes" {
     defer response.deinit();
     try std.testing.expectEqualStrings("ok", response.field("status").string);
     try std.testing.expectEqual(@as(i64, 2), response.field("graph").object.get("version").?.integer);
+    // Types, annotations and associated items no longer force module scope.
+    try std.testing.expectEqualStrings("definitions", response.field("graph").object.get("scope").?.string);
     try expectDependencies(response, "definitions", "width", &.{"Meters"});
     try expectDependencies(response, "definitions", "out_point", &.{ "width", "Point", "module:Fresh" });
     try expectDependencies(response, "definitions", "out_origin", &.{"Point.origin"});

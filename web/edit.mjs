@@ -322,7 +322,7 @@ function showDependencies(index) {
     const time=document.createElement('p');
     time.textContent=`Last request: ${Math.round(result.workerMs ?? 0)} ms in the worker · ${result.evaluation.evaluated_roots?.length ?? 0} evaluations · ${result.plan.reused.length} reused.`;
     content.append(time);
-    if (result.graph?.scope==='module') {const note=document.createElement('p');note.textContent='This document uses types or dispatch requiring conservative module-wide invalidation.';content.append(note);}
+    if (result.graph?.scope==='module') {const note=document.createElement('p');note.textContent='The compiler could not fully resolve this document’s dependencies, so any change re-runs every cell.';content.append(note);}
   }
   $('dependencies-dialog').showModal();
 }
