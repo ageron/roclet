@@ -3,6 +3,7 @@ import { CellEditor, editorFor } from './cell-editor.mjs';
 import { symbolAt, completionOptions } from './compiler-tools.mjs';
 import { renderMarkdown } from './markdown-view.mjs';
 import { renderDisplay } from './display-view.mjs';
+import { engineDetails, engineStats } from './workbench.mjs';
 import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './edit-cells.mjs';
 
 // Global header menus and dialogs keep page-level ids; panel code never looks
@@ -33,13 +34,12 @@ function clearObservations(view, render) {
 // cell views, selection, editors, keyboard and clipboard handling. Header
 // commands reach a panel through the methods assigned at the end.
 export class NotebookPanel {
-  constructor({ root, prefix = '', bytes, highlighter, store, loadPackage, onActivate = () => {}, onChange = () => {} }) {
-    this.root = root; this.prefix = prefix; this.store = store; this.highlighter = highlighter;
-    // The title and run controls are still in the page header.
+  constructor({ root, prefix = '', bytes, highlighter, store, loadPackage, preferences = {}, onActivate = () => {}, onChange = () => {} }) {
+    this.root = root; this.preferences = preferences; this.lastResponse = null; this.prefix = prefix; this.store = store; this.highlighter = highlighter;
     const parts = new Map();
     const part = this.part = name => {
       let node = parts.get(name);
-      if (!node) parts.set(name, node = root.querySelector(`[data-part="${name}"]`) ?? document.getElementById(prefix + name));
+      if (!node) parts.set(name, node = root.querySelector(`[data-part="${name}"]`));
       return node;
     };
     const panel = this;
@@ -336,7 +336,8 @@ export class NotebookPanel {
           content.append(reason,deps);
         }
         const time=document.createElement('p');
-        time.textContent=`Last request: ${Math.round(result.workerMs ?? 0)} ms in the worker · ${result.evaluation.evaluated_roots?.length ?? 0} evaluations · ${result.plan.reused.length} reused.`;
+        const stats=engineStats(result);
+        time.textContent=`Last request: ${Math.round(stats.workerMs ?? 0)} ms in the worker · ${stats.evaluated} evaluations · ${stats.reused} reused.`;
         content.append(time);
         if (result.graph?.scope==='module') {const note=document.createElement('p');note.textContent='The compiler could not fully resolve this document’s dependencies, so any change re-runs every cell.';content.append(note);}
       }
@@ -449,6 +450,9 @@ export class NotebookPanel {
       if (part('stop').hidden && document.activeElement === part('stop')) part('run').focus({preventScroll:true});
       const status = notebook.diagnosticsDeferred && /^(Needs attention|Run failed · no current results)/.test(notebook.status) ? 'Editing · results pending' : notebook.status;
       part('status').textContent = status; part('status').className = /failed|attention|conflict/i.test(status) ? 'error' : '';
+      // Engine details describe the panel's last completed response.
+      if (notebook.result?.workerMs != null) panel.lastResponse = notebook.result;
+      part('engine-status').hidden = !panel.preferences.engineDetails; part('engine-status').textContent = engineDetails(panel.lastResponse);
       part('save-status').textContent = notebook.saveStatus; part('save-status').title = notebook.saveStatus; part('save-status').className = /^Not saved|unavailable/.test(notebook.saveStatus) ? 'error' : '';
       part('notebook').hidden = s.mode !== 'notebook'; part('source-pane').hidden = s.mode !== 'source';
       part('app-header').hidden = s.mode !== 'notebook';

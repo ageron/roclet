@@ -6,9 +6,11 @@ import { CompilerHighlighter } from './roc-highlighting.mjs';
 import { DraftStore } from './edit-store.mjs';
 import { loadPackageBundle } from './package-dialog.mjs';
 import { NotebookPanel, closeMenus, showHelp } from './notebook-panel.mjs';
-import { clonePanel } from './workbench.mjs';
+import { clonePanel, engineDetailsKey, readPreference, writePreference } from './workbench.mjs';
 const $ = id => document.getElementById(id);
 let compilerManifest, libraryToken = 0, panel;
+const storage = (() => { try { return globalThis.localStorage; } catch { return null; } })();
+const preferences = { engineDetails: readPreference(storage, engineDetailsKey) };
 // Header commands act on the active panel.
 const active = () => panel;
 async function refreshLibrary() {
@@ -30,6 +32,7 @@ function reflectHeader(reason) {
   $('recovery-copy').hidden=!/^Not saved/.test(notebook.saveStatus);
   $('undo').disabled = !notebook.history.length; $('redo').disabled = !notebook.future.length;
   $('notebook-view').setAttribute('aria-pressed', s.mode === 'notebook'); $('source-view').setAttribute('aria-pressed', s.mode === 'source');
+  $('engine-details').setAttribute('aria-pressed', preferences.engineDetails);
   if (!notebook.result) $('generated').textContent = '';
   if (reason === 'saved') void refreshLibrary();
 }
@@ -97,6 +100,11 @@ function bind() {
   $('prepare-offline').onclick=()=>perform(async()=>{const b=$('prepare-offline');b.disabled=true;$('offline-state').textContent='Downloading and verifying Roclet and its compiler…';try {$('offline-state').textContent=(await prepareOffline()).label;}catch(error){$('offline-state').textContent=error.message;}finally {b.disabled=false;}});
   $('persist-storage').onclick=()=>perform(async()=>{$('storage-state').textContent=await storageStatus(true);});
   $('find').onclick=()=>active().find();
+  $('engine-details').onclick=()=>{
+    preferences.engineDetails=!preferences.engineDetails;writePreference(storage,engineDetailsKey,preferences.engineDetails);
+    for(const target of [panel]) target.render('status');
+    reflectHeader('status');
+  };
   $('shortcuts').onclick = showHelp;
   document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => b.closest('dialog').close());
   document.addEventListener('click', event => {
@@ -127,7 +135,7 @@ try {
   if (hash !== manifest.artifacts['roclet.wasm'].sha256) throw new Error('Compiler artifact does not match its manifest. Rebuild or refresh Roclet.');
   compilerManifest=manifest;
   const highlighter=new CompilerHighlighter(binary);
-  panel = new NotebookPanel({root, bytes:binary, highlighter, store:drafts, loadPackage:loadPackageBundle, onChange:(_,reason)=>reflectHeader(reason)});
+  panel = new NotebookPanel({root, bytes:binary, highlighter, store:drafts, loadPackage:loadPackageBundle, preferences, onChange:(_,reason)=>reflectHeader(reason)});
   const notebook = panel.notebook;
   notebook.dispose=()=>{highlighter.dispose();panel.dispose();};
   bind();

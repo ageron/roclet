@@ -26,12 +26,18 @@ export function enterAtBoundary(view, forward, goal) {
     },
   });
 }
+// The part of a notebook panel's scroller not covered by its sticky title bar.
+function visibleHeight(view) {
+  const scroller = view.dom.closest('.panel-scroll');
+  if (!scroller) return view.dom.ownerDocument.defaultView.innerHeight - 110;
+  return scroller.clientHeight - (scroller.querySelector(':scope > .panel-title')?.offsetHeight ?? 0);
+}
 export function moveVertical(view, forward, page, extend, adjacent) {
   const {state} = view, main = state.selection.main, line = state.doc.lineAt(main.head);
   if (!extend && state.selection.ranges.length === 1 && main.empty && line.number === (forward ? state.doc.lines : 1)) {
     if (adjacent?.(forward, horizontalGoal(view,main))) return true;
   }
-  const height = Math.max(view.defaultLineHeight, Math.min(view.scrollDOM.clientHeight, view.dom.ownerDocument.defaultView.innerHeight - 110) - view.defaultLineHeight);
+  const height = Math.max(view.defaultLineHeight, Math.min(view.scrollDOM.clientHeight, visibleHeight(view)) - view.defaultLineHeight);
   const ranges = state.selection.ranges.map(range => {
     if (!extend && !range.empty) return EditorSelection.cursor(forward ? range.to : range.from);
     const goal = horizontalGoal(view,range), start = EditorSelection.cursor(range.head,range.assoc,undefined,goal);
