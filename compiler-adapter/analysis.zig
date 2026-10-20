@@ -8,8 +8,11 @@ const base = @import("base");
 const can = @import("can");
 const engine = @import("engine.zig");
 const frontend = @import("document_frontend.zig");
+const syntax = @import("syntax.zig");
+const hashField = @import("workspace.zig").hashField;
 const A = std.mem.Allocator;
 const CIR = can.CIR;
+const Sha256 = std.crypto.hash.sha2.Sha256;
 
 pub const Region = struct { start: u32, end: u32 };
 pub const Definition = struct {
@@ -36,7 +39,7 @@ pub const Graph = struct {
     types: []const frontend.Node = &.{},
     /// Imported modules a node refers to, by name.
     modules: []const frontend.Node = &.{},
-    /// SHA-256 hex of the user program outside every node.
+    /// SHA-256 hex of the user program's parser tokens outside every node.
     context: []const u8 = "",
 };
 
@@ -113,15 +116,24 @@ fn collect(a: A, env: *can.ModuleEnv, tag: can.CIR.Node.Tag, i: usize, patterns:
     }
 }
 
-fn digest(a: A, bytes: []const u8) ![]const u8 {
-    var hash: [32]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(bytes, &hash, .{});
-    return a.dupe(u8, &std.fmt.bytesToHex(hash, .lower));
+/// The slot of the innermost owner whose span holds `[start, end)`. Owners
+/// are sorted by start, longer spans first, and properly nested.
+fn ownerOf(owners: []const Owner, start: u32, end: u32) ?usize {
+    var k = std.sort.partitionPoint(Owner, owners, start, struct {
+        fn before(offset: u32, owner: Owner) bool {
+            return owner.start <= offset;
+        }
+    }.before);
+    while (k > 0) : (k -= 1) {
+        const owner = owners[k - 1];
+        if (end <= owner.end) return owner.slot;
+    }
+    return null;
 }
-fn json(a: A, data: anytype) ![]u8 {
-    var w: std.Io.Writer.Allocating = .init(a);
-    try std.json.Stringify.value(data, .{}, &w.writer);
-    return w.toOwnedSlice();
+fn hex(a: A, hash: *Sha256) ![]const u8 {
+    var bytes: [32]u8 = undefined;
+    hash.final(&bytes);
+    return a.dupe(u8, &std.fmt.bytesToHex(bytes, .lower));
 }
 
 /// Analyse the user bytes `[prefix, prefix + user_bytes)` of the checked
@@ -172,7 +184,6 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
     var owners: std.ArrayList(Owner) = .empty;
     var node_defs: std.AutoArrayHashMapUnmanaged(CIR.Def.Idx, usize) = .empty;
     var nodes: std.ArrayList(frontend.Node) = .empty;
-    var node_spans: std.ArrayList([]const Region) = .empty;
     var node_types: std.ArrayList([]const u8) = .empty;
     for (defs) |idx| {
         const def = env.store.getDef(idx);
@@ -204,14 +215,12 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
         defer tw.deinit();
         try tw.write(can.ModuleEnv.varFrom(idx), .one_line);
         try nodes.append(arena, .{ .name = names[0], .binders = names, .fingerprint = "" });
-        try node_spans.append(arena, try arena.dupe(Region, &.{.{ .start = start - prefix, .end = end - prefix }}));
         try node_types.append(arena, try arena.dupe(u8, tw.get()));
     }
     const expectation_slot = nodes.items.len;
     for (expectations) |expectation| {
         try owners.append(arena, .{ .start = prefix + expectation.start, .end = prefix + expectation.end, .slot = nodes.items.len });
         try nodes.append(arena, .{ .name = expectation.root, .binders = try arena.dupe([]const u8, &.{expectation.root}), .fingerprint = "" });
-        try node_spans.append(arena, try arena.dupe(Region, &.{.{ .start = expectation.start, .end = expectation.end }}));
         try node_types.append(arena, "Bool");
     }
     const type_slot = nodes.items.len;
@@ -230,7 +239,6 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
         try owners.append(arena, .{ .start = region.start.offset, .end = region.end.offset, .slot = nodes.items.len });
         const name = try arena.dupe(u8, env.getIdent(type_header.relative_name));
         try nodes.append(arena, .{ .name = name, .fingerprint = "" });
-        try node_spans.append(arena, try arena.dupe(Region, &.{.{ .start = region.start.offset - prefix, .end = region.end.offset - prefix }}));
         try node_types.append(arena, "");
     }
 
@@ -245,18 +253,7 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
     for (tags, 0..) |tag, i| {
         const r = env.store.regions.items.items[i];
         if (r.start.offset < prefix or r.end.offset > user_end) continue;
-        var k = std.sort.partitionPoint(Owner, owners.items, r.start.offset, struct {
-            fn before(offset: u32, owner: Owner) bool {
-                return owner.start <= offset;
-            }
-        }.before);
-        while (k > 0) : (k -= 1) {
-            const owner = owners.items[k - 1];
-            if (r.end.offset <= owner.end) {
-                try collect(arena, env, tag, i, &patterns, &facts[owner.slot]);
-                break;
-            }
-        }
+        if (ownerOf(owners.items, r.start.offset, r.end.offset)) |slot| try collect(arena, env, tag, i, &patterns, &facts[slot]);
     }
 
     // Module nodes: the content identity of every module a node refers to.
@@ -284,11 +281,6 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
     }.less);
     const module_nodes = try arena.alloc(frontend.Node, sorted_modules.len);
     for (module_nodes, sorted_modules) |*out, name| out.* = .{ .name = name, .fingerprint = modules.get(name).?.items };
-
-    // Covered program bytes; everything else is module context.
-    const covered = try arena.alloc(bool, program.len);
-    @memset(covered, false);
-    for (node_spans.items) |spans| for (spans) |span| @memset(covered[span.start..span.end], true);
 
     var refs: std.AutoHashMapUnmanaged(CIR.Def.Idx, void) = .{};
     var stack: std.ArrayList(CIR.Expr.Idx) = .empty;
@@ -384,19 +376,33 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
         for (nodes.items[type_slot..]) |nested| if (associated(type_name, nested.name)) try appendNew(arena, &deps, nested.name);
         nodes.items[slot].dependencies = deps.items;
     }
-    for (nodes.items, node_spans.items, node_types.items) |*node, spans, node_type| {
-        var bytes: std.ArrayList(u8) = .empty;
-        for (spans) |span| try bytes.appendSlice(arena, program[span.start..span.end]);
-        node.fingerprint = try digest(arena, try json(arena, .{ bytes.items, node_type }));
+    // Fingerprints: the parser tokens a node owns (tag and text, never
+    // offsets, so comments and whitespace do not count) and, for a value or
+    // expectation, its inferred type. Unowned tokens are the context.
+    const hashes = try arena.alloc(Sha256, nodes.items.len);
+    for (hashes, 0..) |*hash, slot| {
+        hash.* = .init(.{});
+        hashField(hash, if (slot < type_slot) "roclet-def-v2" else "roclet-type-v2");
     }
-    var context: std.ArrayList(u8) = .empty;
-    for (program, covered) |byte, skip| if (!skip) try context.append(arena, byte);
+    var context = Sha256.init(.{});
+    hashField(&context, "roclet-context-v2");
+    for ((try syntax.roc(arena, program)).tokens) |token| {
+        const start: u32 = @intCast(token.start);
+        const end: u32 = @intCast(token.end);
+        const hash = if (ownerOf(owners.items, prefix + start, prefix + end)) |slot| &hashes[slot] else &context;
+        hashField(hash, token.tag);
+        hashField(hash, program[start..end]);
+    }
+    for (nodes.items, hashes, node_types.items, 0..) |*item, *hash, node_type, slot| {
+        if (slot < type_slot) hashField(hash, node_type);
+        item.fingerprint = try hex(arena, hash);
+    }
 
     return .{ .definitions = definitions.items, .binders = result_binders.items, .dependency_scope = scope, .graph = .{
         .definitions = nodes.items[0..type_slot],
         .types = nodes.items[type_slot..],
         .modules = module_nodes,
-        .context = try digest(arena, context.items),
+        .context = try hex(arena, &context),
     } };
 }
 

@@ -53,11 +53,11 @@
     "name": "added-definition",
     "before": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
     "after": "# %%\na = 2\nextra = 5\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
-    "evaluate": [
+    "evaluate": [],
+    "reused": [
       "out_left",
       "out_right"
-    ],
-    "reused": []
+    ]
   },
   {
     "name": "apparent-cell-cycle",
@@ -179,6 +179,47 @@
     ],
     "reused": [
       "roclet_expect_1"
+    ]
+  },
+  {
+    "name": "comment-between-defs",
+    "before": "# %%\na = 2\nout_left = a\n# %%\nb = 7\nout_right = b\n",
+    "after": "# %%\na = 2\n# note\nout_left = a\n# %%\nb = 7\nout_right = b\n",
+    "evaluate": [],
+    "reused": [
+      "out_left",
+      "out_right"
+    ]
+  },
+  {
+    "name": "blank-line-edit",
+    "before": "# %%\na = 2\nout_left = a\n# %%\nb = 7\nout_right = b\n",
+    "after": "# %%\na = 2\nout_left = a\n# %%\nb = 7\n\nout_right = b\n",
+    "evaluate": [],
+    "reused": [
+      "out_left",
+      "out_right"
+    ]
+  },
+  {
+    "name": "reorder-unrelated-defs",
+    "before": "# %%\na = 2\nb = 7\nout_left = a\n# %%\nout_right = b\n",
+    "after": "# %%\nb = 7\na = 2\nout_left = a\n# %%\nout_right = b\n",
+    "evaluate": [],
+    "reused": [
+      "out_left",
+      "out_right"
+    ]
+  },
+  {
+    "name": "annotation-change-leaf",
+    "before": "# %%\nwidth : U64\nwidth = 5\nout_w = width\n# %%\nout_other = 7\n",
+    "after": "# %%\nwidth : U32\nwidth = 5\nout_w = width\n# %%\nout_other = 7\n",
+    "evaluate": [
+      "out_w"
+    ],
+    "reused": [
+      "out_other"
     ]
   }
 ]

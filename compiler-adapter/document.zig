@@ -8,6 +8,7 @@ const script = @import("script.zig");
 const Engine = @import("engine_state.zig").Engine;
 const frontend = @import("document_frontend.zig");
 const baseline = @import("baseline.zig");
+const workspace = @import("workspace.zig");
 const A = std.mem.Allocator;
 const V = std.json.Value;
 fn json(a: A, data: anytype) ![]u8 {
@@ -518,7 +519,7 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
             .isolate_errors = request.isolate_errors,
         });
         if (eql(checked.evaluation.status, "ok")) {
-            const current = try dependencyGraph(a, checked.analysis.?, request.modules.json, request.workspace_fingerprint);
+            const current = try dependencyGraph(a, &checked, app_header, request.modules.json, request.workspace_fingerprint);
             document.graph = current;
             try document.put(a, .graph);
             var reactivity: frontend.PlanInput = switch (request.reactivity) {
@@ -718,25 +719,29 @@ fn cellRoots(a: A, cell: frontend.Cell) ![]const []const u8 {
     return roots.items;
 }
 
-// Node fingerprints come from the checked analysis. The context covers the
-// program outside every node, supplied module contents and the workspace.
-fn digest(a: A, bytes: []const u8) ![]const u8 {
-    var hash: [32]u8 = undefined;
-    std.crypto.hash.sha2.Sha256.hash(bytes, &hash, .{});
-    return a.dupe(u8, &std.fmt.bytesToHex(hash, .lower));
-}
-fn dependencyGraph(a: A, analysis: *const notebook.Analysis, modules_json: []const u8, workspace_fingerprint: []const u8) !frontend.Graph {
-    const graph = analysis.graph;
-    var context: std.Io.Writer.Allocating = .init(a);
-    try context.writer.writeAll(graph.context);
-    try context.writer.writeAll(modules_json);
-    try context.writer.writeAll(workspace_fingerprint);
+/// The request's graph: the revision's checked nodes (`analysis.zig`) and a
+/// context covering everything outside them that can change a result.
+fn dependencyGraph(a: A, checked: *const notebook.Checked, app_header: []const u8, modules_json: []const u8, workspace_fingerprint: []const u8) !frontend.Graph {
+    const analysis = checked.analysis.?;
+    var context = std.crypto.hash.sha2.Sha256.init(.{});
+    workspace.hashField(&context, "roclet-context-v2");
+    workspace.hashField(&context, workspace.identity);
+    for ((try syntax.roc(a, app_header)).tokens) |token| {
+        workspace.hashField(&context, token.tag);
+        workspace.hashField(&context, app_header[@intCast(token.start)..@intCast(token.end)]);
+    }
+    workspace.hashField(&context, analysis.graph.context);
+    workspace.hashField(&context, if (checked.rich_support) "rich" else "plain");
+    workspace.hashField(&context, modules_json);
+    workspace.hashField(&context, workspace_fingerprint);
+    var digest: [32]u8 = undefined;
+    context.final(&digest);
     return .{
-        .context = try digest(a, context.written()),
+        .context = try a.dupe(u8, &std.fmt.bytesToHex(digest, .lower)),
         .scope = @tagName(analysis.dependency_scope),
-        .definitions = graph.definitions,
-        .types = graph.types,
-        .modules = graph.modules,
+        .definitions = analysis.graph.definitions,
+        .types = analysis.graph.types,
+        .modules = analysis.graph.modules,
     };
 }
 

@@ -542,3 +542,36 @@ test "the checked graph has type, associated item and module nodes" {
     try expectDependencies(response, "modules", "module:Fresh", &.{});
     try std.testing.expectEqual(@as(usize, 64), node(response, "modules", "module:Fresh").?.object.get("fingerprint").?.string.len);
 }
+
+/// The fingerprint of node `a` and the graph context of `source`.
+fn fingerprints(engine: *Engine, source: []const u8) ![2][]const u8 {
+    var response = try send(engine, .{ .operation = "document", .action = "analyze", .format = "roc", .source = source });
+    defer response.deinit();
+    try std.testing.expectEqualStrings("ok", response.field("status").string);
+    return .{
+        try std.testing.allocator.dupe(u8, node(response, "definitions", "a").?.object.get("fingerprint").?.string),
+        try std.testing.allocator.dupe(u8, response.field("graph").object.get("context").?.string),
+    };
+}
+
+test "fingerprints follow parser tokens and types, not comments or whitespace" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    const sources = [_][]const u8{
+        "# %%\na = 1 # c\nout_a = a\n",
+        "# %%\na=1\n\n# note\nout_a = a\n",
+        "# %%\na = 2\nout_a = a\n",
+        "# %%\na : U64\na = 1\nout_a = a\n",
+        "# %%\na : U32\na = 1\nout_a = a\n",
+    };
+    var seen: [sources.len][2][]const u8 = @splat(.{ "", "" });
+    defer for (seen) |pair| for (pair) |text| std.testing.allocator.free(text);
+    for (sources, 0..) |source, i| seen[i] = try fingerprints(&engine, source);
+    try std.testing.expectEqualStrings(seen[0][0], seen[1][0]);
+    try std.testing.expectEqualStrings(seen[0][1], seen[1][1]);
+    for ([_][2]usize{ .{ 0, 2 }, .{ 0, 3 }, .{ 3, 4 } }) |pair| {
+        try std.testing.expect(!std.mem.eql(u8, seen[pair[0]][0], seen[pair[1]][0]));
+    }
+    // An annotation belongs to its definition, not to the context.
+    try std.testing.expectEqualStrings(seen[3][1], seen[4][1]);
+}
