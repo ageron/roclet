@@ -256,7 +256,7 @@ function createCard(cell) {
   const editor = new CellEditor(body,{
     source:cell.source,kind:cell.kind,positions:cell.editorSelection,highlighter,
     symbol:position=>symbolAt(notebook.result,index(),position),
-    completions:prefix=>completionOptions(notebook.result ?? notebook.baseline?.result,prefix),
+    completions:prefix=>completionOptions(notebook.result ?? notebook.lastChecked,prefix),
     onRename:position=>openRename(index(),position),
     onFocus:()=>{ selection.select(cell.key); selection.mode='text'; selectionActive=true; renderSelection(); },
     onChange:(value,isComposing,positions)=>notebook.editCell(index(),value,isComposing || composing,positions),

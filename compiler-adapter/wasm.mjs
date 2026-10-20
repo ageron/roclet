@@ -25,15 +25,8 @@ export async function createWasmTransport(bytes) {
     try { return run(ptr, bytes.length); }
     finally { wasm.roclet_free(ptr, Math.max(1, bytes.length)); }
   };
-  let previousGraph;
+  // The engine owns the reactive baseline; requests pass through unchanged.
   const transport = request => {
-    // The compiler owns its previous dependency graph. Preserve callers' explicit
-    // alternatives, but do not serialize the same baseline graph on each edit.
-    if(transport.workspace && request.operation==='document' && previousGraph && request.reactivity) {
-      const {previous,current,...reactivity}=request.reactivity;
-      const placeholder=current?.context==='' && current.scope==='module' && current.definitions?.length===0;
-      if(previous && JSON.stringify(previous)===previousGraph && (!current || placeholder || JSON.stringify(current)===previousGraph)) request={...request,reactivity};
-    }
     const bytes = encoder.encode(JSON.stringify(request));
     transport.lastRequestBytes=bytes.length;
     // WASM i32 exports are signed in JS; linear-memory addresses are unsigned.
@@ -47,9 +40,7 @@ export async function createWasmTransport(bytes) {
       // Calls may grow memory: never retain a typed view across a WASM call.
       const length = new DataView(wasm.memory.buffer).getUint32(response, true);
       transport.lastResponseBytes=length;
-      const result=JSON.parse(decoder.decode(new Uint8Array(wasm.memory.buffer, response + 4, length)));
-      if(result.graph && ['ok','partial'].includes(result.status)) previousGraph=JSON.stringify(result.graph);
-      return result;
+      return JSON.parse(decoder.decode(new Uint8Array(wasm.memory.buffer, response + 4, length)));
     } finally {
       if (response) wasm.roclet_free_response(response);
       wasm.roclet_free(ptr, bytes.length);

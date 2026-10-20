@@ -8,7 +8,7 @@
     import('/web/edit-model.mjs'),import('/web/cell-editor.mjs'),fetch('/artifacts/roclet.wasm').then(r=>r.arrayBuffer()),
   ]);
   const notebook=new Notebook(binary,{save:async()=>{},list:async()=>[]},{debounce:100000,timeout:120000});
-  const setup=(sources)=>{notebook.cancelPending();notebook.state=newDraft('Notebook tests');notebook.state.autoRun=false;notebook.state.preamble='app [] {}';notebook.state.cells=sources.map(s=>makeCell('code',s));notebook.baseline=null;notebook.result=null;};
+  const setup=(sources)=>{notebook.cancelPending();notebook.state=newDraft('Notebook tests');notebook.state.autoRun=false;notebook.state.preamble='app [] {}';notebook.state.cells=sources.map(s=>makeCell('code',s));notebook.resetBaseline=true;notebook.result=null;};
   const tests=result=>result.evaluation?.tests ?? [];
   const passed=result=>tests(result).map(t=>t.passed);
   const same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);

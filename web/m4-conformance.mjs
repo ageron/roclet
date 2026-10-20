@@ -17,7 +17,7 @@ try {
   const store={save:async()=>{},list:async()=>[]};
   notebook=new Notebook(bytes,store,{debounce:60000});notebook.state=newDraft();notebook.state.autoRun=false;
   notebook.state.cells=[makeCell('code','a = 2\nf = |x| x + a\nout_left = f(3)'),makeCell('code','b = 7\nout_right = {\n    dbg b\n    b * 2\n}')];
-  await notebook.run();const right=notebook.result.evaluation.values[1];
+  await notebook.run();const right={...notebook.result.evaluation.values[1],reused:true};
   notebook.editCell(0,'a = 4\nf = |x| x + a\nout_left = f(3)');await notebook.check();
   assert.deepEqual(notebook.result.evaluation.values,[right]);assert.deepEqual(notebook.result.plan.reused,['out_right']);
   await notebook.run(0);assert.deepEqual(notebook.result.evaluation.values.map(v=>v.text),['7.0','14.0']);
@@ -26,6 +26,9 @@ try {
   notebook.editCell(0,'a = 4\nf = |x| x + a\nout_left = {\n    crash "boom"\n    f(3)\n}');await notebook.run(0);
   assert.equal(notebook.result.status,'partial');assert.deepEqual(notebook.result.evaluation.values,[right]);assert.equal(notebook.result.evaluation.root_errors[0].root,'out_left');
   report('runtime failure is isolated without discarding the independent current result');
+  notebook.session.stop();await notebook.run();
+  assert.deepEqual(notebook.result.plan.reused,[]);assert(notebook.result.evaluation.values.every(v=>!v.reused));
+  report('a restarted worker has no baseline: every root is evaluated once');
   notebook.change(s=>{s.cells=[makeCell('code','# 🙂 a in a comment\na = 2\ntext = "a stays text"\nout_left = a + 3'),makeCell('code','b = 7\nout_right = b * 2')];});
   await notebook.run();
   const a=symbols(notebook.result).find(d=>d.name==='a');assert.equal(a.locations.length,2);assert.equal(a.type,'Dec');

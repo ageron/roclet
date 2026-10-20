@@ -33,34 +33,6 @@ export function cellsFrom(result, previous = []) {
     attributes: cell.attributes, outputs: cell.outputs, collapsed: previous[i]?.collapsed ?? false }));
 }
 
-// Presentation reuse only: these strings never enter compiler evaluation.
-function mergeCheckedResults(previous, result, state) {
-  if (!result.graph || !result.evaluation) return result;
-  const reused = new Set(result.plan?.reused ?? []);
-  const old = previous?.evaluation;
-  const positions = new Map(result.model.cells.flatMap((cell, i) => [cell.output,...(cell.expectations ?? [])].map(root=>[root,i])));
-  const values = [...(old?.values ?? []).filter(v => reused.has(v.root)), ...(result.evaluation.values ?? [])];
-  values.sort((a,b) => positions.get(a.root) - positions.get(b.root));
-  const events = [...(old?.events ?? []).filter(e => reused.has(e.root)), ...result.evaluation.events]
-    .map(e => ({...e, cell:positions.get(e.root) ?? null})).sort((a,b) => (a.cell ?? -1) - (b.cell ?? -1));
-  const tests = [...(old?.tests ?? []).filter(t=>reused.has(t.root)), ...(result.evaluation.tests ?? [])]
-    .map(test=>{
-      const cell=positions.get(test.root) ?? null;
-      if(!reused.has(test.root)) return {...test,cell};
-      // Reused statuses still use this revision's compiler-provided source map.
-      const expectation=result.expectations?.find(e=>e.root===test.root);
-      const mapping=result.mappings?.find(m=>m.cell===cell && m.generated_start<=expectation?.start && expectation.start<m.generated_end);
-      if(!mapping) return {...test,cell};
-      const absolute=mapping.source_start+expectation.start-mapping.generated_start;
-      const raw=state.sourceCurrent, start=raw?absolute:absolute-result.model.cells[cell].body_start;
-      const source=raw?state.source:result.model.cells[cell].source;
-      const prefix=new TextDecoder().decode(new TextEncoder().encode(source).subarray(0,start));
-      const lines=prefix.split('\n'),location={line:lines.length,column:new TextEncoder().encode(lines.at(-1)).length+1};
-      return {...test,cell,start,end:start+expectation.end-expectation.start,location,scope:raw?'source':'cell'};
-    });
-  return {...result, evaluation:{...result.evaluation, values, tests, events:events.map((e,sequence) => ({...e,sequence}))}};
-}
-
 // Browser-owned edit history, persistence and worker lifecycle. Parsing, output
 // selection, lowering and encoding are exclusively the shared Roc document core.
 export class Notebook {
@@ -68,7 +40,7 @@ export class Notebook {
     this.store = store; this.session = session; this.debounce = debounce; this.timeout = timeout; this.onChange = onChange;
     this.loadPackage = loadPackage;
     this.state = null; this.result = null; this.history = []; this.future = []; this.views = new Map();
-    this.diagnosticsDeferred = false; this.baseline = null;
+    this.diagnosticsDeferred = false; this.lastChecked = null; this.baselineId = null; this.resetBaseline = false;
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
   }
   emit(reason = 'status') { this.onChange(reason); }
@@ -161,24 +133,23 @@ export class Notebook {
   reactiveRequest(action, selectedCell, forceAll = false) {
     const request = requestFor(this.state, action);
     request.compact = true;
-    const previous = this.baseline?.id === this.state.id ? this.baseline.result : null;
-    const roots = previous?.roots ?? [];
-    // A forced cell is resolved against the *new* model in the adapter below.
-    request.reactivity = {known:!!previous?.graph, previous:previous?.graph ?? {context:'',scope:'module',definitions:[]},
-      current:{context:'',scope:'module',definitions:[]}, roots:[], available:[...(previous?.evaluation?.values ?? []),...(previous?.evaluation?.tests ?? []).filter(t=>t.passed)].map(v=>v.root), force:forceAll ? roots : []};
+    // The engine owns the reactive baseline and answers for every root. A
+    // different document starts a fresh baseline; forced cells and forceAll
+    // are resolved against the new model by the engine.
+    request.reactivity = this.resetBaseline || this.baselineId !== this.state.id ? {reset:true} : {};
     request.forceAll = forceAll;
     if (selectedCell != null) request.selectedCell = selectedCell;
     request.isolateErrors = true;
     return request;
   }
   publish(result) {
-    const previous = this.baseline?.id === this.state.id ? this.baseline.result : null;
-    this.result = mergeCheckedResults(previous, result, this.state);
-    if (result.graph) this.baseline = {id:this.state.id,result:this.result};
-    return this.result;
+    this.result = result;
+    if (result.graph) this.lastChecked = result;
+    return result;
   }
   async request(request,{onPackageWaiting}={}) {
     const runId=this.runId;
+    if (request.reactivity) { this.baselineId = this.state.id; this.resetBaseline = false; }
     try {
       return await this.session.request(request,{loadPackage:this.loadPackage,onPackageWaiting:waiting=>{
         if(runId!==this.runId) return;
@@ -304,12 +275,12 @@ export class Notebook {
   }
   async recoveryCopy() {
     this.diagnosticsDeferred = false;
-    this.invalidate();this.state={...clone(this.state),id:key(),title:`${this.state.title.slice(0,100)} (recovery)`,revision:1};delete this.state._storageVersion;this.history=[];this.future=[];this.views.clear();this.emit("document");await this.persist();
+    this.invalidate();this.resetBaseline=true;this.state={...clone(this.state),id:key(),title:`${this.state.title.slice(0,100)} (recovery)`,revision:1};delete this.state._storageVersion;this.history=[];this.future=[];this.views.clear();this.emit("document");await this.persist();
   }
   async replace(record) {
     if (!await this.persist()) throw new Error('The current draft could not be saved. Download a copy before switching documents.');
     this.diagnosticsDeferred = false;
-    this.invalidate(); this.state = clone(record); this.history = []; this.future = []; this.views.clear(); this.group = null;
+    this.invalidate(); this.resetBaseline = true; this.state = clone(record); this.history = []; this.future = []; this.views.clear(); this.group = null;
     this.emit('document'); await this.persist(); this.schedule();
   }
   async open(source, filename) {

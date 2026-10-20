@@ -16,7 +16,8 @@ const measure=async(session,request)=>{
     imageBytes:result.workspaceCache.image_bytes,imageRetries:result.workspaceCache.image_retries,analyses:result.workspaceCache.analyses}};
 };
 const summarize=samples=>({rounds:samples.length,...Object.fromEntries(Object.keys(samples[0]).map(key=>[`${key}Median`,median(samples.map(s=>s[key]))]))});
-const reactive=(request,previous)=>({...request,compact:true,...(previous?{reactivity:{known:true,previous:previous.graph,current:{context:'',scope:'module',definitions:[]},roots:[],available:previous.roots,force:[]}}:{})});
+// Each sequence's first request resets the engine-owned baseline.
+const reactive=(request,previous)=>({...request,compact:true,reactivity:previous?{}:{reset:true}});
 
 // Every measured edit is checked against its expected values. Timings include
 // the real worker/UTF-8/WASM/cache-write path and never compare cached results.
@@ -58,7 +59,7 @@ export async function benchmarkWorkspace(bytes,{rounds=15,buildMode,maxWallMemor
     report('Imported module implementation edits checked; unchanged module bytes never resent');
     modules.stop();
     const restored=session(),restoredMeasurement=await measure(restored,currentRequest);
-    assert.deepEqual(restoredMeasurement.result.evaluation.values,previous.evaluation.values);
+    assert.deepEqual(restoredMeasurement.result.evaluation.values,previous.evaluation.values.map(value=>({...value,reused:false})));
     assert(restoredMeasurement.result.workspaceCache.hits>0,'Restarted worker must consume persisted build artifacts');
     return {buildMode,rounds,warmupRounds:3,wallArea:{startup:wallStartup,warm:wallWarm},
       multiModule:{startup:moduleStartup,warm:summarize(moduleSamples),restoredWorker:restoredMeasurement.sample}};

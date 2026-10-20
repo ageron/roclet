@@ -24,6 +24,25 @@ test('project modules preserve raw source editing and undo as one notebook chang
   notebook.dispose();
 });
 
+test('reactive requests carry only a participation flag and reset for another document',async()=>{
+  const sent=[];
+  const session={invalidate(){},stop(){},request:async request=>{sent.push(request);return {status:'ok',graph:{},model:{cells:[],diagnostics:[]},evaluation:{status:'ok',values:[{root:'out_1',text:'1',reused:true}],events:[]}};}};
+  const notebook=new Notebook(null,{save:async()=>{}},{session,debounce:60000});
+  notebook.state=newDraft();notebook.state.autoRun=false;
+  const result=await notebook.run();await notebook.check();await notebook.run(0);
+  assert.equal(notebook.result.evaluation.values[0].reused,true,'results are published as the engine returned them');
+  assert.equal(result.evaluation.values.length,1);
+  assert.deepEqual(sent.map(r=>r.reactivity),[{reset:true},{},{}]);
+  for(const request of sent) for(const key of ['known','previous','current','available','roots']) assert(!(key in request.reactivity));
+  assert.equal(sent[2].selectedCell,0);assert.equal(sent[0].forceAll,true);
+  await notebook.replace(newDraft('Other'));await notebook.run();
+  assert.deepEqual(sent.at(-1).reactivity,{reset:true});
+  await notebook.recoveryCopy();await notebook.run();
+  assert.deepEqual(sent.at(-1).reactivity,{reset:true});
+  await notebook.run();assert.deepEqual(sent.at(-1).reactivity,{});
+  notebook.dispose();
+});
+
 test('project paths cannot replace the notebook or escape a portable project',()=>{
   for(const path of ['Main.roc','main.roc','../secret.roc','/absolute.roc','nested/../secret.roc','nested//File.roc','C:File.roc','bad\\File.roc']) {
     assert.throws(()=>projectFiles([{path,source:'module []'}]));
