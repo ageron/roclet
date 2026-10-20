@@ -10,11 +10,17 @@ pub fn build(b: *std.Build) void {
     _ = b.option([]const u8, "roc-source", "Deprecated: use the roc path dependency in build.zig.zon");
     _ = b.option(u32, "compiler-jobs", "Deprecated: use zig build -j");
     const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode (default ReleaseFast)") orelse .fast;
+    // Zig's self-hosted backend builds the native adapter in seconds instead of
+    // minutes, but the result runs several times slower. Use -Dllvm=false for
+    // local iteration; release artifacts and CI keep the default (LLVM).
+    const use_llvm = b.option(bool, "llvm", "Use LLVM for the native and WASM adapters (default: Zig's choice, LLVM for release modes)");
     const roc = b.dependency("roc", .{ .target = b.graph.host, .optimize = optimize });
     const native = adapter(b, roc, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
+    native.use_llvm = use_llvm;
     b.step("native-adapter", "Build only the native engine").dependOn(&native.step);
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const wasm = adapter(b, roc, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
+    wasm.use_llvm = use_llvm;
     b.step("wasm-adapter", "Build only the browser engine").dependOn(&wasm.step);
     wasm.entry = .disabled;
     wasm.rdynamic = true;

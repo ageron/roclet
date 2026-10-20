@@ -86,6 +86,13 @@ zig build package
 lints in `ci/zig_lints.zig`, and a dead-file scan over tracked Zig sources. Run
 `zig build check` alone for a fast pre-commit pass.
 
+For faster local iteration, `-Dllvm=false` builds the native adapter with Zig's
+self-hosted backend, which takes seconds instead of minutes, for example
+`zig build test-documents -Dllvm=false`. The result runs several times slower, so
+release artifacts, CI and benchmarks use the default LLVM build. Self-hosted WASM
+builds additionally need an assembly workaround in the prepared compiler and are
+not supported yet.
+
 Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/document-conformance.html`, `/web/m5-conformance.html`, and
 `/web/math-conformance.html` on your local server. `zig build test` does not launch Chrome.
