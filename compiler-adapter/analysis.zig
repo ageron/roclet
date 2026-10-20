@@ -49,6 +49,9 @@ pub const Analysis = struct {
     binders: []const []const u8 = &.{},
     dependency_scope: DependencyScope = .definitions,
     graph: Graph = .{},
+    /// Name references outside the strict-demand closure of their definition,
+    /// kept as edges (see `analyze`).
+    demand_union_fallbacks: u64 = 0,
 };
 
 /// What a node's own CIR (every checked node inside its source span, nested
@@ -153,9 +156,6 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
         binders.clearRetainingCapacity();
         try can.DependencyGraph.appendPatternBinders(env, env.store.getDef(idx).pattern, &binders, &binder_stack, arena);
         for (binders.items) |binder| try patterns.put(arena, binder, idx);
-        const d = env.store.getDef(idx);
-        const r = env.store.getExprRegion(d.expr);
-        if (r.start.offset >= prefix and r.end.offset <= user_end and env.store.getPattern(d.pattern) != .assign) scope = .module;
     }
     const tags = env.store.nodes.items.items(.tag);
     for (tags, 0..) |tag, i| {
@@ -285,6 +285,48 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
     var refs: std.AutoHashMapUnmanaged(CIR.Def.Idx, void) = .{};
     var stack: std.ArrayList(CIR.Expr.Idx) = .empty;
     var defaults: std.AutoHashMapUnmanaged(CIR.Expr.Idx, void) = .{};
+
+    // Value edges: the compiler's strict-demand relation (finalized after
+    // checking; it includes associated items and resolved local dispatch
+    // targets) united with name references. Strict demand alone is not
+    // enough: a lambda passed to a builtin (`List.map(xs, f)`) is demanded,
+    // but not what its body reads. `demand_union_fallbacks` counts, for each
+    // non-function definition, the definitions its united closure reaches
+    // and its strict-demand closure does not.
+    var demand: std.AutoHashMapUnmanaged(CIR.Def.Idx, std.ArrayList(CIR.Def.Idx)) = .empty;
+    if (env.topLevelDemandDependenciesReady()) {
+        for (env.topLevelDemandDependencies()) |edge| {
+            const slot = try demand.getOrPut(arena, edge.dependent);
+            if (!slot.found_existing) slot.value_ptr.* = .empty;
+            try slot.value_ptr.append(arena, edge.dependency);
+        }
+    } else scope = .module;
+    var united: std.AutoHashMapUnmanaged(CIR.Def.Idx, std.ArrayList(CIR.Def.Idx)) = .empty;
+    for (node_defs.keys(), node_defs.values()) |idx, slot| {
+        refs.clearRetainingCapacity();
+        try can.DependencyGraph.collectNameReferences(env, &patterns, env.store.getDef(idx).expr, &refs, &stack, &defaults, arena);
+        if (demand.get(idx)) |dependencies| for (dependencies.items) |dependency| try refs.put(arena, dependency, {});
+        var edges: std.ArrayList(CIR.Def.Idx) = .empty;
+        var it = refs.keyIterator();
+        while (it.next()) |dependency| try edges.append(arena, dependency.*);
+        try united.put(arena, idx, edges);
+        try setDependencies(arena, &nodes.items[slot], refs, defs, &node_defs, nodes.items, &facts[slot], &type_decls, &module_names);
+    }
+    var fallbacks: u64 = 0;
+    var by_demand: std.AutoHashMapUnmanaged(CIR.Def.Idx, void) = .empty;
+    var by_union: std.AutoHashMapUnmanaged(CIR.Def.Idx, void) = .empty;
+    for (node_defs.keys()) |idx| {
+        switch (env.store.getExpr(env.store.getDef(idx).expr)) {
+            .e_lambda, .e_closure => continue,
+            else => {},
+        }
+        try reach(arena, &demand, idx, &by_demand);
+        try reach(arena, &united, idx, &by_union);
+        var it = by_union.keyIterator();
+        while (it.next()) |dependency| if (node_defs.contains(dependency.*) and !by_demand.contains(dependency.*)) {
+            fallbacks += 1;
+        };
+    }
     for (defs) |idx| {
         const def = env.store.getDef(idx);
         const pattern = env.store.getPattern(def.pattern);
@@ -293,16 +335,14 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
         const expr_region = env.store.getExprRegion(def.expr);
         if (name_region.start.offset < prefix or expr_region.end.offset > user_end) continue;
         const name = env.getIdent(pattern.assign.ident);
-        if (std.mem.findScalar(u8, name, '.') != null) scope = .module;
         refs.clearRetainingCapacity();
         try can.DependencyGraph.collectNameReferences(env, &patterns, def.expr, &refs, &stack, &defaults, arena);
         var deps: std.ArrayList([]const u8) = .empty;
         // Source order is deterministic; references include uncalled lambda bodies.
         for (defs) |other| if (refs.contains(other)) {
             const p = env.store.getPattern(env.store.getDef(other).pattern);
-            if (p == .assign) try deps.append(arena, try arena.dupe(u8, env.getIdent(p.assign.ident))) else scope = .module;
+            if (p == .assign) try deps.append(arena, try arena.dupe(u8, env.getIdent(p.assign.ident)));
         };
-        if (node_defs.get(idx)) |slot| try setDependencies(arena, &nodes.items[slot], refs, defs, &node_defs, nodes.items, &facts[slot], &type_decls, &module_names);
         var occurrences: std.ArrayList(Region) = .empty;
         var rename_safe = true;
         for (tags, 0..) |tag, i| {
@@ -348,7 +388,7 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
             var deps: std.ArrayList([]const u8) = .empty;
             for (defs) |other| if (refs.contains(other)) {
                 const pattern = env.store.getPattern(env.store.getDef(other).pattern);
-                if (pattern == .assign) try deps.append(arena, try arena.dupe(u8, env.getIdent(pattern.assign.ident))) else scope = .module;
+                if (pattern == .assign) try deps.append(arena, try arena.dupe(u8, env.getIdent(pattern.assign.ident)));
             };
             const slot = expectation_slot + e;
             try setDependencies(arena, &nodes.items[slot], refs, defs, &node_defs, nodes.items, &facts[slot], &type_decls, &module_names);
@@ -398,12 +438,22 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
         item.fingerprint = try hex(arena, hash);
     }
 
-    return .{ .definitions = definitions.items, .binders = result_binders.items, .dependency_scope = scope, .graph = .{
+    return .{ .definitions = definitions.items, .binders = result_binders.items, .dependency_scope = scope, .demand_union_fallbacks = fallbacks, .graph = .{
         .definitions = nodes.items[0..type_slot],
         .types = nodes.items[type_slot..],
         .modules = module_nodes,
         .context = try hex(arena, &context),
     } };
+}
+
+/// Every definition `edges` reaches from `root`, into `out`.
+fn reach(a: A, edges: *const std.AutoHashMapUnmanaged(CIR.Def.Idx, std.ArrayList(CIR.Def.Idx)), root: CIR.Def.Idx, out: *std.AutoHashMapUnmanaged(CIR.Def.Idx, void)) !void {
+    out.clearRetainingCapacity();
+    var pending: std.ArrayList(CIR.Def.Idx) = .empty;
+    try pending.append(a, root);
+    while (pending.pop()) |current| if (edges.get(current)) |dependencies| for (dependencies.items) |dependency| {
+        if (!(try out.getOrPut(a, dependency)).found_existing) try pending.append(a, dependency);
+    };
 }
 
 fn appendNew(a: A, list: *std.ArrayList([]const u8), name: []const u8) !void {

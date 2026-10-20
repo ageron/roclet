@@ -63,6 +63,7 @@ const Analyzer = struct {
             return;
         };
         self.stats.analyses += 1;
+        self.stats.demand_union_fallbacks += self.result.?.demand_union_fallbacks;
     }
 };
 

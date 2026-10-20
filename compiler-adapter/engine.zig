@@ -882,13 +882,16 @@ pub const RequestStats = struct {
     image_retries: u64 = 0,
     /// Dependency analyses computed (at most one per revision or script run).
     analyses: u64 = 0,
+    /// Name references the analyses kept outside the compiler's strict-demand
+    /// closure (`analysis.zig`); expected for callbacks passed to builtins.
+    demand_union_fallbacks: u64 = 0,
     pub fn jsonStringify(self: @This(), w: anytype) !void {
         try w.beginObject();
         inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |name| {
             try w.objectField(name);
             try w.write(@field(self.cache, name));
         }
-        inline for (.{ "frontend_builds", "lowerings", "executions", "prepared_hits", "image_bytes", "image_retries", "analyses" }) |name| {
+        inline for (.{ "frontend_builds", "lowerings", "executions", "prepared_hits", "image_bytes", "image_retries", "analyses", "demand_union_fallbacks" }) |name| {
             try w.objectField(name);
             try w.write(@field(self, name));
         }

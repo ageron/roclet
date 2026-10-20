@@ -122,7 +122,10 @@ responses. `workspaceCache.frontend_builds`, `lowerings`, `executions`,
 independently of wall-clock timing. `prepared_hits` is 1 when the request was
 served by the retained revision and 0 when it prepared one. `analyses` counts
 dependency analyses (`analysis.zig`): one per new revision, cached on the
-revision for every later request and root, plus one per script run. The input
+revision for every later request and root, plus one per script run.
+`demand_union_fallbacks` counts what those analyses kept as dependency edges
+although the compiler's strict-demand closure does not reach it (see
+Reactive baseline). The input
 key is hashed once per request. `image_bytes` is the size of the image the
 request built (0 when it reused a revision) and `image_retries` the buffer
 doublings it took.
@@ -257,11 +260,16 @@ definitions (associated items as `Type.item`) and expectation roots,
 `types` the local type declarations, and `modules` the imported modules nodes
 refer to (`module:<name>`, fingerprinted by the module's deep content
 identity). Every node has `name`, `binders`, `fingerprint` and `dependencies`;
-a dependency names another node. Edges come from checked CIR: compiler name
-references, type references in annotations, constructions and patterns,
-external lookups, and from each type to its associated items. A definition
-node covers its annotation. A baseline of another graph version invalidates
-every root.
+a dependency names another node. Edges come from checked CIR: the compiler's
+strict-demand relation (`ModuleEnv.topLevelDemandDependencies`, which includes
+associated items and resolved local dispatch targets) united with compiler
+name references, type references in annotations, constructions and patterns,
+external lookups, and from each type to its associated items. The union is
+permanent: strict demand does not follow a lambda passed to a builtin
+(`List.map(xs, f)` demands `f`, not what `f` reads), and
+`workspaceCache.demand_union_fallbacks` counts the definitions a non-function
+definition reaches only through name references. A definition node covers
+its annotation. A baseline of another graph version invalidates every root.
 
 `roclet --bridge a.json b.json ...` serves a sequence with one engine, one
 response per line; `tests/m4.zig` records before/selective/full sequences so the

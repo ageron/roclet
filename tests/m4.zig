@@ -77,6 +77,14 @@ fn engine(a: A, suite: *docs.Suite, workload: Workload) !void {
     });
     const before, const selective, const full = responses[0..3].*;
     for (responses) |response| try expectAnalysedOnce(response);
+    // Name references outside the strict-demand closure, counted by the
+    // analysis of the edited revision (and kept as edges).
+    const fallbacks = get(get(selective, "workspaceCache"), "demand_union_fallbacks").integer;
+    const expected_fallbacks = if (workload.w.object.get("demandUnionFallbacks")) |count| count.integer else 0;
+    if (fallbacks != expected_fallbacks) {
+        std.debug.print("Expected {d} demand union fallbacks, got {d}\n", .{ expected_fallbacks, fallbacks });
+        return error.M4DemandUnion;
+    }
     try equal(a, workload.status(), get(before, "status"));
     try equal(a, get(full, "status"), get(selective, "status"));
     if (selective.object.get("graph") == null) return;

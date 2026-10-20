@@ -88,6 +88,9 @@ export interface CompilerCacheStats {
   /** Dependency analyses computed: 1 for a new revision (cached for later
    *  requests and roots), 0 when reused, 1 per script run. */
   analyses?: number;
+  /** Dependencies those analyses kept although the compiler's strict-demand
+   *  closure does not reach them (a callback passed to a builtin). */
+  demand_union_fallbacks?: number;
   /** Bytes of the flat LIR image built by this request (0 when a retained
    *  revision was reused) and the image buffer doublings it took. */
   image_bytes?: number;

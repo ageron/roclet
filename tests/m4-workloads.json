@@ -221,5 +221,17 @@
     "reused": [
       "out_other"
     ]
+  },
+  {
+    "name": "higher-order-callback",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_mapped = List.map([1, 2], f)\n# %%\nout_other = 7\n",
+    "after": "# %%\na = 3\nf = |x| x + a\nout_mapped = List.map([1, 2], f)\n# %%\nout_other = 7\n",
+    "evaluate": [
+      "out_mapped"
+    ],
+    "reused": [
+      "out_other"
+    ],
+    "demandUnionFallbacks": 1
   }
 ]

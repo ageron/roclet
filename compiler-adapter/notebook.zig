@@ -76,6 +76,7 @@ pub const State = struct {
             const app = self.build.?.getAppSemanticData().?;
             self.analysis_cache = try dependency.analyze(self.revision_arena.allocator(), app.env, self.prefix, self.user_bytes, self.expectations);
             stats.analyses += 1;
+            stats.demand_union_fallbacks += self.analysis_cache.?.demand_union_fallbacks;
         }
         return &self.analysis_cache.?;
     }
