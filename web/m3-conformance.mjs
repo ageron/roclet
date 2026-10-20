@@ -61,7 +61,9 @@ try {
   const reportHtml=await (await exportReport(capture)).text();const dom=new DOMParser().parseFromString(reportHtml,'text/html');assert.equal(dom.querySelectorAll('script,img,iframe').length,0);assert.match(dom.body.textContent,/15\.0/);assert(dom.querySelector('meta[http-equiv="Content-Security-Policy"]'));
   capture.document.title='<script>bad()</script>';capture.model.cells.push({kind:'code',source:'<img src=x onerror=bad()>'});const hostile=new DOMParser().parseFromString(await (await exportReport(capture)).text(),'text/html');assert.equal(hostile.querySelectorAll('script,img').length,0);assert.match(hostile.body.textContent,/<img src=x/);
   report('exports never label stale values current; static reports escape source/title and contain no executable notebook scripts');
-  const site=await exportSite(capture),siteFiles=await unzip(await site.arrayBuffer(),{maxBytes:64*1024*1024});
+  // Sites include the compiler; self-hosted builds can exceed 64 MiB. Match
+  // the site writer's bound without changing portable document import limits.
+  const site=await exportSite(capture),siteFiles=await unzip(await site.arrayBuffer(),{maxBytes:128*1024*1024});
   assert(siteFiles.has('index.html'));assert(siteFiles.has('artifacts/roclet.wasm'));assert(siteFiles.has('web/published.roclet.zip'));
   const siteRelease=JSON.parse(text(siteFiles.get('web/offline-release.json')));
   for(const a of siteRelease.assets) {const path=a.path.startsWith('../')?a.path.slice(3):`web/${a.path}`;assert.equal(await sha256(siteFiles.get(path)),a.sha256);}

@@ -117,6 +117,8 @@ pub fn build(b: *std.Build) void {
     documents.addArg(root);
     documents.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     documents.step.dependOn(&cli.step);
+    // Parity cases record the manifest for this exact native/WASM pair.
+    documents.step.dependOn(ready);
     documents.has_side_effects = true;
     b.step("test-documents", "Test document formats and generate WASM parity cases").dependOn(&documents.step);
     test_step.dependOn(&documents.step);
@@ -129,6 +131,7 @@ pub fn build(b: *std.Build) void {
     m4_tests.addArg(root);
     m4_tests.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     m4_tests.step.dependOn(&cli.step);
+    m4_tests.step.dependOn(ready);
     m4_tests.has_side_effects = true;
     b.step("test-m4", "Check selective evaluation against full recomputation").dependOn(&m4_tests.step);
     test_step.dependOn(&m4_tests.step);

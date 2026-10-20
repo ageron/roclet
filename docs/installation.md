@@ -86,12 +86,14 @@ zig build package
 lints in `ci/zig_lints.zig`, and a dead-file scan over tracked Zig sources. Run
 `zig build check` alone for a fast pre-commit pass.
 
-For faster local iteration, `-Dllvm=false` builds the native adapter with Zig's
-self-hosted backend, which takes seconds instead of minutes, for example
-`zig build test-documents -Dllvm=false`. The result runs several times slower, so
-release artifacts, CI and benchmarks use the default LLVM build. Self-hosted WASM
-builds additionally need an assembly workaround in the prepared compiler and are
-not supported yet.
+For faster local iteration, `-Dllvm=false` builds the native and WASM adapters
+with Zig's self-hosted backend, which takes seconds instead of minutes. Prepare
+the compiler as above, then use `zig build test -Dllvm=false` or
+`zig build serve -Dllvm=false`. These builds retain the default `ReleaseFast`
+optimization mode, but the resulting adapters run several times slower. Release
+artifacts, CI and performance measurements use the default LLVM backend.
+The versioned embedding patch includes the WASM assembly metadata needed by
+the self-hosted linker; no manual compiler edits are required.
 
 Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/document-conformance.html`, `/web/m5-conformance.html`, and
