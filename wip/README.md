@@ -127,7 +127,7 @@ deferred to one final validation pass when the PR is ready.
 | 01 typed pipeline | Merged (`plan/01-typed-pipeline`) |
 | 05 image buffer | Merged (`plan/05-image-buffer`; step 6 landed with plan 01) |
 | 02 engine-owned baseline | In progress |
-| 06 step E (remove `cells` entry and raw legacy shape) | In progress |
+| 06 step E (single `operation` dispatch) | Merged (`plan/06e-retire-legacy-dispatch`) |
 | 03, 06 step F | Not started |
 
 ### Deferred final validation (LLVM)
@@ -157,3 +157,7 @@ deferred to one final validation pass when the PR is ready.
   60-cell median went 377 ms to 180 ms); packaged assets exclude
   `tests/pipeline-benchmark.mjs`; benchmark asserts `analyses == 1` per warm
   edit with medians near 9.7 ms and 8.1 ms.
+- Plan 06 step E: document-conformance replays 262 cases including the
+  `operation: "program"` runtime dbg fixture; `workspace-conformance` and
+  `m5-conformance` run their converted document requests in a browser for the
+  first time (they sent M0 `cells` requests before).

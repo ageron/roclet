@@ -233,10 +233,12 @@ Pages that remain after this plan: `document-`, `edit-`, `edit-ui-`, `m3-`, `m4-
 Grep gates (run from the repository root; every command must print nothing):
 
 ```sh
-grep -rn "BrowserSession\|RevisionGate\|CompilerAdapter\|byteOffsetToUtf16" --include=*.mjs --include=*.html --include=*.zig --include=*.md . | grep -v "^./web/vendor\|^./zig-pkg\|^./.toolchain\|^./zig-out\|^./docs/m[0-9]\|^./docs/.*-validation.json\|^./design.md\|^./wip/"
-grep -rn "web/session.mjs\|web/worker.mjs\|web/app.mjs\|adapter.mjs\|web/conformance.mjs\|web/conformance.html\|tests/unit.test.mjs\|tests/fixtures.mjs" --include=*.mjs --include=*.html --include=*.zig --include=*.md --include=*.yml . | grep -v "^./web/vendor\|^./zig-pkg\|^./.toolchain\|^./zig-out\|^./docs/m[0-9]\|^./docs/.*-validation.json\|^./wip/"
+grep -rn "BrowserSession\|RevisionGate\|CompilerAdapter\|byteOffsetToUtf16" --include=*.mjs --include=*.html --include=*.zig --include=*.md . | grep -v "^\(\./\)\?\(web/vendor\|zig-pkg\|\.toolchain\|zig-out\|docs/m[0-9]\|docs/.*-validation.json\|design.md\|wip/\)"
+grep -rn "web/session.mjs\|web/worker.mjs\|web/app.mjs\|adapter.mjs\|web/conformance.mjs\|web/conformance.html\|tests/unit.test.mjs\|tests/fixtures.mjs" --include=*.mjs --include=*.html --include=*.zig --include=*.md --include=*.yml . | grep -v "^\(\./\)\?\(web/vendor\|zig-pkg\|\.toolchain\|zig-out\|docs/m[0-9]\|docs/.*-validation.json\|wip/\)"
 grep -rn "processCore\|core_cache\|CachedProgram\|cold_core\|overlay.json\|Document\.roc\|core/" compiler-adapter build.zig tools .github | grep -v "ROC-LICENSE"
-grep -rn "protocol.d.ts" . --include=*.md --include=*.mjs --include=*.zig | grep -v "^./design.md\|^./wip/\|^./zig-pkg\|^./.toolchain"
+grep -rn "protocol.d.ts" . --include=*.md --include=*.mjs --include=*.zig | grep -v "^\(\./\)\?\(design.md\|wip/\|zig-pkg\|\.toolchain\)"
+# No M0 cells requests remain in pages or tests:
+grep -rn 'cells:\[{key' web tests | grep -v '^web/vendor'
 # After step E only:
 grep -rn "snapshot.zig\|native-conformance\|contains(\"cells\")" compiler-adapter build.zig tools tests web | grep -v "^web/vendor"
 ```
