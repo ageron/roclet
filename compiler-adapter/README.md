@@ -82,6 +82,20 @@ headerless program on the echo platform and returns the protocol-1 program
 response. A request without one of these four operations is answered with
 `status: "protocol_error"`.
 
+The wire shape is pinned in `tests/protocol-shape.json` and checked by
+`zig build test-documents`; `operation: syntax` and `operation: markdown` are
+part of that shape. The pin is the sorted set of
+`"<operation>.<request|result>.<key.path> <types>"` lines (`[]` marks array
+elements; types are as JSON sees them) observed across every request and
+response the document and M4 suites record, so it names each key the engine
+accepts or sends and says nothing about values. The typed Zig structs that
+serialise responses (`document.Response`, `notebook.Evaluation`,
+`script.Outcome`) and this README describe the protocol; the pin checks it.
+An intentional protocol change regenerates the pin in the same commit with
+`zig build test-documents -Dupdate-protocol-shape`, so the diff is reviewed;
+an accidental one fails `zig build test`. A field appears in the pin only once
+a fixture exercises it, so add the fixture with the field.
+
 `compact: true` on `analyze` or `evaluate` omits export encodings, duplicate draft
 and source strings, and internal parser facts. Editor cells, mappings,
 diagnostics, dependency graphs, plans, rendering, and evaluated values retain
@@ -254,9 +268,8 @@ last successful evaluation in this engine. Requests never carry graphs.
   engine and no baseline, so its first run evaluates every root once.
 
 The `graph` member of a checked document response is graph version 2
-(`version: 2`, `protocol.d.ts` `DependencyGraph`), built by `analysis.zig` once
-per revision from the checked module. `definitions` holds the value
-definitions (associated items as `Type.item`) and expectation roots,
+(`version: 2`), built by `analysis.zig` once per revision from the checked
+module. `definitions` holds the value definitions (associated items as `Type.item`) and expectation roots,
 `types` the local type declarations, and `modules` the imported modules nodes
 refer to (`module:<name>`, fingerprinted by the module's deep content
 identity). Every node has `name`, `binders`, `fingerprint` and `dependencies`;
