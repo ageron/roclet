@@ -95,9 +95,12 @@ try {
     assert(Math.abs(bar.top - panel.top) <= 1, `${slot} title bar is not at the top of its panel`);
     assert(Math.abs(status.bottom - panel.bottom) <= 1 && status.bottom <= innerHeight + 1, `${slot} status bar is not at the bottom of its panel`);
     assert.equal(part(slot,'title').value, title);
+    assert(!root(slot).inert && root(slot).dataset.loading === 'false', `${slot} panel is still loading`);
+    assert.equal(part(slot,'status-bar').querySelectorAll('button').length, 0, `${slot} status bar holds a button`);
+    assert(part(slot,'run').parentElement === part(slot,'stop').parentElement && part(slot,'run').parentElement.classList.contains('run-slot'), `${slot} Run and Stop do not share a slot`);
     assert(part(slot,'title-bar').contains(part(slot,'title')) && part(slot,'status-bar').contains(part(slot,'status')), `${slot} parts are misplaced`);
   }
-  assert.equal(document.title, 'Alpha | Beta — Roclet');
+  assert.equal(document.title, 'Roclet: Alpha | Beta');
   assert(document.documentElement.scrollWidth <= innerWidth, 'The page overflowed horizontally');
   if (compact()) {
     assert(!$('panel-tabs').hidden, 'No tabs in the compact layout');
@@ -234,13 +237,19 @@ try {
 
   await show('right'); cells('right')[0].focus(); assert(bench.active === bench.right, `The ${bench.slotOf(bench.active)} panel is active`);
   const leftId = L().state.id, rightId = R().state.id;
-  await until(()=>[...$('recent').options].some(option=>option.value === leftId), 'the recent list');
-  const chooseLeft = () => { $('recent').value = leftId; $('recent').dispatchEvent(new Event('change')); };
+  // Recent notebooks lists drafts for the active panel and marks the one open
+  // in the other panel; choosing it is refused like any other open.
+  const chooseLeft = async () => {
+    $('recent').click(); const entry = () => $('recent-list').querySelector(`[data-notebook-id="${leftId}"]`);
+    await until(entry, 'the recent list');
+    assert.equal($('recent-list').querySelector(`[data-notebook-id="${rightId}"]`)?.getAttribute('aria-current'), 'true');
+    assert.match(entry().textContent, /Open in the left panel/); entry().click();
+  };
   const refusal = () => part('right','notice').textContent.includes('already open in the left panel');
-  chooseLeft(); await until(refusal, 'the refusal notice'); assert.equal(R().state.id, rightId);
+  await chooseLeft(); await until(refusal, 'the refusal notice'); assert.equal(R().state.id, rightId); assert(!$('recent-dialog').open);
   [...part('right','notice').querySelectorAll('button')].find(b=>b.textContent==='Go to it').click();
   await until(()=>bench.active === bench.left, 'Go to it');
-  await show('right'); chooseLeft(); await until(refusal, 'the refusal notice');
+  await show('right'); await chooseLeft(); await until(refusal, 'the refusal notice');
   [...part('right','notice').querySelectorAll('button')].find(b=>b.textContent==='Open an independent copy here').click();
   await until(()=>R().state.id !== rightId, 'the independent copy');
   assert.notEqual(R().state.id, leftId); assert.equal(R().state.title, `${L().state.title} (copy)`);
@@ -264,6 +273,36 @@ try {
   await L().run(undefined, {automatic:true});
   assert.deepEqual(sent.left.at(-1).request.reactivity, {reset:true});
   report('D16 closing the right panel disposes its worker and restores one panel with legacy ids; closing the left panel moves the right document left with a reset');
+  // A panel opening its first notebook shows a loading state, and evaluates
+  // only after its document is rendered.
+  const createPanel = bench.createPanel; let releaseParse, held = [];
+  const parseGate = new Promise(resolve=>{ releaseParse = resolve; });
+  bench.createPanel = options => {
+    const created = createPanel(options), session = created.notebook.session, request = session.request.bind(session);
+    session.request = async (body, callbacks) => { held.push(body.action); if (held.length === 1) await parseGate; return request(body, callbacks); };
+    return created;
+  };
+  const delta = draft('Delta', [['markdown', '# Delta prose'], ['code', 'out_delta = 4']], 1); delta.autoRun = true;
+  let opening;
+  try {
+    opening = bench.open('right', {record:delta}, {focus:false});
+    await until(()=>held.length === 1, 'the right panel’s first request');
+    assert.equal(root('right').dataset.loading, 'true'); assert(root('right').inert);
+    assert.deepEqual(held, ['parse'], 'The right panel evaluated before it was shown');
+    if (!compact()) assert(visible(part('right','panel-loading')) && getComputedStyle(part('right','panel-scroll')).visibility === 'hidden', 'The loading state is not shown');
+    assert.equal(root('left').dataset.loading, 'false'); assert(!root('left').inert);
+    releaseParse(); await opening;
+  } finally { releaseParse(); bench.createPanel = createPanel; }
+  assert.equal(root('right').dataset.loading, 'false'); assert(!root('right').inert);
+  assert.equal(part('right','title').value, 'Delta'); assert.equal(root('right').querySelector('.cell-preview h1')?.textContent, 'Delta prose');
+  await until(()=>byRoot(R().result).out_delta?.text === '4.0', 'the revealed panel to evaluate').catch(error=>{throw new Error(`${error.message}: ${R().status}; ${JSON.stringify(held)}; ${JSON.stringify(R().result?.evaluation?.values)}`);});
+  assert(held.includes('evaluate')); assert.equal(document.title, 'Roclet: Gamma | Delta');
+  // Keyboard help is reached from Help and `?`, also in the second panel.
+  await show('right'); cells('right')[0].focus(); assert(bench.active === bench.right);
+  key('?', {shiftKey:true}); assert($('shortcuts-dialog').open, '? did not open keyboard help'); $('shortcuts-dialog').close();
+  $('help-menu').open = true; $('shortcuts').click(); assert($('shortcuts-dialog').open && !$('help-menu').open, 'Help menu did not open keyboard help'); $('shortcuts-dialog').close();
+  await bench.close('right');
+  report('D17 a panel opening its first notebook stays in a loading state until its prose is rendered, then evaluates; the tab title names both notebooks; keyboard help opens from Help and ? in the second panel, whose status bar has no buttons');
 
   // Package prompts with a stub dialog driver; the real file picker is
   // tools/browser-dual-package-probe.mjs.

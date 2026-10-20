@@ -77,6 +77,7 @@ pub fn main(init: std.process.Init) !void {
         "web/home.mjs",
         "web/home.css",
         "web/assets/roclet-logo-large.png",
+        "web/assets/favicon.svg",
         "LICENSE",
         "THIRD_PARTY_NOTICES.md",
         "demos/01-reactivity.roc",

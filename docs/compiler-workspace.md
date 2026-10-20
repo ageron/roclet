@@ -188,8 +188,9 @@ The merged ReleaseFast native/WASM pair passes:
   checked runnable exports, and the upstream pinned Display package; the M4
   responses replay in the same order through one worker, including the engine's
   retained reactive baseline.
-- 49 Edit UI contracts at desktop, compact and 600 px widths, 18 side-by-side
-  contracts at wide, medium and tabbed widths, the lifecycle contracts, 18
+- 56 Edit UI contracts at desktop, compact and 600 px widths, 19 side-by-side
+  contracts at wide, medium and tabbed widths, 10 startup contracts, the
+  lifecycle contracts, 18
   rich-output contracts, seven math contracts, 11 sharing/offline contracts,
   three ordinary-Roc demos in WASM, and the workspace/cache/package suite.
 - Desktop/compact top-level assertion and App header probes, including source
@@ -197,9 +198,9 @@ The merged ReleaseFast native/WASM pair passes:
 - Real released roc-parser 2.0.0 with transitive Unicode 4.2.0, and roc-time 0.2.0,
   through the local archive proxy and through the static-host file picker, in one
   panel and shared by two panels.
-- In-process engine tests, native unit/workspace checks, 35 Node tests,
+- In-process engine tests, native unit/workspace checks, 42 Node tests,
   `zig build check` (formatting, tidy rules, lints, dead files, module globals),
-  artifact verification, and packaging with 89 verified offline assets.
+  artifact verification, and packaging with 90 verified offline assets.
 
 The formatted calendar notebook evaluates six outputs and two assertions with
 one frontend build and one lowering, including fresh-worker restoration with
@@ -235,8 +236,10 @@ counters and retained revisions, reuse that ignores the other panel (including a
 comment edit and a type declaration), `reset` on a document switch, `dbg` and
 `expect` attribution, per-panel Stop, one shared package prompt, one module
 compilation, per-worker `memoryBytes` within 256 MiB each and 512 MiB together,
-per-panel project files, focus routing, concurrent saves, the one-panel-per-draft
-rule and closing either panel. `tools/browser-dual-package-probe.mjs` repeats
+per-panel project files, focus routing, concurrent saves, a per-panel loading
+state that defers evaluation until the panel's document is rendered, the
+one-panel-per-draft rule (also through **File → Open recent…**) and closing
+either panel. `tools/browser-dual-package-probe.mjs` repeats
 the package flow with the real file picker.
 
 ```sh

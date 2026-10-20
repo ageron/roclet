@@ -48,13 +48,15 @@ export function openDecision(openIds, slot, id) {
   if (id != null && openIds[other] === id) return { action: 'refuse', other };
   return { action: 'open' };
 }
+// Tabs read “Roclet: <title>”, naming both notebooks while two are open.
 export function documentTitle(titles) {
-  return titles.length ? `${titles.map(title => title || 'Untitled').join(' | ')} — Roclet` : 'Roclet';
+  return titles.length ? `Roclet: ${titles.map(title => title || 'Untitled').join(' | ')}` : 'Roclet';
 }
-// The compact tab shows a panel's state without its status bar.
-export function statusDot({ status = '', saveStatus = '' } = {}) {
+// The compact tab shows a panel's state without its status bar. A Notebook
+// reports its current operation as `busy`; plain summaries use the wording.
+export function statusDot({ status = '', saveStatus = '', busy } = {}) {
   if (/^Not saved|unavailable/.test(saveStatus)) return { state: 'unsaved', label: 'not saved' };
-  if (/Running|Saving before|Preparing document|Waiting for package/.test(status)) return { state: 'running', label: 'running' };
+  if (busy ?? /Running|Saving before|Preparing document|Waiting for package/.test(status)) return { state: 'running', label: 'running' };
   if (/failed|attention|conflict/i.test(status)) return { state: 'attention', label: 'needs attention' };
   return { state: 'idle', label: '' };
 }
@@ -97,7 +99,7 @@ export function engineDetails(result) {
 export class Workbench {
   constructor({ container = null, createPanel, store, onChange = () => {}, onLayout = () => {}, narrow = null, history = globalThis.history, location = globalThis.location, document: page = globalThis.document, fetch = globalThis.fetch?.bind(globalThis) }) {
     Object.assign(this, { container, createPanel, store, onChange, onLayout, narrow, history, location, page, fetch });
-    this.panels = []; this.active = null;
+    this.panels = []; this.active = null; this.holdScheduling = false;
     narrow?.addEventListener?.('change', () => this.layout());
   }
   get left() { return this.panels[0] ?? null; }
@@ -148,21 +150,28 @@ export class Workbench {
     if (!/^(https?|file):/.test(this.location?.href ?? '')) return;
     this.history?.replaceState(null, '', layoutUrl(this.location.href, ids));
   }
-  // Every path that opens a document in a panel comes through here.
+  // Every path that opens a document in a panel comes through here. A new
+  // panel stays in its loading state until its first document is rendered.
   async open(slot, request, { focus = true } = {}) {
     let panel = this.panel(slot);
     const created = !panel;
     if (request.id != null) {
       const decision = openDecision(this.ids(), slot, request.id);
       if (decision.action === 'noop') { this.activate(panel); return panel; }
-      if (decision.action === 'refuse') { panel ??= await this.addPanel(slot); this.refuse(panel, decision.other); return panel; }
+      if (decision.action === 'refuse') { panel ??= await this.addPanel(slot); this.refuse(panel, decision.other); await this.reveal(panel); return panel; }
     }
     panel ??= await this.addPanel(slot);
     try { await this.load(panel, request); }
     catch (error) { if (error.name !== 'AbortError') panel.notice(error.message); }
+    await this.reveal(panel);
     this.layout(); this.writeUrl();
     if (created && focus) { this.activate(panel); panel.focus(); }
     return panel;
+  }
+  async reveal(panel) {
+    // While the page itself is starting, evaluation waits for the whole page.
+    try { await panel.reveal?.({ schedule: !this.holdScheduling }); }
+    catch (error) { if (error.name !== 'AbortError') panel.notice(error.message); }
   }
   async load(panel, request) {
     const notebook = panel.notebook, current = !!notebook.state;

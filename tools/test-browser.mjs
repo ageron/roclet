@@ -7,6 +7,7 @@ const suites=[
   ['Document parity','document-conformance'],
   ['Reactive evaluation','m4-conformance'],
   ['Notebook lifecycle','edit-conformance'],
+  ['Notebook startup','startup-conformance'],
   ['Desktop notebook UI','edit-ui-conformance'],
   ['Compact notebook UI','edit-ui-conformance',null,'390x960'],
   ['Sharing and offline','m3-conformance'],

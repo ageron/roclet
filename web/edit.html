@@ -1,12 +1,19 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-startup="loading">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Roclet</title>
+<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
 <script>
 // Apply before paint; preferences never become part of a notebook.
 (() => {
+  addEventListener('roclet-startup-error', ({detail:error}) => {
+    document.documentElement.dataset.startup = 'error';
+    document.getElementById('startup').setAttribute('role', 'alert');
+    document.getElementById('startup-message').textContent = `Roclet could not start. ${error?.message ?? 'Reload the page to try again.'}`;
+    document.getElementById('startup-actions').hidden = false;
+  });
   const key = 'roclet.theme';
   const allowed = ['system', 'light', 'dark'];
   const system = matchMedia('(prefers-color-scheme: dark)');
@@ -14,8 +21,7 @@
   try { const saved = localStorage.getItem(key); if (allowed.includes(saved)) preference = saved; } catch {}
   const apply = () => {
     document.documentElement.dataset.theme = preference === 'system' ? (system.matches ? 'dark' : 'light') : preference;
-    const picker = document.getElementById('theme');
-    if (picker) picker.value = preference;
+    for (const button of document.querySelectorAll('#theme button[data-theme]')) button.setAttribute('aria-pressed', button.dataset.theme === preference);
   };
   apply();
   system.addEventListener('change', apply);
@@ -25,9 +31,12 @@
     }
   });
   addEventListener('DOMContentLoaded', () => {
+    document.getElementById('startup-reload').onclick = () => location.reload();
     apply();
-    document.getElementById('theme').addEventListener('change', event => {
-      preference = event.target.value; apply();
+    document.getElementById('theme').addEventListener('click', event => {
+      const button = event.target.closest('button[data-theme]');
+      if (!button) return;
+      preference = button.dataset.theme; apply();
       try { localStorage.setItem(key, preference); } catch {}
     });
   });
@@ -36,7 +45,20 @@
 <style>
 :root { color-scheme:light; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--text); background:var(--page); font-size:15px;  }
 * { box-sizing:border-box; } body { margin:0; } button,input,select,textarea { font:inherit; } button,select,summary { cursor:pointer; } button,summary,.file-label { color:inherit; border:1px solid transparent; background:transparent; border-radius:6px; padding:.45rem .65rem; } button:hover,summary:hover,.file-label:hover { background:var(--hover); } button:disabled { opacity:.35; cursor:default; } :focus-visible { outline:2px solid var(--focus); outline-offset:3px; } [hidden] { display:none !important; } a { color:var(--link); } kbd { font:11px/1.5 ui-monospace,monospace; color:var(--muted); white-space:nowrap; }
-html,body { height:100%; } body { height:100dvh; display:grid; grid-template-rows:auto auto minmax(0,1fr); overflow:hidden; }
+html,body { height:100%; } body { height:100dvh; overflow:hidden; display:grid; grid-template-rows:minmax(0,1fr); } #notebook-app { min-height:0; display:grid; grid-template-rows:auto auto minmax(0,1fr); }
+/* Startup: a themed loading state until the chosen notebook and its prose are laid out. */
+#startup { position:fixed; inset:0; display:grid; align-content:center; justify-items:center; gap:1rem; padding:2rem; text-align:center; background:var(--page); color:var(--muted); }
+#startup-message { max-width:32rem; margin:0; line-height:1.6; }
+.startup-spinner { width:25px; height:25px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:output-spin .85s linear infinite; }
+#startup-actions { display:flex; align-items:center; gap:1rem; }
+#startup-actions button { color:var(--accent); border:1px solid var(--line); }
+#notebook-app { visibility:hidden; }
+:root[data-startup="ready"] #notebook-app { visibility:visible; }
+:root[data-startup="ready"] #startup,:root[data-startup="error"] .startup-spinner { display:none; }
+/* A panel opening its first notebook shows the same loading state in its body. */
+.notebook-panel { position:relative; } .panel-loading { display:none; }
+.notebook-panel[data-loading=true] > .panel-scroll { visibility:hidden; }
+.notebook-panel[data-loading=true] > .panel-loading { position:absolute; inset:0 0 30px; z-index:16; display:grid; align-content:center; justify-items:center; gap:1rem; color:var(--muted); font-size:.9rem; background:var(--page); }
 .document-bar { position:relative; z-index:20; background:var(--bar); border-bottom:1px solid var(--line); display:flex; align-items:center; gap:.8rem; min-width:0; padding:.3rem 1.3rem; }
 .logo { flex:none; width:44px; height:34px; }
 .logo img { width:100%; height:100%; object-fit:contain; display:block; }
@@ -65,8 +87,13 @@ html,body { height:100%; } body { height:100dvh; display:grid; grid-template-row
 .close-panel { color:var(--muted); font-size:1.1rem; line-height:1; } .notice-action { margin:.4rem .4rem 0 0; border-color:var(--line); background:var(--page); font-size:.85rem; padding:.3rem .6rem; }
 .side-choices { display:grid; gap:.2rem; } .side-choices h3 { font-size:.8rem; color:var(--muted); margin:.9rem 0 .2rem; font-weight:600; } .side-choices button { text-align:left; overflow-wrap:anywhere; }
 .status-bar > div { display:flex; align-items:center; gap:.3rem 1rem; flex-wrap:wrap; min-width:0; } .status-bar button { padding:.15rem .45rem; } .engine-status { font-variant-numeric:tabular-nums; white-space:nowrap; }
-.run-actions { margin-left:auto; display:flex; align-items:center; justify-content:flex-end; gap:.6rem; white-space:nowrap; } .run-button { color:var(--accent); } .auto-label { font-size:.8rem; color:var(--muted); display:flex; align-items:center; gap:.35rem; } input[type=checkbox] { accent-color:var(--accent); } .stop { color:var(--error); border-color:var(--error); }
-.popover { position:relative; } summary { list-style:none; font-size:.87rem; white-space:nowrap; } summary::-webkit-details-marker { display:none; } .menu-panel { position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:254px; padding:.45rem; background:var(--page); border:1px solid var(--line); border-radius:9px; box-shadow:0 8px 30px #3520431c; font-size:.85rem; } .menu-panel button,.menu-panel a,.menu-panel .file-label { display:flex; width:100%; text-align:left; justify-content:space-between; align-items:center; padding:.6rem .7rem; text-decoration:none; } .menu-panel label { display:block; padding:.6rem .7rem; color:var(--muted); } .menu-panel select { margin-top:.4rem; width:100%; max-width:100%; } select { background:var(--page); color:inherit; border:1px solid var(--line); border-radius:5px; padding:.4rem; } .menu-panel p { color:var(--muted); line-height:1.55; font-size:.78rem; margin:.6rem .7rem; } .menu-divider { border-top:1px solid var(--line); margin:.3rem; } .file-label { position:relative; cursor:pointer; } .file-label:focus-within { outline:2px solid var(--focus); } .file-label input { position:absolute; width:1px; height:1px; opacity:0; } button[aria-pressed=true] { color:var(--accent); background:var(--hover); }
+.run-actions { margin-left:auto; display:flex; align-items:center; justify-content:flex-end; gap:.6rem; white-space:nowrap; } .run-button { color:var(--accent); }
+/* Run and Stop share one fixed slot, so the title bar never moves. */
+.run-slot { display:grid; width:6rem; } .run-slot > button { grid-area:1 / 1; width:100%; line-height:1.2; } .auto-label { font-size:.8rem; color:var(--muted); display:flex; align-items:center; gap:.35rem; } input[type=checkbox] { accent-color:var(--accent); } .stop { color:var(--error); border-color:var(--error); }
+.popover { position:relative; } summary { list-style:none; font-size:.87rem; white-space:nowrap; } summary::-webkit-details-marker { display:none; } .menu-panel { position:absolute; right:0; top:calc(100% + 8px); z-index:30; width:254px; display:flex; flex-direction:column; gap:2px; padding:8px; max-height:calc(100dvh - 90px); overflow-y:auto; overscroll-behavior:contain; background:var(--page); border:1px solid var(--line); border-radius:9px; box-shadow:0 8px 30px #3520431c; font-size:.85rem; } .menu-panel button,.menu-panel a,.menu-panel .file-label { display:flex; width:100%; text-align:left; justify-content:space-between; align-items:center; padding:.6rem .7rem; text-decoration:none; } .menu-panel label { display:block; padding:.6rem .7rem; color:var(--muted); } .menu-panel select { margin-top:.4rem; width:100%; max-width:100%; } select { background:var(--page); color:inherit; border:1px solid var(--line); border-radius:5px; padding:.4rem; } .menu-panel p { color:var(--muted); line-height:1.55; font-size:.78rem; margin:.6rem .7rem; } .menu-divider { border-top:1px solid var(--line); margin:.3rem; } .file-label { position:relative; cursor:pointer; } .file-label:focus-within { outline:2px solid var(--focus); } .file-label input { position:absolute; width:1px; height:1px; opacity:0; } button[aria-pressed=true] { color:var(--accent); background:var(--hover); }
+.menu-group { padding:.4rem .7rem; } .menu-label { display:block; margin-bottom:.5rem; color:var(--muted); font-size:.78rem; }
+.menu-choices { display:flex; gap:4px; } .menu-panel .menu-choices button { flex:1; justify-content:center; min-width:0; padding:.45rem .35rem; }
+#recent-list { display:flex; flex-direction:column; gap:4px; } .recent-entry { display:flex; align-items:center; justify-content:space-between; gap:1rem; width:100%; padding:.8rem; text-align:left; } .recent-entry > span { min-width:0; overflow-wrap:anywhere; } .recent-entry strong { display:block; font-size:.9rem; font-weight:600; } .recent-entry small { display:block; margin-top:.3rem; color:var(--muted); font-size:.75rem; } .recent-entry[aria-current="true"] { background:var(--surface); }
 .shell { max-width:980px; margin:0 auto; padding:1rem 4rem 3rem; } .error { color:var(--error); } .notice { background:var(--warning); border-radius:6px; padding:.8rem 1rem; margin:.5rem 0 1rem 42px; font-size:.9rem; } .document-diagnostics { margin-left:42px; }
 .cell { --cell-gap:10px; position:relative; display:grid; grid-template-columns:32px minmax(0,1fr) 30px; gap:var(--cell-gap); margin-right:calc(-30px - var(--cell-gap)); scroll-margin:58px 0 12px; outline:none; }
 .cell-body { position:relative; min-width:0; border:1px solid transparent; border-radius:7px; background:var(--surface); } .cell.markdown-cell .cell-body { background:transparent; } .cell:hover .cell-body { border-color:var(--line); } .cell.selected .cell-body { border-color:var(--focus); } .cell.command-selected .cell-body { border-color:var(--selection-border); box-shadow:inset 3px 0 var(--selection-border); background:var(--selected); } .cell:focus-visible .cell-body { outline:2px solid var(--selection-border); outline-offset:2px; }
@@ -88,7 +115,7 @@ dialog select { max-width:100%; } #find-results { grid-template-columns:minmax(0
 /* Panel content follows the panel's own width, so a narrow column gets the compact cell layout. */
 @container panel (max-width:680px) { .panel-title { padding:.3rem .6rem; gap:.3rem; } .panel-title .title-input { font-size:.9rem; padding-inline:.25rem; } .run-actions { gap:.15rem; font-size:.8rem; } .run-actions button { padding:.35rem; } .auto-label { font-size:.7rem; gap:.15rem; }
 .shell { padding:1rem 2.8rem 2rem .4rem; } .cell { --cell-gap:6px; grid-template-columns:24px minmax(0,1fr) 30px; } .insertion,.document-diagnostics,.notice { margin-left:30px; } textarea { padding:.85rem .8rem; font-size:13px; } .cell-preview,.result-block { padding:.6rem .8rem; } .status-bar { padding:.2rem .6rem; font-size:.7rem; gap:.2rem .6rem; } .status-bar > div { gap:.2rem .6rem; } }
-@media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important; } .output-spinner { animation:none !important; } }
+@media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto !important; } .output-spinner,.startup-spinner { animation:none !important; } }
 
 .roc-type-tooltip { padding:6px 10px; font:13px/1.5 ui-monospace,monospace; white-space:pre-wrap; max-width:420px; }
 .roc-completions { position:fixed; z-index:100; max-width:min(460px,90vw); max-height:240px; overflow:auto; border:1px solid var(--line); border-radius:7px; background:var(--page); box-shadow:0 4px 20px #30203a22; padding:4px; font:13px/1.5 ui-monospace,monospace; }
@@ -115,6 +142,8 @@ dialog { background:var(--page); }
 </style>
 </head>
 <body>
+<section id="startup" role="status" aria-live="polite"><span class="startup-spinner" aria-hidden="true"></span><p id="startup-message">Opening notebook…</p><div id="startup-actions" hidden><button id="startup-reload">Reload</button><a href="../">Roclet home</a></div><noscript><p>Enable JavaScript to open a notebook.</p></noscript></section>
+<div id="notebook-app" inert>
 <header class="document-bar">
   <a class="logo" href="../" aria-label="Roclet home"><img src="./assets/roclet-logo.png" width="127" height="128" alt=""></a>
   <a class="brand" href="../">Roclet</a>
@@ -125,8 +154,8 @@ dialog { background:var(--page); }
     <button id="download">Download a copy <kbd>⌘ / Ctrl S</kbd></button>
     <button id="project-files">Project files…</button>
     <button id="share">Export & share…</button><button id="offline">Offline & storage…</button>
-    <label>File format<select id="format"><option value="roc">Roc</option><option value="markdown">Markdown</option></select></label>
-    <label>Recent documents<select id="recent" aria-label="Recent documents"></select></label>
+    <button id="recent">Open recent…</button>
+    <div class="menu-divider"></div><div class="menu-group"><span class="menu-label" id="format-label">File format</span><div id="format" class="menu-choices" role="group" aria-labelledby="format-label"><button data-format="roc" aria-pressed="true">Roc</button><button data-format="markdown" aria-pressed="false">Markdown</button></div></div>
     <p>Drafts are saved in this browser. Downloads are separate copies.</p>
   </div></details>
   <details class="popover" id="edit-menu"><summary aria-label="Edit menu">Edit</summary><div class="menu-panel"><p class="menu-target" hidden></p>
@@ -138,7 +167,7 @@ dialog { background:var(--page); }
     <button id="preview">View runnable Roc</button>
     <div class="menu-divider"></div><button id="open-side">Open side by side…</button><button id="close-side" hidden>Close side panel</button>
     <button id="engine-details" aria-pressed="false">Show engine details</button>
-    <div class="menu-divider"></div><label>Theme<select id="theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <div class="menu-divider"></div><div class="menu-group"><span class="menu-label" id="theme-label">Theme</span><div id="theme" class="menu-choices" role="group" aria-labelledby="theme-label"><button data-theme="system" aria-pressed="true">System</button><button data-theme="light" aria-pressed="false">Light</button><button data-theme="dark" aria-pressed="false">Dark</button></div></div>
   </div></details>
   <details class="popover" id="help-menu"><summary aria-label="Help menu">Help</summary><div class="menu-panel"><p class="menu-target" hidden></p>
     <button id="shortcuts">Keyboard shortcuts <kbd>?</kbd></button>
@@ -148,10 +177,11 @@ dialog { background:var(--page); }
 </header>
 <div class="panel-tabs" id="panel-tabs" role="tablist" aria-label="Open notebooks" hidden></div>
 <main class="workbench" id="workbench" data-panels="1" data-layout="single"></main>
-<template id="notebook-panel-template"><section class="notebook-panel" data-panel="left" aria-label="Notebook"><div class="panel-scroll" data-part="panel-scroll">
+</div>
+<template id="notebook-panel-template"><section class="notebook-panel" data-panel="left" aria-label="Notebook" data-loading="true" inert><div class="panel-loading" data-part="panel-loading" role="status"><span class="startup-spinner" aria-hidden="true"></span><span>Opening notebook…</span></div><div class="panel-scroll" data-part="panel-scroll">
   <div class="panel-title" data-part="title-bar">
   <label class="sr-only" data-part="title-label" data-for="title">Document title</label><input data-part="title" class="title-input" maxlength="120">
-  <div class="run-actions"><label class="auto-label" title="Recompute after editing"><input data-part="auto" type="checkbox" checked>Auto-run</label><button data-part="run" class="run-button" title="Run all cells">▷ Run all</button><button data-part="stop" class="stop" hidden>Stop</button><button data-part="close-panel" class="close-panel" title="Close this notebook panel" aria-label="Close this notebook panel" hidden>×</button></div>
+  <div class="run-actions"><label class="auto-label" title="Recompute after editing"><input data-part="auto" type="checkbox" checked>Auto-run</label><div class="run-slot"><button data-part="run" class="run-button" title="Run all cells">▷ Run all</button><button data-part="stop" class="stop" title="Stop execution" hidden>Stop</button></div><button data-part="close-panel" class="close-panel" title="Close this notebook panel" aria-label="Close this notebook panel" hidden>×</button></div>
   </div>
   <div class="shell">
   <div data-part="notice" class="notice" role="alert" hidden></div><div data-part="document-diagnostics" class="document-diagnostics" aria-live="polite"></div>
@@ -160,9 +190,10 @@ dialog { background:var(--page); }
   <section data-part="source-pane" hidden><div class="source-heading"><p data-part="raw-help">Complete editable source</p><button data-part="back-notebook">← Notebook</button></div><div data-part="source" class="raw"></div></section>
   </div></div>
   <footer class="status-bar" data-part="status-bar"><div class="status-left"><span data-part="status" role="status">Loading the local compiler…</span><span data-part="selection-status" class="selection-status" role="status"></span></div>
-  <div class="status-right"><span data-part="engine-status" class="engine-status" title="Last response: worker time, evaluated and reused results, worker memory" hidden>—</span><span data-part="save-status" role="status">Opening browser storage…</span><button data-part="help" class="quiet">Keyboard shortcuts <kbd>?</kbd></button></div></footer>
+  <div class="status-right"><span data-part="engine-status" class="engine-status" title="Last response: worker time, evaluated and reused results, worker memory" hidden>—</span><span data-part="save-status" role="status">Opening browser storage…</span></div></footer>
 </section></template>
 <p id="navigation-help" class="sr-only">Escape selects a cell. Arrow keys move between cells; Shift plus arrows extends the selection. Enter edits. Use your usual copy, cut and paste shortcuts for selected cells.</p>
+<dialog id="recent-dialog" aria-labelledby="recent-title"><div class="dialog-title"><h2 id="recent-title">Recent notebooks</h2><button data-close aria-label="Close recent notebooks">×</button></div><p id="recent-status" role="status">Notebooks saved in this browser.</p><div id="recent-list"></div></dialog>
 <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title"><div class="dialog-title"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button data-close aria-label="Close keyboard shortcuts">×</button></div>
   <p>Inside a cell, type and select text as usual. Press <kbd>Esc</kbd> to select the whole cell.</p>
   <dl class="shortcuts"><dt>Enter</dt><dd>Edit the selected cell</dd><dt>↑ / ↓</dt><dd>Select previous / next cell</dd><dt>Shift ↑ / ↓</dt><dd>Extend or shrink the cell selection</dd><dt>⌘ / Ctrl A</dt><dd>Select all cells</dd><dt>⌘ / Ctrl C, X, V</dt><dd>Copy, cut, paste cells after the selection</dd><dt>A / B</dt><dd>Insert code above / below the selection</dd><dt>Delete / Backspace</dt><dd>Delete selected cells (undoable)</dd><dt>⌘ / Ctrl Enter</dt><dd>Run the current cell</dd><dt>Shift Enter</dt><dd>Run, then select the next cell</dd><dt>Alt Enter</dt><dd>Insert below, then run the current cell</dd><dt>⌘ / Ctrl Z</dt><dd>Undo (add Shift to redo)</dd><dt>⌘ / Ctrl S</dt><dd>Download a copy</dd><dt>?</dt><dd>Show this help in cell selection mode</dd></dl>
@@ -220,6 +251,13 @@ dialog { background:var(--page); }
     "@codemirror/streamparser": "./vendor/editor/codemirror-streamparser.mjs"
   }
 }</script>
-<script type="module">import { startNotebook } from "./edit.mjs"; await startNotebook();</script>
+<script type="module" id="notebook-bootstrap">
+try {
+  const { startNotebook } = await import('./edit.mjs');
+  await startNotebook();
+} catch (error) {
+  dispatchEvent(new CustomEvent('roclet-startup-error', {detail:error}));
+}
+</script>
 </body>
 </html>

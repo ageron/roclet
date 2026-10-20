@@ -86,21 +86,36 @@ zig build package
 lints in `ci/zig_lints.zig`, and a dead-file scan over tracked Zig sources. Run
 `zig build check` alone for a fast pre-commit pass.
 
-For faster local iteration, `-Dllvm=false` builds the native adapter with Zig's
-self-hosted backend, which takes seconds instead of minutes, for example
-`zig build test-documents -Dllvm=false`. The result runs several times slower, so
-release artifacts, CI and benchmarks use the default LLVM build. Self-hosted WASM
-builds additionally need an assembly workaround in the prepared compiler and are
-not supported yet.
+For faster local iteration, `-Dllvm=false` builds the native and WASM adapters
+with Zig's self-hosted backend, which takes seconds instead of minutes. Prepare
+the compiler as above, then use `zig build test -Dllvm=false` or
+`zig build serve -Dllvm=false`. These builds retain the default `ReleaseFast`
+optimization mode, but the resulting adapters run several times slower. Release
+artifacts, CI and performance measurements use the default LLVM backend.
+The versioned embedding patch includes the WASM assembly metadata needed by
+the self-hosted linker; no manual compiler edits are required.
 
 Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/dual-conformance.html` (side-by-side notebooks; add `?medium` or
 `?compact` for the 1000px and 390px layouts),
 `/web/document-conformance.html`, `/web/m5-conformance.html`, and
 `/web/math-conformance.html` on your local server. With Node.js 22+ and Chrome,
-`node tools/test-browser.mjs` runs the core browser suites, including desktop and
-compact UI checks. `zig build test` publishes the compiler pair and generates
+`node tools/test-browser.mjs` runs the core browser suites, including startup
+and desktop and compact UI checks. `zig build test` publishes the compiler pair and generates
 parity fixtures but does not launch Chrome. Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
+
+With Node.js 22+ and Chrome installed, run the browser-side unit tests and
+individual pages from the command line, for example the startup (loading state,
+startup errors, favicon and tab title) and notebook UI checks. Self-hosted
+(`-Dllvm=false`) artifacts are several times slower, so give them a longer
+`--timeout`:
+
+```sh
+node --test tests/*.test.mjs
+node tools/browser-check.mjs --page web/startup-conformance.html --timeout 180000
+node tools/browser-check.mjs --page web/edit-ui-conformance.html --timeout 180000
+node tools/browser-check.mjs --page 'web/edit-ui-conformance.html?compact' --timeout 180000
+```
 
 ## Save, open, and share
 

@@ -45,7 +45,7 @@ try {
   report('cell menus show visible one-based positions and label inferred output IDs separately');
   const ids=[...document.querySelectorAll('[id]')].map(node=>node.id);
   assert.equal(new Set(ids).size,ids.length,`Duplicated ids: ${ids.filter((id,i)=>ids.indexOf(id)!==i).join(', ')}`);
-  for(const id of ['title','auto','run','stop','status','save-status','selection-status','help','notice','document-diagnostics','app-header','app-header-source','notebook','cells','source-pane','source']) assert($(id),`Missing legacy id ${id}`);
+  for(const id of ['title','auto','run','stop','status','save-status','selection-status','notice','document-diagnostics','app-header','app-header-source','notebook','cells','source-pane','source']) assert($(id),`Missing legacy id ${id}`);
   assert(cards().every(card=>card.querySelector(`#result-${CSS.escape(card.dataset.key)}`)),'Result ids lost their cell keys');
   report('U3: no element id is duplicated and the primary panel keeps the legacy ids');
   const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
@@ -460,6 +460,131 @@ try {
   assert(['diagnostic','runtime_error'].includes(notebook.result.status));assert.equal(notebook.result.evaluation.values.length,0);
   assert(notebook.result.evaluation.diagnostics.some(d=>d.message.includes('Geometry.roc')));assert.match($('document-diagnostics').textContent,/Geometry\.roc/);
   report('Project files dialog adds and edits imported modules, persists their sources, updates the existing output and invalidates removed imports');
+
+  // Notebook menu choices use one level of controls, retaining the same model
+  // conversions, persistence and undo as the former nested selectors.
+  assert.equal(document.querySelectorAll('.header-menus select').length,0);
+  assert.equal(document.querySelectorAll('footer #help,footer button').length,0);
+  $('help-menu').open=true;$('shortcuts').focus();$('shortcuts').click();
+  assert($('shortcuts-dialog').open);assert(!$('help-menu').open);
+  $('shortcuts-dialog').querySelector('[data-close]').click();
+  assert(document.activeElement===$('help-menu').querySelector('summary'));
+  report('navbar controls contain no nested selectors; keyboard help lives in Help and restores focus when closed');
+
+  window.scrollTo(0,0);
+  for(const id of ['document-menu','edit-menu','view-menu','help-menu']) {
+    const popup=$(id);popup.open=true;
+    const panel=popup.querySelector('.menu-panel'),rect=panel.getBoundingClientRect();
+    assert(rect.top>=0 && rect.bottom<=innerHeight+1,`${id} overflowed the viewport vertically`);
+    const rows=[...panel.children].filter(node=>node.matches('button,a,.file-label') && !node.hidden);
+    for(const row of rows) {
+      const bounds=row.getBoundingClientRect();
+      assert(bounds.left-rect.left>=4 && rect.right-bounds.right>=4,'Hover background reaches the menu border');
+    }
+    for(let i=1;i<rows.length;i++)assert(rows[i].getBoundingClientRect().top-rows[i-1].getBoundingClientRect().bottom>=1,'Adjacent menu hover backgrounds have no separation');
+    popup.open=false;
+  }
+  report('menu hover rows have an inset and separation, and panels fit vertically in this viewport');
+
+  const formatChoice=value=>document.querySelector(`[data-format="${value}"]`);
+  await notebook.format('roc');notebook.change(s=>{s.cells=[makeCell('code','out_format = 42')];});
+  assert.equal(formatChoice('roc').getAttribute('aria-pressed'),'true');
+  formatChoice('markdown').click();assert(formatChoice('roc').disabled && formatChoice('markdown').disabled);
+  await until(()=>notebook.state.format==='markdown' && !formatChoice('markdown').disabled);
+  assert.equal(formatChoice('markdown').getAttribute('aria-pressed'),'true');assert.equal(formatChoice('roc').getAttribute('aria-pressed'),'false');
+  await notebook.persist();assert.equal((await store.get(notebook.state.id)).format,'markdown');
+  $('undo').click();assert.equal(notebook.state.format,'roc');assert.equal(formatChoice('roc').getAttribute('aria-pressed'),'true');
+  notebook.change(s=>{s.cells=[makeCell('code','out_bad = {')];});
+  const malformed=notebook.state.cells[0].source;
+  formatChoice('markdown').click();await until(()=>notebook.status.startsWith('Fix diagnostics before switching format') && !formatChoice('markdown').disabled);
+  assert.equal(notebook.state.format,'roc');assert.equal(notebook.state.cells[0].source,malformed);assert.equal(formatChoice('roc').getAttribute('aria-pressed'),'true');
+  notebook.undo();
+  report('flat format choices persist successful conversions, follow Undo and retain the original format and source after diagnostics');
+
+  const themeChoice=value=>document.querySelector(`button[data-theme="${value}"]`),themeBefore=localStorage.getItem('roclet.theme');
+  themeChoice('dark').click();assert.equal(document.documentElement.dataset.theme,'dark');assert.equal(themeChoice('dark').getAttribute('aria-pressed'),'true');
+  assert.equal(localStorage.getItem('roclet.theme'),'dark');
+  localStorage.setItem('roclet.theme','light');dispatchEvent(new StorageEvent('storage',{key:'roclet.theme',newValue:'light',storageArea:localStorage}));
+  assert.equal(document.documentElement.dataset.theme,'light');assert.equal(themeChoice('light').getAttribute('aria-pressed'),'true');assert.equal(themeChoice('dark').getAttribute('aria-pressed'),'false');
+  themeChoice('system').click();assert.equal(themeChoice('system').getAttribute('aria-pressed'),'true');
+  assert.equal(document.documentElement.dataset.theme,matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
+  themeChoice(['light','dark'].includes(themeBefore)?themeBefore:'system').click();if(themeBefore===null)localStorage.removeItem('roclet.theme');
+  report('flat theme choices reflect persisted preferences, other-tab changes and the system theme');
+
+  const other=makeCell('code','out_recent = 84'),alternate={...notebook.state,id:crypto.randomUUID(),title:'Another QA notebook',cells:[other],files:[],source:'',sourceCurrent:false,revision:1,autoRun:false};
+  delete alternate._storageVersion;await store.save(alternate);await notebook.persist();
+  const currentId=notebook.state.id,openRecent=()=>{$('document-menu').open=true;$('recent').focus();$('recent').click();};
+  openRecent();await until(()=>$('recent-list').querySelector(`[data-notebook-id="${alternate.id}"]`));
+  assert($('recent-dialog').open);assert.equal($('recent-list').querySelector(`[data-notebook-id="${currentId}"]`).getAttribute('aria-current'),'true');
+  $('recent-dialog').querySelector('[data-close]').click();assert(!$('recent-dialog').open);assert(document.activeElement===$('document-menu').querySelector('summary'));
+  openRecent();await until(()=>$('recent-list').querySelector(`[data-notebook-id="${alternate.id}"]`));
+  const get=store.get.bind(store);store.get=async()=>undefined;
+  try {
+    $('recent-list').querySelector(`[data-notebook-id="${alternate.id}"]`).click();
+    await until(()=>$('recent-status').textContent.includes('no longer available') && !$('recent-list').inert);
+    assert($('recent-dialog').open);assert.equal(notebook.state.id,currentId);
+  } finally {store.get=get;}
+  $('recent-list').querySelector(`[data-notebook-id="${alternate.id}"]`).click();await until(()=>notebook.state.id===alternate.id && !$('recent-dialog').open);
+  assert.equal($('title').value,alternate.title);assert.equal(document.title,`Roclet: ${alternate.title}`);
+  assert($('notebook').contains(document.activeElement),'Opening a recent notebook should return focus to its content');
+  const list=store.list.bind(store);store.list=async()=>[];
+  try {
+    openRecent();await until(()=>$('recent-list').children.length===0 && $('recent-status').textContent.length>0 && !/loading/i.test($('recent-status').textContent));
+    assert($('recent-dialog').open);assert.equal($('recent-list').querySelectorAll('button').length,0);
+    $('recent-dialog').querySelector('[data-close]').click();
+    store.list=async()=>{throw new Error('Storage unavailable');};
+    openRecent();await until(()=>$('recent-status').textContent.includes('unavailable'));
+    assert($('recent-dialog').open);assert.equal($('recent-list').querySelectorAll('button').length,0);
+    $('recent-dialog').querySelector('[data-close]').click();
+  } finally {store.list=list;}
+  report('Recent notebooks marks the current draft, restores focus, switches content and explains empty, missing and unavailable drafts');
+
+  // Keep the browser presentation real while holding the save/worker boundary.
+  // This makes every toolbar phase observable without relying on a slow machine.
+  notebook.change(s=>{s.cells=[makeCell('code','out_toolbar = 42')];});
+  const toolbarResult=await notebook.run();await notebook.persist();
+  const originalSession=notebook.session,originalSave=store.save.bind(store),originalTimeout=notebook.timeout;
+  let pending,releaseSave;
+  const saveGate=new Promise(resolve=>{releaseSave=resolve;});
+  notebook.session={
+    invalidate(){},stop(){pending?.reject(new DOMException('Stopped','AbortError'));},
+    request(request,callbacks){
+      let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});
+      pending={request,callbacks,resolve,reject};return promise;
+    },
+  };
+  const bounds=node=>{const r=node.getBoundingClientRect();return [r.left,r.top,r.width,r.height];};
+  const sameBounds=(actual,expected)=>actual.forEach((value,index)=>assert(Math.abs(value-expected[index])<.5,`Toolbar moved: ${actual} instead of ${expected}`));
+  try {
+    store.save=async record=>{await saveGate;return originalSave(record);};
+    window.scrollTo(0,0);await measure();
+    const runBounds=bounds($('run')),titleBounds=bounds($('title')),autoBounds=bounds($('auto').closest('label'));
+    $('run').focus();$('run').click();
+    assert(notebook.busy);assert($('run').hidden);assert(!$('stop').hidden);assert(document.activeElement===$('stop'));
+    sameBounds(bounds($('stop')),runBounds);sameBounds(bounds($('title')),titleBounds);sameBounds(bounds($('auto').closest('label')),autoBounds);
+    assert.match(notebook.status,/Saving before/);
+    releaseSave();await until(()=>pending);
+    pending.callbacks.onPackageWaiting(true);assert.match(notebook.status,/Waiting for package/);assert(!$('stop').hidden);assert($('run').hidden);
+    sameBounds(bounds($('stop')),runBounds);sameBounds(bounds($('title')),titleBounds);
+    pending.callbacks.onPackageWaiting(false);sameBounds(bounds($('stop')),runBounds);
+    $('stop').click();assert(!notebook.busy);assert(!$('run').hidden);assert($('stop').hidden);assert(document.activeElement===$('run'));
+    sameBounds(bounds($('run')),runBounds);await notebook.persist();
+    report('Run and Stop share stable bounds during saving, execution, package waiting and cancellation, transferring focus between the same toolbar slot');
+
+    pending=null;$('run').focus();$('run').click();await until(()=>pending);
+    pending.resolve(structuredClone(toolbarResult));await until(()=>!notebook.busy);
+    assert(!$('run').hidden);assert($('stop').hidden);assert(document.activeElement===$('run'));sameBounds(bounds($('run')),runBounds);
+    pending=null;inputs()[0].focus();const focusedEditor=document.activeElement;$('run').click();await until(()=>pending);
+    assert(document.activeElement===focusedEditor);
+    pending.reject(new Error('Toolbar test compiler failure'));await until(()=>!notebook.busy && notebook.status.startsWith('Run failed:'));
+    assert(document.activeElement===focusedEditor);assert(!$('run').hidden);sameBounds(bounds($('run')),runBounds);
+    pending=null;notebook.timeout=30;$('run').focus();$('run').click();await until(()=>pending);await until(()=>!notebook.busy);
+    assert.match(notebook.status,/Stopped after/);assert(document.activeElement===$('run'));sameBounds(bounds($('run')),runBounds);
+    report('completion, compiler errors and timeouts restore Run without moving the toolbar or stealing editor focus');
+  } finally {
+    releaseSave();pending?.reject(new DOMException('Test finished','AbortError'));
+    notebook.session=originalSession;store.save=originalSave;notebook.timeout=originalTimeout;notebook.cancelPending();
+  }
 
   await notebook.persist(); notebook.dispose(); store.close();
   await new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name); request.onsuccess=resolve;request.onerror=()=>reject(request.error);});

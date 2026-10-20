@@ -55,10 +55,10 @@
   // Exercise the actual notebook UI, not only the model API.
   const $=id=>document.getElementById(id);
   assert(['document-menu','edit-menu','view-menu','help-menu'].every(id=>$(id)) && document.querySelector('.logo img'),'Upstream notebook menus or logo are missing');
-  const theme=$('theme'),preference=theme.value;theme.value='dark';theme.dispatchEvent(new Event('change'));
+  const theme=value=>document.querySelector(`button[data-theme="${value}"]`),preference=document.querySelector('button[data-theme][aria-pressed="true"]').dataset.theme;theme('dark').click();
   assert(document.documentElement.dataset.theme==='dark','The upstream theme picker did not apply');
   assert(getComputedStyle($('app-header')).backgroundColor===getComputedStyle(document.querySelector('.cell:not(.markdown-cell) .cell-body')).backgroundColor,'App header did not inherit the dark theme surface');
-  theme.value=preference;theme.dispatchEvent(new Event('change'));
+  theme(preference).click();
   report.push('upstream menus, logo and dark theme are preserved with the App header');
   $('auto').checked=false;$('auto').dispatchEvent(new Event('change'));
   $('source-view').click();await until(()=>!$('source-pane').hidden && document.querySelector('#source .cm-content'));

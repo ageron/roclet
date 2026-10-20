@@ -14,14 +14,50 @@ const preferences = { engineDetails: readPreference(storage, engineDetailsKey) }
 // Header commands act on the active panel.
 const active = () => bench.active;
 export const workbench = () => bench;
+const ready = () => document.documentElement.dataset.startup === 'ready';
+// The Recent notebooks dialog lists drafts for the panel active when it was
+// opened. Opening goes through the workbench, so a draft already open in the
+// other panel is refused there with Go to it and an independent copy.
 async function refreshLibrary() {
-  const token = ++libraryToken, target = active();
+  if (!$('recent-dialog').open) return;
+  const token = ++libraryToken, target = active(), slot = bench.slotOf(target), list = $('recent-list');
   try {
     const records = (await target.store.list()).filter(validDraft);
     if (token !== libraryToken) return;
-    $('recent').replaceChildren();
-    for (const record of records) { const option = document.createElement('option'); option.value = record.id; option.textContent = record.title || 'Untitled'; option.selected = record.id === target.notebook.state?.id; $('recent').append(option); }
-  } catch { /* The persistent save-status message already explains the failure. */ }
+    list.replaceChildren();
+    $('recent-status').textContent = records.length ? 'Notebooks saved in this browser.' : 'No notebooks have been saved in this browser yet.';
+    const dates = new Intl.DateTimeFormat(undefined, {dateStyle:'medium',timeStyle:'short'}), ids = bench.ids();
+    const otherSlot = slot === 'left' ? 'right' : 'left';
+    for (const record of records) {
+      const current = record.id === target.notebook.state?.id, elsewhere = !current && record.id === ids[otherSlot], title = record.title || 'Untitled';
+      const entry = document.createElement('button');
+      entry.className = 'recent-entry'; entry.dataset.notebookId = record.id; entry.setAttribute('aria-label', `Open notebook: ${title}`);
+      entry.onclick = async () => {
+        try {
+          list.inert = true;
+          if (!current && !elsewhere) {
+            $('recent-status').textContent = 'Opening notebook…';
+            if (!validDraft(await target.store.get(record.id))) throw new Error('This notebook is no longer available in this browser.');
+          }
+          $('recent-dialog').close();
+          if (!current) await target.perform(() => bench.open(slot, { id: record.id }));
+          if (!elsewhere) target.focusSelection();
+        } catch (error) { $('recent-status').textContent = error.message; }
+        finally { list.inert = false; }
+      };
+      if (current) entry.setAttribute('aria-current', 'true');
+      const description = document.createElement('span'), name = document.createElement('strong'), modified = document.createElement('small');
+      name.textContent = title;
+      const modifiedAt = new Date(record.updatedAt);
+      modified.textContent = Number.isFinite(modifiedAt.getTime()) ? dates.format(modifiedAt) : 'Saved in this browser';
+      description.append(name, modified); entry.append(description);
+      if (current || elsewhere) { const label = document.createElement('small'); label.textContent = current ? 'Current' : `Open in the ${otherSlot} panel`; entry.append(label); }
+      list.append(entry);
+    }
+  } catch {
+    if (token !== libraryToken) return;
+    list.replaceChildren(); $('recent-status').textContent = 'Recent notebooks are unavailable in this browser.';
+  }
 }
 // Header state that mirrors the active panel's notebook. With two panels each
 // menu names the notebook it acts on.
@@ -33,7 +69,7 @@ function reflectHeader(reason) {
   const notebook = active().notebook;
   if (!notebook?.state) return;
   const s = notebook.state;
-  $('format').value = s.format;
+  for (const button of $('format').querySelectorAll('[data-format]')) button.setAttribute('aria-pressed', button.dataset.format === s.format);
   $('recovery-copy').hidden=!/^Not saved/.test(notebook.saveStatus);
   $('undo').disabled = !notebook.history.length; $('redo').disabled = !notebook.future.length;
   $('notebook-view').setAttribute('aria-pressed', s.mode === 'notebook'); $('source-view').setAttribute('aria-pressed', s.mode === 'source');
@@ -91,22 +127,43 @@ function bind() {
   const perform = work => active().perform(work);
   const notebook = () => active().notebook;
   // A panel that was refused a document has none; only page-level commands apply.
-  const pageCommands = new Set(['open-side', 'close-side', 'engine-details', 'shortcuts', 'offline', 'theme']);
+  const pageCommands = new Set(['open-side', 'close-side', 'engine-details', 'shortcuts', 'offline']);
   document.querySelector('.header-menus').addEventListener('click', event => {
     const control = event.target.closest('button,input,select');
-    if (!control || active().notebook.state || pageCommands.has(control.id)) return;
+    if (!control || active().notebook.state || pageCommands.has(control.id) || control.closest('#theme')) return;
     event.preventDefault(); event.stopPropagation(); closeMenus(); active().notice('Choose a notebook for this panel first, or close it.');
   }, true);
   $('notebook-view').onclick = () => active().setMode('notebook');
   $('source-view').onclick = () => active().setMode('source');
-  $('format').onchange = () => perform(async () => { await notebook().format($('format').value); active().render('document'); });
+  // Format choices are disabled while a conversion runs; the model keeps the
+  // original format and source when diagnostics prevent it.
+  let changingFormat = false;
+  $('format').onclick = event => {
+    const choice = event.target.closest('button[data-format]'), target = active();
+    if (!choice || changingFormat || choice.dataset.format === target.notebook.state.format) return;
+    changingFormat = true;
+    for (const button of $('format').querySelectorAll('[data-format]')) button.disabled = true;
+    void target.perform(async () => {
+      try { await target.notebook.format(choice.dataset.format); }
+      finally {
+        changingFormat = false;
+        for (const button of $('format').querySelectorAll('[data-format]')) button.disabled = false;
+        target.render('document'); reflectHeader('document');
+      }
+    });
+  };
   $('undo').onclick = () => active().undo(false); $('redo').onclick = () => active().undo(true);
   $('recovery-copy').onclick=()=>perform(()=>notebook().recoveryCopy());
   $('new').onclick = () => perform(async () => { const target = active(); await bench.load(target, { fresh: true }); bench.writeUrl(); target.editSelection(); });
   $('rich-example').onclick=()=>perform(async()=>{const response=await fetch('../fixtures/documents/rich-outputs.roc');if(!response.ok) throw new Error('Example unavailable; rebuild the offline distribution.');await notebook().open(await response.text(),'Rich outputs.roc');closeMenus();});
-  // Opening a draft goes through the workbench, which refuses a draft that is
-  // already open in the other panel.
-  $('recent').onchange = () => perform(async () => { const target = active(), id = $('recent').value; if (id === target.notebook.state.id) return; $('recent').value = target.notebook.state.id; await bench.open(bench.slotOf(target), { id }); });
+  $('recent').onclick = () => {
+    closeMenus(); $('recent-list').replaceChildren(); $('recent-status').textContent = 'Loading notebooks…';
+    $('recent-dialog').showModal(); void refreshLibrary();
+  };
+  $('recent-dialog').onclose = () => {
+    const focused = document.activeElement;
+    if (focused === document.body || focused === $('recent') || $('recent-dialog').contains(focused)) $('document-menu').querySelector('summary').focus({preventScroll:true});
+  };
   $('open').onchange = () => perform(async () => { const target = active(), file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>20*1024*1024) throw new Error('Roclet bundles are limited to 20 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await target.notebook.replace(record);target.notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await target.notebook.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); target.focusSelection(); });
   $('preview').onclick = () => perform(async () => { const result = await notebook().inspect('export', 'roc'); $('generated').textContent = result.source; closeMenus(); $('generated-dialog').showModal(); });
   // Dialogs are shared by the page and bound to the panel active when opened.
@@ -184,7 +241,7 @@ function bind() {
   // capture-phase handler on its root, which runs after this one for targets
   // inside that panel.
   document.addEventListener('keydown', event => {
-    if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || document.querySelector('dialog[open]')) return;
+    if (!ready() || event.defaultPrevented || event.isComposing || event.keyCode === 229 || document.querySelector('dialog[open]')) return;
     const mod = event.metaKey || event.ctrlKey, key = event.key.toLowerCase(), target = event.target;
     const menu = target.closest?.('details[open]');
     if (event.key === 'Escape' && menu) { event.preventDefault(); event.stopPropagation(); menu.open = false; menu.querySelector('summary').focus(); return; }
@@ -195,7 +252,7 @@ function bind() {
     if (mod && key === 'z') { event.preventDefault(); event.stopPropagation(); active().notebook.undo(event.shiftKey, { editing: !!editorFor(target) }); }
     else if (event.key === '?' && !mod) { event.preventDefault(); event.stopPropagation(); showHelp(); }
   }, true);
-  window.addEventListener('beforeunload', event => { if (bench.unsaved()) { event.preventDefault(); event.stopPropagation(); event.returnValue = ''; } });
+  window.addEventListener('beforeunload', event => { if (ready() && bench.unsaved()) { event.preventDefault(); event.stopPropagation(); event.returnValue = ''; } });
 }
 export async function startNotebook(drafts = new DraftStore()) {
 // The panel markup exists before the compiler loads so its status is visible.
@@ -220,6 +277,8 @@ try {
   };
   bench = new Workbench({ container:$('workbench'), createPanel, store:drafts, narrow:matchMedia('(max-width: 899px)'), onChange:(_,reason)=>reflectHeader(reason), onLayout:()=>renderTabs() });
   bench.prompts = prompts;
+  // Evaluation and package downloads start only once the page is shown.
+  bench.holdScheduling = true;
   const panel = await bench.addPanel('left'), notebook = panel.notebook;
   // The left notebook stands for the page in existing tests: disposing it
   // disposes every panel and the shared highlighter.
@@ -249,10 +308,20 @@ try {
     catch(error) {panel.notice(`Publication could not be opened: ${error.message}`);}
   }
   // `right` names the right panel; the most-recent-draft fallback is never used for it.
+  // Parse and render the chosen documents before exposing the editor. A left
+  // panel that cannot be prepared is a startup failure.
+  await panel.reveal({ schedule:false });
   if (layout.right?.error) panel.notice(`The side panel could not be opened: ${layout.right.error}`);
   else if (layout.right) await bench.open('right', layout.right, { focus:false });
   if (layout.right) bench.replaceUrl(bench.panels.length === 2 ? bench.ids() : {});
-  document.documentElement.dataset.ready = 'true'; return notebook;
-} catch (error) { $('status').textContent = 'Roclet could not start'; $('notice').textContent = error.message; $('notice').hidden = false; }
-
+  $('notebook-app').inert = false;
+  document.documentElement.dataset.startup = 'ready';
+  document.documentElement.dataset.ready = 'true';
+  bench.holdScheduling = false;
+  for (const target of bench.panels) target.notebook.resumeScheduling();
+  return notebook;
+} catch (error) {
+  try { bench?.left?.notebook.dispose(); } catch { /* Startup already failed. */ }
+  dispatchEvent(new CustomEvent('roclet-startup-error', {detail:error}));
+}
 }

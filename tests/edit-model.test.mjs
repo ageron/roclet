@@ -148,3 +148,90 @@ test('a fresh worker posts the request as submitted even if the caller mutates i
     await assert.rejects(result,{name:'AbortError'});
   } finally {globalThis.Worker=originalWorker;}
 });
+
+// Toolbar activity belongs to the active request, rather than a status string.
+function deferred() {
+  let resolve,reject;
+  const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});
+  return {promise,resolve,reject};
+}
+const documentResult=()=>({status:'ok',model:{preamble:'app [] {}',metadata:'',cells:[],diagnostics:[]},evaluation:{status:'ok',values:[],events:[]}});
+async function waitFor(predicate) {
+  for(let i=0;i<100;i++) {if(predicate())return;await new Promise(resolve=>setTimeout(resolve,1));}
+  throw new Error('Deferred notebook request did not start');
+}
+function pendingNotebook(t,options={}) {
+  const requests=[];
+  const session={
+    invalidate(){},
+    stop(){for(const request of requests)request.reject(new DOMException('Stopped','AbortError'));},
+    request(value,callbacks){const request={...deferred(),value,callbacks};requests.push(request);return request.promise;},
+  };
+  const notebook=new Notebook(null,{save:async()=>{}},{session,debounce:60000,...options});
+  notebook.state=newDraft();notebook.state.autoRun=false;
+  t.after(()=>notebook.dispose());
+  return {notebook,requests};
+}
+
+test('Run remains busy through saving, package loading and evaluation, then becomes ready',async t=>{
+  const saved=deferred();
+  const {notebook,requests}=pendingNotebook(t);
+  notebook.store.save=()=>saved.promise;
+  const run=notebook.run();
+  assert.equal(notebook.busy,true,'Stop is available while saving before evaluation');
+  assert.equal(requests.length,0);
+  saved.resolve();await waitFor(()=>requests.length===1);
+  requests[0].callbacks.onPackageWaiting(true);
+  assert.match(notebook.status,/Waiting for package/);assert.equal(notebook.busy,true);
+  requests[0].callbacks.onPackageWaiting(false);
+  assert.equal(notebook.busy,true);
+  requests[0].resolve(documentResult());await run;
+  assert.equal(notebook.busy,false);
+});
+
+test('an older completion cannot clear the activity of a newer Run',async t=>{
+  const {notebook,requests}=pendingNotebook(t);
+  const older=notebook.run();await waitFor(()=>requests.length===1);
+  const newer=notebook.run();await waitFor(()=>requests.length===2);
+  requests[0].resolve(documentResult());
+  assert.equal(await older,null);assert.equal(notebook.busy,true);
+  requests[1].resolve(documentResult());await newer;
+  assert.equal(notebook.busy,false);
+});
+
+test('inspection activity clears after engine errors and edits without exposing stale results',async t=>{
+  const {notebook,requests}=pendingNotebook(t);
+  const broken=notebook.inspect('view');assert.equal(notebook.busy,true);
+  requests[0].reject(new Error('Compiler unavailable'));
+  await assert.rejects(broken,/Compiler unavailable/);assert.equal(notebook.busy,false);
+  const stale=notebook.inspect('view');assert.equal(notebook.busy,true);
+  notebook.editCell(0,'2 + 2');assert.equal(notebook.busy,false);
+  const latest=notebook.inspect('view');assert.equal(notebook.busy,true);
+  requests[1].resolve(documentResult());await assert.rejects(stale,{name:'AbortError'});
+  assert.equal(notebook.busy,true);
+  requests[2].resolve(documentResult());await latest;assert.equal(notebook.busy,false);
+});
+
+test('package cancellation and request errors restore Run without a stuck busy state',async t=>{
+  const {notebook,requests}=pendingNotebook(t);
+  const cancelled=notebook.run();await waitFor(()=>requests.length===1);
+  requests[0].callbacks.onPackageWaiting(true);
+  requests[0].reject(new DOMException('Package picker cancelled','AbortError'));await cancelled;
+  assert.equal(notebook.busy,false);assert.match(notebook.status,/Package loading cancelled/);
+  const failed=notebook.run();await waitFor(()=>requests.length===2);
+  requests[1].reject(new Error('Invalid package hash'));await failed;
+  assert.equal(notebook.busy,false);assert.match(notebook.status,/Invalid package hash/);
+});
+
+test('Stop and timeout release activity immediately and ignore late package notifications',async t=>{
+  const {notebook,requests}=pendingNotebook(t,{timeout:30});
+  const cancelled=notebook.run();await waitFor(()=>requests.length===1);
+  requests[0].callbacks.onPackageWaiting(true);notebook.stop();
+  assert.equal(notebook.busy,false);await cancelled;
+  requests[0].callbacks.onPackageWaiting(false);
+  assert.equal(notebook.busy,false);assert.match(notebook.status,/Stopped/);
+  const timedOut=notebook.run();await waitFor(()=>requests.length===2);await timedOut;
+  assert.equal(notebook.busy,false);assert.equal(notebook.state.autoRun,false);assert.match(notebook.status,/Stopped after/);
+  const disposed=notebook.run();await waitFor(()=>requests.length===3);
+  notebook.dispose();assert.equal(notebook.busy,false);await disposed;
+});

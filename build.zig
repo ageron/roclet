@@ -120,6 +120,7 @@ pub fn build(b: *std.Build) void {
     documents.addArg(root);
     documents.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     documents.step.dependOn(&cli.step);
+    // Parity cases record the manifest for this exact native/WASM pair.
     documents.step.dependOn(ready);
     documents.has_side_effects = true;
     test_step.dependOn(&documents.step);

@@ -131,13 +131,16 @@ test('a draft can be open in only one panel',()=>{
 });
 
 test('titles and tab status dots describe each panel',()=>{
-  assert.equal(documentTitle(['Wall area']),'Wall area — Roclet');
-  assert.equal(documentTitle(['Left','']),'Left | Untitled — Roclet');
+  assert.equal(documentTitle(['Wall area']),'Roclet: Wall area');
+  assert.equal(documentTitle(['Left','']),'Roclet: Left | Untitled');
   assert.equal(documentTitle([]),'Roclet');
   assert.equal(statusDot({status:'Running…',saveStatus:'Saved in this browser'}).state,'running');
   assert.equal(statusDot({status:'Needs attention · 1 failed test',saveStatus:'Saved in this browser'}).state,'attention');
   assert.equal(statusDot({status:'Running…',saveStatus:'Not saved: quota. Download a copy.'}).state,'unsaved');
   assert.equal(statusDot({status:'Current · 2 results',saveStatus:'Saved in this browser'}).state,'idle');
+  // A notebook's current operation decides activity, not its status wording.
+  assert.equal(statusDot({status:'Waiting for package…',saveStatus:'Saved in this browser',busy:false}).state,'idle');
+  assert.equal(statusDot({status:'Ready',saveStatus:'Saved in this browser',busy:true}).state,'running');
 });
 
 test('an independent copy has a new id, fresh cell keys and the same content',()=>{
@@ -165,7 +168,7 @@ function fakeWorkbench(records) {
   const bench=new Workbench({store,history,location:{href:'https://roclet.test/web/edit.html'},document:{title:''},
     createPanel:({slot,store,onChange})=>{
       const session={stop(){},invalidate(){},request:async()=>({status:'ok',graph:{},model:{cells:[],diagnostics:[]},evaluation:{status:'ok',values:[],events:[]}})};
-      const panel={slot,store,notices:[],disposed:false,focused:0,
+      const panel={slot,store,notices:[],disposed:false,focused:0,revealed:[],reveal(options){this.revealed.push(options);},
         notebook:new Notebook(null,store,{session,debounce:60000,onChange:reason=>onChange(panel,reason)}),
         get title(){return this.notebook.state?.title||'Untitled';},
         notice(message,actions=[]){this.notices.push({message,actions});},focus(){this.focused++;},
@@ -182,7 +185,8 @@ test('the workbench opens a second draft, refuses a duplicate and offers a copy'
   const right=await bench.open('right',{id:b.id});
   assert.equal(bench.panels.length,2);assert.equal(right.notebook.state.id,b.id);assert.notEqual(right.store,left.store);
   assert.equal(history.urls.at(-1),`/web/edit.html?notebook=${a.id}&right=${b.id}`);
-  assert.equal(page.title,'Alpha | Beta — Roclet');assert.equal(bench.active,right);
+  assert.equal(page.title,'Roclet: Alpha | Beta');assert.equal(bench.active,right);
+  assert.deepEqual(right.revealed,[{schedule:true}],'a new panel is revealed once its document is loaded');
   // Choosing the left draft in the right panel leaves the right panel as it was.
   await bench.open('right',{id:a.id});
   assert.equal(right.notebook.state.id,b.id);
@@ -210,6 +214,7 @@ test('closing the left panel moves the right document into the left slot',async(
   // A refused URL right=left opens an empty right panel with the notice.
   const refused=await bench.open('right',{id:b.id},{focus:false});
   assert.equal(refused.notebook.state,null);assert.match(refused.notices.at(-1).message,/already open/);
+  assert.equal(refused.revealed.length,1,'a refused panel is still shown with its notice');
   await bench.close('right');assert.equal(bench.panels.length,1);bench.dispose();
 });
 
@@ -220,4 +225,13 @@ test('the engine details preference defaults off and survives unavailable storag
   const broken={getItem(){throw new Error('denied');},setItem(){throw new Error('denied');}};
   assert.equal(readPreference(broken,engineDetailsKey),false);writePreference(broken,engineDetailsKey,true);
   assert.equal(readPreference(null,engineDetailsKey),false);
+});
+
+test('panels opened while the page starts are revealed without starting evaluation',async()=>{
+  const a=newDraft('Alpha'),b=newDraft('Beta');
+  const {bench}=fakeWorkbench(new Map([[a.id,a],[b.id,b]]));
+  const left=await bench.addPanel('left');await left.notebook.initialize({id:a.id});
+  bench.holdScheduling=true;
+  const right=await bench.open('right',{id:b.id},{focus:false});
+  assert.deepEqual(right.revealed,[{schedule:false}]);bench.dispose();
 });

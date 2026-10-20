@@ -1,7 +1,8 @@
-import { Notebook, makeCell } from './edit-model.mjs';
+import { Notebook, makeCell, cellsFrom } from './edit-model.mjs';
 import { CellEditor, editorFor } from './cell-editor.mjs';
 import { symbolAt, completionOptions } from './compiler-tools.mjs';
 import { renderMarkdown } from './markdown-view.mjs';
+import { settleMathStyles } from './math-view.mjs';
 import { renderDisplay } from './display-view.mjs';
 import { engineDetails, engineStats } from './workbench.mjs';
 import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './edit-cells.mjs';
@@ -59,7 +60,8 @@ export class NotebookPanel {
     const button = (label, action, name = label) => {
       const node = document.createElement('button'); node.textContent = label; node.setAttribute('aria-label', name); node.onclick = () => perform(action); return node;
     };
-    const notebook = this.notebook = new Notebook(bytes, store, {onChange:reason=>{reflect(reason);onChange(panel,reason);},loadPackage});
+    // Automatic checks and runs wait until the panel's first document is shown.
+    const notebook = this.notebook = new Notebook(bytes, store, {onChange:reason=>{reflect(reason);onChange(panel,reason);},loadPackage,deferScheduling:true});
     // Presentation only: keep the same output nodes while an edited revision is
     // pending. The model still invalidates results immediately for execution/export.
     function renderObservation(view, kind, content, stale = false) {
@@ -451,8 +453,12 @@ export class NotebookPanel {
       const s = notebook.state;
       if (part('title').value !== s.title) part('title').value = s.title;
       part('auto').checked = s.autoRun;
-      part('stop').hidden = !/Running|Saving before|Preparing document/.test(notebook.status);
-      if (part('stop').hidden && document.activeElement === part('stop')) part('run').focus({preventScroll:true});
+      // Run and Stop swap in one slot while the current operation is active,
+      // and focus follows the control it was on.
+      const focused = document.activeElement, busy = notebook.busy;
+      part('run').hidden = busy; part('stop').hidden = !busy;
+      if (busy && focused === part('run')) part('stop').focus({preventScroll:true});
+      else if (!busy && focused === part('stop')) part('run').focus({preventScroll:true});
       const status = notebook.diagnosticsDeferred && /^(Needs attention|Run failed · no current results)/.test(notebook.status) ? 'Editing · results pending' : notebook.status;
       part('status').textContent = status; part('status').className = /failed|attention|conflict/i.test(status) ? 'error' : '';
       // Engine details describe the panel's last completed response.
@@ -515,9 +521,8 @@ export class NotebookPanel {
       if(part('app-header').open)headerEditor.view.requestMeasure();
     };
     part('back-notebook').onclick = () => this.setMode('notebook');
-    part('help').onclick = showHelp;
     root.addEventListener('keydown', event => {
-      if (!notebook.state || event.defaultPrevented || event.isComposing || composing || event.keyCode === 229 || document.querySelector('dialog[open]')) return;
+      if (!notebook.state || panel.loading || event.defaultPrevented || event.isComposing || composing || event.keyCode === 229 || document.querySelector('dialog[open]')) return;
       const mod = event.metaKey || event.ctrlKey, key = event.key.toLowerCase();
       const target = event.target, card = target.closest?.('.cell');
       const menu = target.closest?.('details[open]');
@@ -549,7 +554,7 @@ export class NotebookPanel {
       else if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); event.stopPropagation(); removeCells(selection.selected); }
       else if (event.key === '?') { event.preventDefault(); event.stopPropagation(); showHelp(); }
     }, true);
-    const ownsClipboard = event => notebook.state?.mode === 'notebook' && selection.mode === 'cells' && part('notebook').contains(event.target) && !textTarget(event.target) && !event.target.closest?.('details,button,a');
+    const ownsClipboard = event => !panel.loading && notebook.state?.mode === 'notebook' && selection.mode === 'cells' && part('notebook').contains(event.target) && !textTarget(event.target) && !event.target.closest?.('details,button,a');
     for (const action of ['copy','cut']) root.addEventListener(action, event => {
       if (!ownsClipboard(event) || !selection.selected.length || !event.clipboardData || window.getSelection()?.toString()) return;
       const keys = selection.selected, cells = editable().filter(c => keys.includes(c.key)), encoded = encodeCells(cells);
@@ -581,9 +586,38 @@ export class NotebookPanel {
       await notebook.mode(mode);
       if (mode === 'source') sourceEditor.focus(); else if (notebook.state.mode === 'notebook') focusCell(selection.focus);
     });
+    // Parse and render the panel's first document, including its equations,
+    // before showing it. Only then may automatic evaluation (and so external
+    // package downloads) start. A panel without a document is shown as is.
+    this.reveal = async ({ schedule = true } = {}) => {
+      if (!panel.loading) return;
+      try {
+        if (notebook.state) {
+          const parsed = notebook.result?.model ? notebook.result : await notebook.inspect('parse');
+          if (notebook.state.sourceCurrent && notebook.state.mode === 'notebook') {
+            notebook.state.cells = cellsFrom(parsed, notebook.state.cells);
+            notebook.state.preamble = parsed.model.preamble; notebook.state.metadata = parsed.model.metadata;
+          }
+          notebook.publish(parsed); reflect('document'); reflect('result');
+          if (root.querySelector('.roclet-math')) {
+            await settleMathStyles();
+            // KaTeX embeds its fonts, but their decoding can still change the
+            // initial equation layout.
+            root.getBoundingClientRect(); await document.fonts.ready;
+          }
+          sourceEditor.view.requestMeasure(); headerEditor.view.requestMeasure();
+          for (const view of cards.values()) view.editor.view.requestMeasure();
+          await new Promise(requestAnimationFrame);
+        }
+      } finally {
+        root.inert = false; root.dataset.loading = 'false';
+        if (schedule) notebook.resumeScheduling();
+      }
+    };
     this.disposeEditors = () => { sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) view.editor.destroy(); };
   }
   get title() { return this.notebook.state?.title || 'Untitled'; }
+  get loading() { return this.root.dataset.loading === 'true'; }
   // Labels and live regions set by the workbench. Background panels do not
   // announce their status; the active one does.
   present({ label, titleLabel, active, two, mode }) {
