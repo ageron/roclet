@@ -1,4 +1,4 @@
-//! Roclet M0 whole-module bridge. Built unchanged for native and wasm32.
+//! The engine's JSON boundary: one request in, one response out. Built unchanged for native and wasm32.
 const std = @import("std");
 const builtin = @import("builtin");
 pub const runner = @import("engine.zig");
@@ -15,10 +15,9 @@ const gpa = if (is_wasm) std.heap.wasm_allocator else std.heap.page_allocator;
 pub const std_options: std.Options = .{ .logFn = quietLog };
 fn quietLog(comptime _: std.log.Level, comptime _: @TypeOf(.enum_literal), comptime _: []const u8, _: anytype) void {}
 
-/// The protocol-1 program request: `operation: "program"` (or, until the M0
-/// adapter is retired, an object without `operation`).
+/// The protocol-1 program request (`operation: "program"`), served by `script.run`.
 const Request = struct {
-    operation: ?[]const u8 = null,
+    operation: []const u8,
     protocol: u32,
     source: []const u8,
     user_bytes: u32,
@@ -30,20 +29,23 @@ const Request = struct {
     root: ?[]const u8 = null,
     files: []const struct { path: []const u8, source: []const u8 } = &.{},
 };
-/// (the WASM allocator in the browser).
+/// Serve one request. The object's `operation` is the only dispatch:
+/// `document`, `syntax` and `markdown` go to `document.zig`, `program` to
+/// `script.zig`; anything else is a `protocol_error`. The response is
+/// allocated in `gpa` (the WASM allocator in the browser).
 pub fn process(engine: *Engine, bytes: []const u8) ![]u8 {
     engine.beginRequest();
-    const probe = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch return processSource(engine, bytes);
+    const probe = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch return encode(script.rejected(engine, "Malformed request"));
     defer probe.deinit();
-    if (probe.value == .object) try mountFiles(engine, probe.value, gpa);
-    if (probe.value == .object) if (probe.value.object.get("operation")) |operation| {
-        if (operation == .string and std.mem.eql(u8, operation.string, "program")) return processSource(engine, bytes);
-        return processDocument(engine, probe.value);
+    const operation = if (probe.value == .object) probe.value.object.get("operation") else null;
+    if (operation) |name| if (name == .string) {
+        if (std.mem.eql(u8, name.string, "program")) return processSource(engine, bytes);
+        for ([_][]const u8{ "document", "syntax", "markdown" }) |known| if (std.mem.eql(u8, name.string, known)) {
+            try mountFiles(engine, probe.value, gpa);
+            return processDocument(engine, probe.value);
+        };
     };
-    if (probe.value == .object and probe.value.object.contains("cells")) {
-        return processSnapshot(engine, bytes);
-    }
-    return processSource(engine, bytes);
+    return encode(script.rejected(engine, "Expected operation document, syntax, markdown or program"));
 }
 
 fn processSource(engine: *Engine, bytes: []const u8) ![]u8 {
@@ -164,29 +166,16 @@ fn processDocument(engine: *Engine, value: std.json.Value) ![]u8 {
         if (engine.previous_graph) |old| engine.gpa.free(old);
         engine.previous_graph = owned;
     };
-    return encode(Envelope{ .response = .{ .document = response }, .stats = engine.stats, .required = engine.workspace.required.items });
+    return encode(Envelope{ .response = response, .stats = engine.stats, .required = engine.workspace.required.items });
 }
-/// One M0 snapshot request (`cells`), evaluated through the typed API.
-fn processSnapshot(engine: *Engine, bytes: []const u8) ![]u8 {
-    var storage = std.heap.ArenaAllocator.init(gpa);
-    defer storage.deinit();
-    const evaluation = try @import("snapshot.zig").evaluate(engine, storage.allocator(), bytes);
-    return encode(Envelope{ .response = .{ .snapshot = evaluation }, .stats = engine.stats, .required = engine.workspace.required.items });
-}
-/// A response with the engine's `workspaceCache` and `packagesRequired` appended.
+/// A document response with the engine's `workspaceCache` and `packagesRequired` appended.
 const Envelope = struct {
-    response: union(enum) { document: document.Response, snapshot: notebook.Evaluation },
+    response: document.Response,
     stats: runner.RequestStats,
     required: []const Workspace.RequiredPackage,
     pub fn jsonStringify(self: Envelope, w: anytype) !void {
         try w.beginObject();
-        switch (self.response) {
-            .document => |response| try response.writeFields(w),
-            .snapshot => |evaluation| inline for (@typeInfo(notebook.Evaluation).@"struct".field_names) |name| {
-                try w.objectField(name);
-                try w.write(@field(evaluation, name));
-            },
-        }
+        try self.response.writeFields(w);
         try w.objectField("workspaceCache");
         try w.write(self.stats);
         try w.objectField("packagesRequired");

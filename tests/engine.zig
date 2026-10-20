@@ -223,6 +223,26 @@ test "typed evaluation checks, analyses and lowers once for every root" {
     try std.testing.expectEqual(@as(u64, 1), engine.stats.prepared_hits);
 }
 
+test "typed requests with invalid roots, modules or size are rejected before compilation" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectError(error.InvalidRoot, notebook.checkDocument(&engine, a, try typedRequest(a, "", &.{"x)\ncrash \"bad\""}, false)));
+    try std.testing.expectError(error.DuplicateRoot, notebook.checkDocument(&engine, a, try typedRequest(a, "", &.{ "x", "x" }, false)));
+    var module = try typedRequest(a, "", &.{}, false);
+    module.modules = &.{.{ .name = "bad", .content = "" }};
+    try std.testing.expectError(error.InvalidModule, notebook.checkDocument(&engine, a, module));
+    // The generated entrypoint counts against the limit, so a program of exactly
+    // `source_limit` bytes is already too large.
+    const large = try a.alloc(u8, notebook.source_limit);
+    @memset(large, ' ');
+    try std.testing.expectError(error.SourceTooLarge, notebook.checkDocument(&engine, a, try typedRequest(a, large, &.{}, false)));
+    try std.testing.expect(engine.revision == null);
+    try std.testing.expectEqual(@as(u64, 0), engine.stats.frontend_builds);
+}
+
 test "typed evaluation isolates a crashing root or fails the revision" {
     var engine = Engine.init(std.testing.allocator, .failing);
     defer engine.deinit();
@@ -343,4 +363,28 @@ test "a script run reports its program response without the notebook revision" {
     try std.testing.expectEqual(@as(usize, 1), events.len);
     try std.testing.expectEqualStrings("[\"y\"]", events[0].object.get("message").?.string);
     try std.testing.expect(events[0].object.get("root") == null);
+}
+
+test "requests without a known operation are protocol errors" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    // The retired M0 `cells` snapshot, the retired raw program shape, an
+    // unknown operation and malformed JSON are all rejected without compiling.
+    for ([_][]const u8{
+        \\{"cells":[{"key":"x","source":"out_1 = 1"}],"roots":["out_1"]}
+        ,
+        \\{"protocol":1,"source":"main! = |_| Ok({})","user_bytes":0}
+        ,
+        \\{"operation":"evaluate","source":""}
+        ,
+        "not json",
+    }) |request| {
+        const bytes = try bridge.process(&engine, request);
+        defer response_allocator.free(bytes);
+        const parsed = try std.json.parseFromSlice(V, std.testing.allocator, bytes, .{});
+        defer parsed.deinit();
+        try std.testing.expectEqualStrings("protocol_error", parsed.value.object.get("status").?.string);
+    }
+    try std.testing.expect(engine.revision == null);
+    try std.testing.expectEqual(@as(u64, 0), engine.stats.frontend_builds);
 }

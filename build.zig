@@ -94,33 +94,20 @@ pub fn build(b: *std.Build) void {
     fixture_run.setCwd(b.path("."));
     fixture_run.has_side_effects = true;
     b.step("package-fixture", "Write a verified local package for browser integration tests").dependOn(&fixture_run.step);
-    const unit_step = b.step("test-unit", "Test the snapshot protocol and host utilities");
+    const unit_step = b.step("test-unit", "Test the document layer and host utilities");
     inline for (.{ "tools/build-tool.zig", "tools/serve.zig", "tools/package-proxy.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
     }
     const image_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/image.zig") });
     unit_step.dependOn(&b.addRunArtifact(image_tests).step);
-    // The document and snapshot layers call the engine's typed API.
-    inline for (.{ "compiler-adapter/document.zig", "compiler-adapter/snapshot.zig" }) |file| {
-        const tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, file) });
-        unit_step.dependOn(&b.addRunArtifact(tests).step);
-    }
-    const test_exe = b.addExecutable(.{ .name = "roclet-conformance", .root_module = b.createModule(.{
-        .root_source_file = b.path("tests/native.zig"),
-        .target = b.graph.host,
-        .optimize = .small,
-    }) });
-    const native_tests = b.addRunArtifact(test_exe);
-    native_tests.addArg(root);
-    native_tests.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
-    native_tests.has_side_effects = true;
-    native_tests.step.dependOn(&cli.step);
+    // The document layer calls the engine's typed API.
+    const document_unit_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/document.zig") });
+    unit_step.dependOn(&b.addRunArtifact(document_unit_tests).step);
     const test_step = b.step("test", "Run native conformance and unit tests; generate browser parity cases");
     test_step.dependOn(unit_step);
     test_step.dependOn(&workspace_run.step);
     test_step.dependOn(&fixture_run.step);
-    test_step.dependOn(&native_tests.step);
     const document_tests = b.addExecutable(.{ .name = "roclet-document-tests", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/documents.zig"),
         .target = b.graph.host,

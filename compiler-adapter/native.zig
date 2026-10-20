@@ -3,7 +3,7 @@ const std = @import("std");
 const bridge = @import("bridge.zig");
 pub const std_options = bridge.std_options;
 const usage =
-    \\Usage: roclet [run] FILE.roc|FILE.md|snapshot.json
+    \\Usage: roclet [run] FILE.roc|FILE.md|request.json
     \\       roclet parse FILE.roc|FILE.md
     \\       roclet check FILE.roc|FILE.md
     \\       roclet convert FILE --to roc|markdown [--output FILE] [--normalize] [--force] [--allow-relocation]
