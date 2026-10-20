@@ -135,6 +135,16 @@ pub fn build(b: *std.Build) void {
     m4_tests.has_side_effects = true;
     b.step("test-m4", "Check selective evaluation against full recomputation").dependOn(&m4_tests.step);
     test_step.dependOn(&m4_tests.step);
+    const engine_tests = b.addTest(.{ .use_llvm = use_llvm, .root_module = b.createModule(.{
+        .root_source_file = b.path("tests/engine.zig"),
+        .target = b.graph.host,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{.{ .name = "bridge", .module = adapterModule(b, roc, b.graph.host, optimize, "compiler-adapter/bridge.zig") }},
+    }) });
+    const engine_run = b.addRunArtifact(engine_tests);
+    b.step("test-engine", "Run in-process engine tests (several engines, attribution, request state)").dependOn(&engine_run.step);
+    test_step.dependOn(&engine_run.step);
 
     // Code checks borrowed from the Roc compiler's CI (ci/tidy.zig, ci/zig_lints.zig).
     // `zig build check` runs them all; `zig build test` depends on it so CI runs them too.
@@ -160,7 +170,13 @@ pub fn build(b: *std.Build) void {
     run_zig_lints.has_side_effects = true;
     b.step("run-check-zig-lints", "Run Zig source lints").dependOn(&run_zig_lints.step);
     check_step.dependOn(&run_zig_lints.step);
-    inline for (.{ "ci/tidy.zig", "ci/zig_lints.zig" }) |file| {
+    const globals = b.addExecutable(.{ .name = "globals", .root_module = b.createModule(.{ .root_source_file = b.path("ci/globals.zig"), .target = b.graph.host, .optimize = .debug }) });
+    const run_globals = b.addRunArtifact(globals);
+    run_globals.setCwd(b.path("."));
+    run_globals.has_side_effects = true;
+    b.step("check-globals", "Allow only the documented module-level variables in compiler-adapter").dependOn(&run_globals.step);
+    check_step.dependOn(&run_globals.step);
+    inline for (.{ "ci/tidy.zig", "ci/zig_lints.zig", "ci/globals.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         check_step.dependOn(&b.addRunArtifact(tests).step);
     }
@@ -168,21 +184,27 @@ pub fn build(b: *std.Build) void {
 }
 
 fn adapter(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, name: []const u8, root: []const u8) *std.Build.Step.Compile {
-    const exe = b.addExecutable(.{ .name = name, .root_module = b.createModule(.{
+    return b.addExecutable(.{ .name = name, .root_module = adapterModule(b, roc, target, optimize, root) });
+}
+
+/// A module rooted in compiler-adapter/ with the compiler modules, builtins,
+/// md4c and embedded package files the adapter imports.
+fn adapterModule(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, root: []const u8) *std.Build.Module {
+    const module = b.createModule(.{
         .root_source_file = b.path(root),
         .target = target,
         .optimize = optimize,
         .link_libc = target.result.os.tag != .freestanding,
-    }) });
-    inline for (.{ "compile", "lir", "eval", "check", "base", "ctx", "builtins", "roc_target", "build_options", "can", "collections", "reporting", "parse", "unbundle" }) |module| exe.root_module.addImport(module, roc.module(module));
+    });
+    inline for (.{ "compile", "lir", "eval", "check", "base", "ctx", "builtins", "roc_target", "build_options", "can", "collections", "reporting", "parse", "unbundle" }) |name| module.addImport(name, roc.module(name));
     const compiled_builtins = roc.module("eval").import_table.get("compiled_builtins").?;
-    exe.root_module.addImport("compiled_builtins", compiled_builtins);
-    if (target.result.cpu.arch == .wasm32) exe.root_module.addImport("compressed_builtins", compressedBuiltins(b, roc, compiled_builtins));
-    exe.root_module.addCSourceFile(.{ .file = b.path("vendor/md4c/md4c.c"), .flags = &.{ "-std=c99", "-O2" } });
-    exe.root_module.addIncludePath(b.path("vendor/md4c"));
-    exe.root_module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("package/Display.roc") });
-    exe.root_module.addAnonymousImport("display-package-url.txt", .{ .root_source_file = b.path("package/display-package-url.txt") });
-    return exe;
+    module.addImport("compiled_builtins", compiled_builtins);
+    if (target.result.cpu.arch == .wasm32) module.addImport("compressed_builtins", compressedBuiltins(b, roc, compiled_builtins));
+    module.addCSourceFile(.{ .file = b.path("vendor/md4c/md4c.c"), .flags = &.{ "-std=c99", "-O2" } });
+    module.addIncludePath(b.path("vendor/md4c"));
+    module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("package/Display.roc") });
+    module.addAnonymousImport("display-package-url.txt", .{ .root_source_file = b.path("package/display-package-url.txt") });
+    return module;
 }
 
 fn compressedBuiltins(b: *std.Build, roc: *std.Build.Dependency, builtins: *std.Build.Module) *std.Build.Module {

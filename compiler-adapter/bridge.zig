@@ -2,7 +2,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const runner = @import("engine.zig");
-const platform = @import("platform.zig");
+pub const platform = @import("platform.zig");
 const can = @import("can");
 const reporting = @import("reporting");
 const Workspace = @import("workspace.zig");
