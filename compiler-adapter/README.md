@@ -14,6 +14,40 @@ observations with their checked module/root provenance. Normal Roc parsing and
 checking semantics remain the compiler's responsibility. The upstream license is
 included in `ROC-LICENSE`.
 
+## Engine instances and process-wide state
+
+All mutable adapter state belongs to an explicit `Engine` (`engine_state.zig`):
+the virtual workspace and compiler artifact store, `packagesRequired`, the
+retained checked/lowered notebook revision, the last confirmed dependency graph,
+the synthetic or native source paths, and the `workspaceCache` counters.
+`bridge.process(&engine, request)` serves one top-level request and starts with
+`engine.beginRequest()`, which clears `packagesRequired` and the counters. A
+native host may construct several engines in one process (`tests/engine.zig`
+does); the WASM export layer owns exactly one per worker instance.
+
+The response under construction belongs to a request-scoped `ResponseBuilder`
+in `bridge.zig`. Compiler callbacks reach it through `Diagnostics.ctx`, an
+`Analyzer {ctx, call}` pair, and a `platform.Observer`. The observer carries
+the root it stamps on every `value`, `dbg`, `expect_failed`, `crashed` and
+`test_*` event; it travels in the interpreter's `EchoEnv`, so RocOps callbacks
+read it from `ops.env`, and the notebook pipeline derives one observer per
+executed or replayed root. Attribution therefore never depends on global state.
+App headers are parsed from memory; nothing is written to the workspace.
+
+Three module-level variables remain, and `zig build check-globals` (part of
+`zig build check` and `zig build test`, implemented in `ci/globals.zig`)
+rejects any other:
+
+- `platform.active_roc_ops`: hosted platform functions receive no RocOps or
+  environment pointer (natural C ABI on native, `(args, ret)` on wasm32), yet
+  `Echo.line!` must decref its argument. The interpreter run that owns the
+  current RocOps publishes it with `enterRocOps`/`leaveRocOps`, which assert
+  that runs never nest. It carries no attribution state.
+- `engine.builtin_modules`: the decoded builtin modules are immutable and
+  borrowed by every `BuildEnv`, so engines in one process share them.
+- `bridge.wasm_engine`: the worker's single `Engine` instance, a struct rather
+  than scattered state.
+
 ## Document preparation
 
 `document_frontend.zig` implements document segmentation, expression lowering,

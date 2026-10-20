@@ -57,6 +57,12 @@ use byte-oriented WASM entry points. Compact notebook responses omit unused
 intermediate syntax, duplicate source, and export encodings. Subsequent requests
 also omit the worker's already confirmed dependency graph.
 
+Each worker owns one compiler engine instance. All mutable adapter state (the
+virtual filesystem, live compiler cache, retained revision, confirmed graph and
+request counters) belongs to that engine rather than to module globals, and
+observations are attributed through a request-scoped observer that carries its
+root. Native hosts and the in-process `zig build test-engine` suite can hold
+several engines in one process.
 The worker keeps its virtual filesystem and live compiler cache between edits.
 IndexedDB stores checked/canonicalized artifacts under the compiler identity and
 actual WASM digest, with entry checksums and a global 32 MiB/512-entry artifact
