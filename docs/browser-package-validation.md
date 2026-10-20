@@ -25,7 +25,7 @@ The configuration is loaded only when an uncached package needs downloading.
 The real released roc-parser 2.0.0 archive and its transitive Unicode 4.2.0
 archive passed Chrome tests through both the local endpoint and a separate
 proxy origin. These tests use real GitHub downloads, without browser interception
-or manually installed archives. The actual Studio verifies number parsing,
+or manually installed archives. The actual notebook verifies number parsing,
 invalid input, editing, and worker restart.
 
 ```sh
@@ -42,7 +42,7 @@ node tools/browser-check.mjs --base-url http://127.0.0.1:4179 \
 
 The expected report is `result: "pass", passed: true`. This probe also attempts
 a direct GitHub fetch to record the CORS restriction; its failure is expected.
-A failed Studio run reports `result: "blocked"`, so inspect the report in addition
+A failed notebook run reports `result: "blocked"`, so inspect the report in addition
 to the command's exit status.
 
 ## roc-time demonstration
@@ -105,8 +105,9 @@ proxy service. No external HTTPS deployment is claimed by this local check.
 
 ## Verified browser results
 
-The final ReleaseFast browser compiler is 25,090,811 bytes, SHA-256
-`3c2bc4a897ef75df55f2282242784724f8d56214a53a6e149ce06ae1bad447ec`.
+After merging upstream main (`6819762`), the final ReleaseFast browser compiler
+is 25,097,937 bytes, SHA-256
+`cd92bdd279d304fecf80ed7cc6602923808a72fa5131df04fa521eb8fa1f2c7e`.
 The local-endpoint test at 1280×960 and separate-origin proxy test at 390×960
 both pass the complete roc-time probe: all six intermediate/final outputs,
 booking edits, 90-minute and 120-minute requests, an off-hours booking,
@@ -129,14 +130,23 @@ The header probe checks that a new notebook starts with the card collapsed,
 then exercises expansion, source editing, a missing-module diagnostic, undo,
 Ctrl+Enter, autosave, and source-view round trips while preserving every cell.
 Run it with the same browser command and `--script tools/browser-header-probe.mjs`.
-Both desktop and compact layouts pass. The existing Studio UI contracts also
-pass at both widths, alongside the lifecycle and rich-output contracts.
+Both desktop and compact layouts pass. The existing Edit UI contracts also
+pass all 46 contracts at both widths, alongside the lifecycle and rich-output
+contracts. Document parity covers 226 complete native/WASM responses and 80
+fresh-worker runs; all 146 native document contracts also pass.
 
-Packaging verifies all 75 offline assets, including the demo and download
+Packaging verifies all 82 offline assets, including the demo and download
 configuration. Result rendering uses reusable functions, avoiding Roc’s empirical
 compile-time branch-coverage warning for a top-level match on the current value.
 No diagnostics are suppressed. The probe verifies the warning is absent for both
 valid and reversed dates, while still displaying the actual reversed-date error.
+
+Upstream’s Edit menus, purple/light/dark themes, hummingbird branding, and pinned
+Display package are retained. Existing `studio.html` bookmarks redirect to
+`edit.html` with their query and fragment preserved. The exact pinned Display
+package is provided by the embedded library during notebook execution, while
+runnable Roc exports keep its content-addressed dependency. Other dependencies
+continue through the normal package resolver.
 
 ## Compiler memory limit
 
