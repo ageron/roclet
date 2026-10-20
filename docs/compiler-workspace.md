@@ -128,9 +128,9 @@ module/package test suites are not selected. See the
 
 The merged ReleaseFast native/WASM pair passes:
 
-- 146 native document contracts, 36 compiler cases, and 30 complete selective/full
+- 167 native document contracts, 36 compiler cases, and 30 complete selective/full
   evaluation responses.
-- 226 complete native/WASM document comparisons and 80 fresh-worker runs,
+- 261 complete native/WASM document comparisons and 115 fresh-worker runs,
   including Unicode mappings, failure isolation, missing-module diagnostics,
   checked runnable exports, and the upstream pinned Display package.
 - 46 Edit UI contracts at each desktop/compact width, 21 lifecycle contracts,
@@ -140,7 +140,7 @@ The merged ReleaseFast native/WASM pair passes:
   links, dependency changes, selected-cell execution, undo, and persistence.
 - Real released roc-parser 2.0.0 with transitive Unicode 4.2.0, and roc-time 0.2.0,
   through local and separate-origin archive proxy configurations.
-- Native unit/workspace checks, 11 Node unit contracts, 13 Node workspace tests,
+- Native unit/workspace checks, seven Node edit-model tests, 13 Node workspace tests,
   five ordinary-Roc demo/fixture runs against an extracted Display package,
   artifact verification, and packaging with 87 verified offline assets.
 
