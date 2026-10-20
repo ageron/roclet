@@ -29,7 +29,6 @@ pub const Options = struct {
     analyze: *const fn (*can.ModuleEnv, u32) void,
 };
 const Label = struct { root: []const u8, text: []const u8, value: []const u8, rich: bool = false };
-const Entry = struct { name: []const u8, request: check.CheckedArtifact.RootRequest };
 const State = struct {
     key: [32]u8,
     buffer: []align(16) u8,
@@ -362,7 +361,7 @@ fn appendRoot(a: A, env: *can.ModuleEnv, exported: []const check.CheckedArtifact
     }
     return error.EntrypointNotFound;
 }
-fn reportRuntime(interpreter: *eval.LirInterpreter, diagnostics: engine.Diagnostics, err: anyerror) error{EvaluationFailed} {
+fn reportRuntime(interpreter: *eval.LirInterpreter, diagnostics: engine.Diagnostics, err: (eval.LirInterpreter.Error || error{EntrypointNotFound})) error{EvaluationFailed} {
     switch (err) {
         error.Crash => if (host.observer) |emit| emit("crashed", interpreter.getCrashMessage()),
         else => if (interpreter.getRuntimeErrorMessage()) |message| diagnostics.write(message),

@@ -74,37 +74,6 @@ pub fn echoLineHostedFn() host_abi.HostedFn {
         host_abi.hostedFn(&echoHostedFn);
 }
 
-/// Handle stdout write errors: exit cleanly on broken pipe (standard
-/// Unix behavior), crash on other errors.
-fn handleStdoutError(err: std.Io.File.Writer.Error) noreturn {
-    if (comptime is_wasm) {
-        @trap();
-    } else {
-        switch (err) {
-            error.BrokenPipe => std.process.exit(0),
-            error.AccessDenied,
-            error.Canceled,
-            error.DeviceBusy,
-            error.DiskQuota,
-            error.FileBusy,
-            error.FileTooBig,
-            error.InputOutput,
-            error.LockViolation,
-            error.NoDevice,
-            error.NoSpaceLeft,
-            error.NotOpenForWriting,
-            error.PermissionDenied,
-            error.SystemResources,
-            error.Unexpected,
-            error.WouldBlock,
-            => {
-                std.debug.print("echo!: stdout write failed: {}\n", .{err});
-                std.process.exit(1);
-            },
-        }
-    }
-}
-
 /// Create a minimal RocOps struct for default_app execution.
 pub fn makeDefaultRocOps(env: *EchoEnv, hosted_fns: []host_abi.HostedFn) host_abi.RocOps {
     const fns = struct {

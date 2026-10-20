@@ -591,12 +591,6 @@ pub fn persistentBuiltins() !*eval.BuiltinModules {
     return &builtin_modules.?;
 }
 
-fn observeCompileTime(_: *anyopaque, event: eval.CompileTimeFinalization.EventView) void {
-    switch (event) {
-        .dbg => |message| if (echo_platform.observer) |emit| emit("dbg", message),
-    }
-}
-
 pub var last_cache_stats: compile.CacheStats = .{};
 
 pub var request_cache_stats: compile.CacheStats = .{};

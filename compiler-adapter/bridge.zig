@@ -4,7 +4,6 @@ const builtin = @import("builtin");
 const runner = @import("engine.zig");
 const platform = @import("platform.zig");
 const can = @import("can");
-const collections = @import("collections");
 const reporting = @import("reporting");
 const Workspace = @import("workspace.zig");
 const compiled_builtins = @import("compiled_builtins");
@@ -201,7 +200,7 @@ fn analyzeFallible(env: *can.ModuleEnv, prefix: u32) !void {
         const expr_region = env.store.getExprRegion(def.expr);
         if (name_region.start.offset < prefix or expr_region.end.offset > prefix + user_bytes) continue;
         const name = env.getIdent(pattern.assign.ident);
-        if (std.mem.indexOfScalar(u8, name, '.') != null) response.dependency_scope = "module";
+        if (std.mem.findScalar(u8, name, '.') != null) response.dependency_scope = "module";
         refs.clearRetainingCapacity();
         try can.DependencyGraph.collectNameReferences(env, &patterns, def.expr, &refs, &stack, &defaults, arena);
         var deps: std.ArrayList([]const u8) = .empty;
@@ -393,7 +392,10 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
             .diagnostics = .{ .ctx = null, .vtable = &diag_vtable },
             .analyze = analyze,
         }) catch |err| {
-            response.status = if (err == error.CompilationFailed) "diagnostic" else "runtime_error";
+            response.status = switch (err) {
+                error.CompilationFailed => "diagnostic",
+                else => "runtime_error",
+            };
             if (response.failure == null) response.failure = dupe(@errorName(err));
             if (callback_failed) return error.OutOfMemory;
             return serialize();
@@ -426,7 +428,10 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         .target_usize = if (is_wasm) .u32 else .native,
         .roc_target = if (is_wasm) .wasm32 else @import("roc_target").RocTarget.detectNative(),
     }) catch |err| {
-        response.status = if (err == error.CompilationFailed) "diagnostic" else "runtime_error";
+        response.status = switch (err) {
+            error.CompilationFailed => "diagnostic",
+            else => "runtime_error",
+        };
         if (response.failure == null) response.failure = dupe(@errorName(err));
         if (callback_failed) return error.OutOfMemory;
         return serialize();

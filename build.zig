@@ -129,6 +129,36 @@ pub fn build(b: *std.Build) void {
     m4_tests.has_side_effects = true;
     b.step("test-m4", "Check selective evaluation against full recomputation").dependOn(&m4_tests.step);
     test_step.dependOn(&m4_tests.step);
+
+    // Code checks borrowed from the Roc compiler's CI (ci/tidy.zig, ci/zig_lints.zig).
+    // `zig build check` runs them all; `zig build test` depends on it so CI runs them too.
+    const check_step = b.step("check", "Check Zig formatting, tidy rules, lints, and dead Zig files");
+    const zig_format = b.addFmt(.{ .paths = &.{ b.path("build.zig"), b.path("compiler-adapter"), b.path("tools"), b.path("tests"), b.path("ci") }, .check = true });
+    b.step("run-check-zig-format", "Check Zig formatting (zig fmt --check)").dependOn(&zig_format.step);
+    check_step.dependOn(&zig_format.step);
+    const tidy = b.addExecutable(.{ .name = "tidy", .root_module = b.createModule(.{ .root_source_file = b.path("ci/tidy.zig"), .target = b.graph.host, .optimize = .debug }) });
+    const run_tidy = b.addRunArtifact(tidy);
+    run_tidy.setCwd(b.path("."));
+    run_tidy.has_side_effects = true;
+    b.step("run-check-tidy", "Run code tidiness checks over every tracked file").dependOn(&run_tidy.step);
+    check_step.dependOn(&run_tidy.step);
+    const run_git_lints = b.addRunArtifact(tidy);
+    run_git_lints.addArg("--git-lints");
+    run_git_lints.setCwd(b.path("."));
+    run_git_lints.has_side_effects = true;
+    b.step("run-check-git-lints", "Report tracked Zig files that nothing imports or builds").dependOn(&run_git_lints.step);
+    check_step.dependOn(&run_git_lints.step);
+    const zig_lints = b.addExecutable(.{ .name = "zig_lints", .root_module = b.createModule(.{ .root_source_file = b.path("ci/zig_lints.zig"), .target = b.graph.host, .optimize = .debug }) });
+    const run_zig_lints = b.addRunArtifact(zig_lints);
+    run_zig_lints.setCwd(b.path("."));
+    run_zig_lints.has_side_effects = true;
+    b.step("run-check-zig-lints", "Run Zig source lints").dependOn(&run_zig_lints.step);
+    check_step.dependOn(&run_zig_lints.step);
+    inline for (.{ "ci/tidy.zig", "ci/zig_lints.zig" }) |file| {
+        const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
+        check_step.dependOn(&b.addRunArtifact(tests).step);
+    }
+    test_step.dependOn(check_step);
 }
 
 fn adapter(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, name: []const u8, root: []const u8) *std.Build.Step.Compile {

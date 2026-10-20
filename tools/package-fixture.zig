@@ -1,3 +1,4 @@
+//! Writes a verified local Roc package archive fixture for browser integration tests.
 const std = @import("std");
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();

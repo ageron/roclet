@@ -81,6 +81,11 @@ zig build test
 zig build package
 ```
 
+`zig build test` also runs `zig build check`: `zig fmt --check`, the tidy rules in
+`ci/tidy.zig` (banned patterns, dead private declarations, Markdown titles), the
+lints in `ci/zig_lints.zig`, and a dead-file scan over tracked Zig sources. Run
+`zig build check` alone for a fast pre-commit pass.
+
 Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/document-conformance.html`, `/web/m5-conformance.html`, and
 `/web/math-conformance.html` on your local server. `zig build test` does not launch Chrome.
