@@ -21,19 +21,18 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Install pinned Zig
-        shell: bash
+      - name: Read pinned Zig version
+        id: zig-version
         run: |
-          set -euo pipefail
-          version=$(jq -r .zigVersion compiler.lock.json)
-          curl --fail --location --retry 3 https://ziglang.org/download/index.json -o "$RUNNER_TEMP/zig-index.json"
-          url=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].tarball' "$RUNNER_TEMP/zig-index.json")
-          sha=$(jq -er --arg v "$version" '.[$v]["x86_64-linux"].shasum' "$RUNNER_TEMP/zig-index.json")
-          curl --fail --location --retry 3 "$url" -o "$RUNNER_TEMP/zig.tar.xz"
-          printf '%s  %s\n' "$sha" "$RUNNER_TEMP/zig.tar.xz" | sha256sum --check
-          mkdir "$RUNNER_TEMP/zig"
-          tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
-          echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+          version=$(jq -er .zigVersion compiler.lock.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Install pinned Zig
+        # Official GitHub mirror of https://codeberg.org/mlugg/setup-zig/.
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ steps.zig-version.outputs.version }}
+          # Restore/save below owns both Zig caches and the prepared compiler.
+          use-cache: false
       - uses: actions/cache/restore@v4
         id: compiler-cache
         with:
