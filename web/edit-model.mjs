@@ -47,6 +47,9 @@ export function cellsFrom(result, previous = []) {
     attributes: cell.attributes, outputs: cell.outputs, collapsed: previous[i]?.collapsed ?? false }));
 }
 
+export function unsavedError(message, discardLabel, discard) {
+  return Object.assign(new Error(message), { name: 'UnsavedError', discardLabel, discard });
+}
 // Browser-owned edit history, persistence and worker lifecycle. Parsing, output
 // selection, lowering and encoding are exclusively the shared Roc document core.
 export class Notebook {
@@ -93,10 +96,15 @@ export class Notebook {
       if (this.state.id === id && this.state.revision === revision && saveVersion === this.saveVersion) { this.saveStatus = 'Saved in this browser'; this.emit('saved'); }
       return true;
     } catch (error) {
-      if (this.state.id === id && saveVersion === this.saveVersion) { this.saveStatus = `Not saved: ${error.message}. Download a copy.`; this.emit(); }
+      if (this.state.id === id && saveVersion === this.saveVersion) { this.saveStatus = `Not saved: ${error.message.replace(/[.!?]+\s*$/, '')}. Download a copy.`; this.emit(); }
       return false;
     }
   }
+  // A draft that cannot be saved (for example after another tab changed it)
+  // is still kept when this exact revision was downloaded.
+  markDownloaded() { if (this.state) this.downloaded = { id: this.state.id, revision: this.state.revision }; }
+  get downloadedCurrent() { return !!this.state && this.downloaded?.id === this.state.id && this.downloaded.revision === this.state.revision; }
+  async keep() { return await this.persist() || this.downloadedCurrent; }
   cancelPending() {
     clearTimeout(this.timer); this.timer = null; this.runId++; this.activeOperation = null; this.session.invalidate();
   }
@@ -313,14 +321,20 @@ export class Notebook {
     this.diagnosticsDeferred = false;
     this.invalidate();this.resetBaseline=true;this.state={...clone(this.state),id:key(),title:`${this.state.title.slice(0,100)} (recovery)`,revision:1};delete this.state._storageVersion;this.history=[];this.future=[];this.views.clear();this.emit("document");await this.persist();
   }
-  async replace(record) {
-    if (!await this.persist()) throw new Error('The current draft could not be saved. Download a copy before switching documents.');
+  // Switching away from a draft that cannot be kept is refused with an
+  // UnsavedError whose `discard` switches anyway, losing this tab's changes.
+  async replace(record, { discard = false } = {}) {
+    if (!discard && !await this.keep()) throw unsavedError(`The current draft could not be saved, so the other document was not opened. ${this.saveStatus}`, 'Switch without saving (discards unsaved changes in this tab)', () => this.replace(record, { discard: true }));
     this.diagnosticsDeferred = false;
     this.invalidate(); this.resetBaseline = true; this.state = clone(record); this.history = []; this.future = []; this.views.clear(); this.group = null;
     this.emit('document'); await this.persist(); this.schedule();
   }
   async open(source, filename) {
-    await this.replace(openedDraft(source, filename));
+    try { await this.replace(openedDraft(source, filename)); }
+    catch (error) {
+      if (error.name === 'UnsavedError') { const discard = error.discard; error.discard = async () => { await discard(); await this.mode('notebook'); }; }
+      throw error;
+    }
     await this.mode('notebook');
   }
   dispose() { clearTimeout(this.timer); this.runId++; this.activeOperation = null; this.session.stop(); }

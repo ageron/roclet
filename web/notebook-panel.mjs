@@ -53,9 +53,16 @@ export class NotebookPanel {
       const node = part('notice'); node.textContent = message; node.hidden = !message;
       for (const [label, action] of actions) { const choice = button(label, action); choice.className = 'notice-action'; node.append(' ', choice); }
     };
+    // A document switch refused because this draft could not be saved offers
+    // a download (supplied by the page as panel.download) or switching anyway.
+    const report = this.report = error => {
+      if (error.name === 'AbortError') return;
+      if (error.name === 'UnsavedError') notice(error.message, [['Download a copy', () => panel.download?.()], [error.discardLabel, error.discard]]);
+      else notice(error.message);
+    };
     const perform = this.perform = async work => {
       notice('');
-      try { await work(); } catch (error) { if (error.name !== 'AbortError') notice(error.message); }
+      try { await work(); } catch (error) { report(error); }
     };
     const button = (label, action, name = label) => {
       const node = document.createElement('button'); node.textContent = label; node.setAttribute('aria-label', name); node.onclick = () => perform(action); return node;

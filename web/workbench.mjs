@@ -162,7 +162,7 @@ export class Workbench {
     }
     panel ??= await this.addPanel(slot);
     try { await this.load(panel, request); }
-    catch (error) { if (error.name !== 'AbortError') panel.notice(error.message); }
+    catch (error) { if (error.name !== 'AbortError') (panel.report ?? (e => panel.notice(e.message))).call(panel, error); }
     await this.reveal(panel);
     this.layout(); this.writeUrl();
     if (created && focus) { this.activate(panel); panel.focus(); }
@@ -203,25 +203,37 @@ export class Workbench {
       ['Open an independent copy here', async () => { await this.load(panel, { record: independentCopy(other.notebook.state) }); this.layout(); this.writeUrl(); }],
     ]);
   }
-  // Closing a panel saves it first and is refused when that fails. Closing the
-  // left panel moves the right document into the left slot (a document switch,
-  // so the engine starts a fresh baseline) and loses the right undo history.
-  async close(slot) {
+  // Closing a panel saves it first. A notebook that cannot be saved (another
+  // tab changed its draft, or storage failed) keeps the panel open with a
+  // notice offering a download, after which closing proceeds, or closing
+  // without saving that notebook, named in `discard`. Closing the left panel
+  // moves the right document into the left slot (a document switch, so the
+  // engine starts a fresh baseline) and loses the right undo history.
+  async close(slot, { discard = [] } = {}) {
     const left = this.left, right = this.right;
     if (!right) return false;
-    const unsaved = 'could not be saved. Download a copy before closing it.';
-    if (right.notebook.state && !await right.notebook.persist()) throw new Error(`The ${slot === 'right' ? '' : 'right '}notebook ${unsaved}`);
+    const kept = async panel => !panel.notebook.state || discard.includes(panel) || await panel.notebook.keep();
+    if (!await kept(right)) return this.closeRefused(right, slot, discard);
     if (slot === 'left' && right.notebook.state) {
-      if (left.notebook.state && !await left.notebook.persist()) throw new Error(`The left notebook ${unsaved}`);
+      if (!await kept(left)) return this.closeRefused(left, slot, discard);
       const id = right.notebook.state.id;
       this.remove(right);
       const record = await left.store.get(id);
       if (!validDraft(record)) throw new Error('The right notebook is unavailable in this browser.');
-      if (left.notebook.state) await left.notebook.replace(record); else await left.notebook.initialize({ id });
+      if (left.notebook.state) await left.notebook.replace(record, { discard: true }); else await left.notebook.initialize({ id });
     } else this.remove(right);
     this.replaceUrl({});
     left.focus();
     return true;
+  }
+  closeRefused(panel, slot, discard) {
+    const name = this.slotOf(panel);
+    panel.notice(`The ${name} notebook could not be saved, so the ${slot} panel stays open. ${panel.notebook.saveStatus}`, [
+      ['Download a copy', () => panel.download?.()],
+      ['Close without saving (discards unsaved changes in this tab)', () => this.close(slot, { discard: [...discard, panel] })],
+    ]);
+    this.activate(panel);
+    return false;
   }
   remove(panel) {
     this.panels = this.panels.filter(item => item !== panel);

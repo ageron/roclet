@@ -303,6 +303,22 @@ try {
   $('help-menu').open = true; $('shortcuts').click(); assert($('shortcuts-dialog').open && !$('help-menu').open, 'Help menu did not open keyboard help'); $('shortcuts-dialog').close();
   await bench.close('right');
   report('D17 a panel opening its first notebook stays in a loading state until its prose is rendered, then evaluates; the tab title names both notebooks; keyboard help opens from Help and ? in the second panel, whose status bar has no buttons');
+  // Another tab (here a second DraftStore on the same database) saves the
+  // right draft; closing it must not dead-end.
+  await bench.open('right', {record:draft('Epsilon', [['code', 'out_e = 5']], 1)}, {focus:false}); clearTimeout(R().timer);
+  await until(()=>R().saveStatus === 'Saved in this browser', 'the right draft to save');
+  const other = new DraftStore(name), stored = await other.get(R().state.id);
+  await other.save({...stored, title:`${stored.title} elsewhere`}); other.close();
+  assert.equal(await bench.close('right'), false); assert.equal(bench.panels.length, 2);
+  assert.match(R().saveStatus, /^Not saved: Another tab changed this draft\. .*reopening it\. Download a copy\.$/); assert(!/\.\./.test(R().saveStatus), 'Doubled punctuation');
+  const closeNotice = part('right','notice'), action = label => [...closeNotice.querySelectorAll('button')].find(b=>b.textContent===label);
+  assert.match(closeNotice.textContent, /right notebook could not be saved, so the right panel stays open/);
+  assert(action('Download a copy') && action('Close without saving (discards unsaved changes in this tab)'), 'The notice lacks its actions');
+  assert.equal(await bench.close('right'), false, 'A retry closed without saving');
+  action('Close without saving (discards unsaved changes in this tab)').click();
+  await until(()=>bench.panels.length === 1, 'closing without saving');
+  assert(!document.getElementById('right-title') && $('title') && $('status') && $('notebook'), 'Legacy ids changed after closing');
+  report('D18 closing a panel whose draft another tab changed keeps it open with Download and Close without saving; the latter restores one panel with legacy ids');
 
   // Package prompts with a stub dialog driver; the real file picker is
   // tools/browser-dual-package-probe.mjs.

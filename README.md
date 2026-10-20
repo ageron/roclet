@@ -47,7 +47,8 @@ notebook gets its own column and its own compiler, so running or stopping one
 never disturbs the other; menu commands act on the notebook you last clicked,
 named at the top of each menu. Below 900px wide the two notebooks become tabs.
 A notebook can be open in only one column at a time; Roclet offers to switch to
-it or to open an independent copy instead. **View → Show engine details** adds
+it or to open an independent copy instead. If another tab changed a draft, closing
+or switching away from it offers a download or to continue without saving. **View → Show engine details** adds
 the last run's worker time, evaluated and reused results, and memory to each
 status bar.
 

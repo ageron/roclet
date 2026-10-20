@@ -158,9 +158,10 @@ test('an independent copy has a new id, fresh cell keys and the same content',()
 function memoryStore(records=new Map()) {
   return {records,closed:false,
     async get(id){const r=records.get(id);return r&&structuredClone(r);},
-    async save(record){records.set(record.id,structuredClone(record));},
+    conflicts:new Set(),
+    async save(record){if(this.conflicts.has(record.id))throw new Error('Another tab changed this draft. Download your edits or save a recovery copy before reopening it.');records.set(record.id,structuredClone(record));},
     async list(){return [...records.values()].map(r=>structuredClone(r));},
-    async fork(){return memoryStore(records);},close(){this.closed=true;}};
+    async fork(){const fork=memoryStore(records);fork.conflicts=this.conflicts;return fork;},close(){this.closed=true;}};
 }
 function fakeWorkbench(records) {
   const store=memoryStore(records),history={urls:[],replaceState(_,__,url){this.urls.push(url);}};
@@ -172,6 +173,7 @@ function fakeWorkbench(records) {
         notebook:new Notebook(null,store,{session,debounce:60000,onChange:reason=>onChange(panel,reason)}),
         get title(){return this.notebook.state?.title||'Untitled';},
         notice(message,actions=[]){this.notices.push({message,actions});},focus(){this.focused++;},
+        download(){this.notebook.markDownloaded();},
         dispose(){this.disposed=true;this.notebook.dispose();}};
       created.push(panel);return panel;
     }});
@@ -234,4 +236,38 @@ test('panels opened while the page starts are revealed without starting evaluati
   bench.holdScheduling=true;
   const right=await bench.open('right',{id:b.id},{focus:false});
   assert.deepEqual(right.revealed,[{schedule:false}]);bench.dispose();
+});
+
+test('closing a panel whose draft another tab changed offers a download or closing without saving',async()=>{
+  const a=newDraft('Alpha'),b=newDraft('Beta');a.autoRun=b.autoRun=false;
+  const {bench,store}=fakeWorkbench(new Map([[a.id,a],[b.id,b]]));
+  const left=await bench.addPanel('left');await left.notebook.initialize({id:a.id});
+  const right=await bench.open('right',{id:b.id});
+  store.conflicts.add(b.id);
+  assert.equal(await bench.close('right'),false);assert.equal(bench.panels.length,2);
+  assert.equal(right.notebook.saveStatus,'Not saved: Another tab changed this draft. Download your edits or save a recovery copy before reopening it. Download a copy.');
+  const refusal=right.notices.at(-1);assert.match(refusal.message,/right notebook could not be saved, so the right panel stays open/);
+  assert.deepEqual(refusal.actions.map(([label])=>label),['Download a copy','Close without saving (discards unsaved changes in this tab)']);
+  // Retrying keeps refusing until the draft is downloaded or discarded.
+  assert.equal(await bench.close('right'),false);
+  refusal.actions[0][1]();assert.equal(await bench.close('right'),true);assert.equal(bench.panels.length,1);
+  // Closing without saving the failing panel only; the other is still saved.
+  const again=await bench.open('right',{id:b.id});
+  again.notebook.change(s=>{s.title='Beta edited';});
+  assert.equal(await bench.close('left'),false);
+  await again.notices.at(-1).actions[1][1]();
+  assert.equal(bench.panels.length,1);assert(again.disposed);assert.equal(left.notebook.state.id,b.id);assert.equal(left.notebook.state.title,'Beta');
+  bench.dispose();
+});
+
+test('switching away from a draft that cannot be saved offers to switch without saving',async()=>{
+  const a=newDraft('Alpha'),b=newDraft('Beta');a.autoRun=b.autoRun=false;
+  const {bench,store}=fakeWorkbench(new Map([[a.id,a],[b.id,b]]));
+  const left=await bench.addPanel('left');await left.notebook.initialize({id:a.id});
+  store.conflicts.add(a.id);
+  const error=await left.notebook.replace(structuredClone(b)).catch(error=>error);
+  assert.equal(error.name,'UnsavedError');assert.equal(left.notebook.state.id,a.id);
+  assert.match(error.discardLabel,/Switch without saving/);
+  await error.discard();assert.equal(left.notebook.state.id,b.id);
+  bench.dispose();
 });

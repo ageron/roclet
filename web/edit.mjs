@@ -117,6 +117,17 @@ async function openSideDialog() {
   if (active().notebook.state) group('This notebook', [choice('Independent copy of this notebook', () => ({ record: independentCopy(active().notebook.state) }))]);
   $('side-dialog').showModal();
 }
+// Downloads the panel's current revision; a draft that then fails to save
+// (another tab changed it) may still be closed or switched away from.
+async function downloadCopy(target) {
+  const notebook = target.notebook, result = await notebook.inspect('export');
+  if (notebook.state.format === 'roc' && result.status !== 'ok') throw new Error('Fix the errors before downloading runnable Roc, or switch to Markdown to save unfinished source.');
+  const url = URL.createObjectURL(new Blob([result.source], {type:'text/plain;charset=utf-8'}));
+  const link = document.createElement('a'); link.href = url; link.download = `${(notebook.state.title || 'notebook').replace(/[^a-z0-9._ -]/gi, '_')}.${notebook.state.format === 'roc' ? 'roc' : 'md'}`; link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  notebook.markDownloaded();
+  target.notice('Download requested for a separate copy. The original file is not updated.');
+}
 function closePanel(slot) {
   const right = bench.right, target = bench.panel(slot);
   if (!right) return;
@@ -193,14 +204,7 @@ function bind() {
     $('project-remove').onclick=()=>{project.removeProjectFile($('project-select').value);showProjectFile(target);};
     showProjectFile(target,project.state.files?.[0]?.path);$('project-dialog').showModal();
   };
-  $('download').onclick = () => { const target = active(); return target.perform(async () => {
-    const notebook = target.notebook, result = await notebook.inspect('export');
-    if (notebook.state.format === 'roc' && result.status !== 'ok') throw new Error('Fix the errors before downloading runnable Roc, or switch to Markdown to save unfinished source.');
-    const url = URL.createObjectURL(new Blob([result.source], {type:'text/plain;charset=utf-8'}));
-    const link = document.createElement('a'); link.href = url; link.download = `${(notebook.state.title || 'notebook').replace(/[^a-z0-9._ -]/gi, '_')}.${notebook.state.format === 'roc' ? 'roc' : 'md'}`; link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    target.notice('Download requested for a separate copy. The original file is not updated.');
-  }); };
+  $('download').onclick = () => { const target = active(); return target.perform(() => downloadCopy(target)); };
   $('share').onclick=()=>{
     const target=active();closeMenus();$('share-dialog').showModal();$('share-results').checked=!!target.notebook.result?.evaluation?.values?.length;$('share-debug').checked=false;$('share-type').dispatchEvent(new Event('change'));
     $('export-share').onclick=()=>target.perform(async()=>{
@@ -273,6 +277,7 @@ try {
     const panel = new NotebookPanel({ root:panelRoot, prefix, bytes:binary, highlighter, store, preferences, onActivate, onChange,
       loadPackage:details=>prompts.request({...details,requester:panel.title}) });
     panel.part('close-panel').onclick = () => closePanel(bench.slotOf(panel));
+    panel.download = () => downloadCopy(panel);
     return panel;
   };
   bench = new Workbench({ container:$('workbench'), createPanel, store:drafts, narrow:matchMedia('(max-width: 899px)'), onChange:(_,reason)=>reflectHeader(reason), onLayout:()=>renderTabs() });
