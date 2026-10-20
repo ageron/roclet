@@ -64,8 +64,9 @@ function mergeCheckedResults(previous, result, state) {
 // Browser-owned edit history, persistence and worker lifecycle. Parsing, output
 // selection, lowering and encoding are exclusively the shared Roc document core.
 export class Notebook {
-  constructor(bytes, store, { session = new DocumentSession(bytes), debounce = 550, timeout = 15000, onChange = () => {} } = {}) {
+  constructor(bytes, store, { session = new DocumentSession(bytes), debounce = 550, timeout = 15000, onChange = () => {}, loadPackage } = {}) {
     this.store = store; this.session = session; this.debounce = debounce; this.timeout = timeout; this.onChange = onChange;
+    this.loadPackage = loadPackage;
     this.state = null; this.result = null; this.history = []; this.future = []; this.views = new Map();
     this.diagnosticsDeferred = false; this.baseline = null;
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
@@ -175,6 +176,18 @@ export class Notebook {
     if (result.graph) this.baseline = {id:this.state.id,result:this.result};
     return this.result;
   }
+  async request(request,{onPackageWaiting}={}) {
+    const runId=this.runId;
+    try {
+      return await this.session.request(request,{loadPackage:this.loadPackage,onPackageWaiting:waiting=>{
+        if(runId!==this.runId) return;
+        this.status=waiting?'Waiting for package bundle…':'Running…';this.emit();onPackageWaiting?.(waiting);
+      }});
+    } catch(error) {
+      if(runId===this.runId && error.name==='AbortError') {this.status='Package loading cancelled · run to retry';this.emit();}
+      throw error;
+    }
+  }
   async check() {
     try {
       const result = await this.inspect('analyze'); this.publish(result);
@@ -190,9 +203,11 @@ export class Notebook {
     if (runId !== this.runId) return null;
     this.status = 'Running…'; this.emit();
     const started = performance.now();
-    const timeout = setTimeout(() => { if (runId === this.runId) this.stop('Stopped after 15 seconds · automatic execution paused'); }, this.timeout);
+    let timeout;
+    const armTimeout=()=>{timeout=setTimeout(() => { if (runId === this.runId) this.stop('Stopped after 15 seconds · automatic execution paused'); }, this.timeout);};
+    armTimeout();
     try {
-      const result = await this.session.request(request);
+      const result = await this.request(request,{onPackageWaiting:waiting=>{clearTimeout(timeout);if(!waiting)armTimeout();}});
       if (runId !== this.runId || revision !== this.state.revision || id !== this.state.id) return null;
       this.publish(result);
       const count=this.result.evaluation?.values?.length ?? 0, results=`${count} ${count===1?'result':'results'}`;
@@ -216,7 +231,7 @@ export class Notebook {
       const c=candidate.cells[edit.cell]; c.source=c.source.slice(0,edit.from)+edit.insert+c.source.slice(edit.to); c.outputs=[];
     }
     candidate.sourceCurrent=false;
-    const checked = await this.session.request(requestFor(candidate,'analyze'));
+    const checked = await this.request(requestFor(candidate,'analyze'));
     if (token!==this.runId || revision!==this.state.revision || id!==this.state.id) throw new DOMException('Document changed','AbortError');
     if (checked.status!=='ok') throw new Error('The renamed document does not type-check. No changes were applied.');
     const original=edits.find(e=>e.cell===cell && e.from<=position && position<=e.to);
@@ -237,7 +252,7 @@ export class Notebook {
     this.status = 'Preparing document…'; this.emit();
     // Structural edits need spans for the editable cells, not imported source
     // that may still contain markers or saved-output comments.
-    const result = await this.session.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target));
+    const result = await this.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target));
     if (token !== this.runId || revision !== this.state.revision || id !== this.state.id) throw new DOMException('Document changed', 'AbortError');
     if (!result.model) throw new Error(result.failure ?? 'The document engine could not read this draft.');
     this.status = result.status === 'ok' ? (this.result?.evaluation?.status === 'ok' && Array.isArray(this.result.evaluation.values) ? 'Current' : 'Ready') : 'Needs attention'; this.emit();

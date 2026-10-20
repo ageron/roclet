@@ -100,6 +100,7 @@ pub fn main(init: std.process.Init) !void {
         "web/workspace.mjs",
         "web/build-cache.mjs",
         "web/packages.mjs",
+        "web/package-dialog.mjs",
         "web/package-download.mjs",
         "web/package-config.json",
         "demos/04-meeting-windows.roc",

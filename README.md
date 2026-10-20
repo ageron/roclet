@@ -67,7 +67,10 @@ Roclet is heading.
 Add supporting modules through **File → Project files**. Roc package declarations
 use the notebook's normal app header. Browser builds cache compiler artifacts and
 verified packages locally; warm edits reuse them without downloading dependencies
-again. Portable Roclet bundles include your attached project sources.
+again. If a package host blocks browser downloads, Roclet offers a download link
+and lets you load the bundle from your computer, verifying its hash before use.
+This works on a completely static host. Portable Roclet bundles include your
+attached project sources.
 
 ## License
 

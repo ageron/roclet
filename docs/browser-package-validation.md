@@ -4,12 +4,37 @@ Tested on 2026-10-20 (Australia/Melbourne) with Chrome 153.0.8010.52. The Roc
 compiler pin is `7894793d1454103d47c4368c942b3fec1406e8fd`.
 
 Direct GitHub release downloads fail browser CORS (`MissingAllowOriginHeader`).
-The supported workflow uses a download proxy while retaining the original Roc
-package URL and hash. Notebook compilation and evaluation stay in the browser.
-A hosted Pages deployment needs a separately deployed HTTPS proxy endpoint
-before its external-package examples can download dependencies.
+Downloads are direct by default. If downloading fails, Roclet offers the original
+archive URL and a file picker for a user-downloaded `.tar.zst`. Roc verifies the
+content hash and archive before using or caching those bytes, then resumes the
+notebook. This supports GitHub Pages and other completely static hosts without
+a backend. Notebook compilation and evaluation stay in the browser.
 
-## Download service
+## Static file-picker fallback
+
+Chrome at 1280×960 and 390×960 passes the actual file-picker flow with no proxy
+configured and real released roc-time, roc-parser, and transitive Unicode bundles.
+A malformed archive and a valid archive for the wrong package are both rejected
+without entering IndexedDB. Loading the matching file resumes evaluation; missing
+transitive dependencies prompt in turn. Cancel leaves the notebook editable and
+Run retries. Fresh workers restore all three verified archives without another
+file selection, including a worker with package networking explicitly disabled.
+The desktop test waits 16 seconds before selecting a file,
+confirming that the notebook execution timeout pauses during user interaction.
+
+For manual QA, serve the site statically and open
+`web/edit.html?example=meeting-windows`. Follow **Download bundle**, then
+**Load bundle…**. Try an incorrect file before loading the released roc-time
+bundle. The six outputs and two assertions should appear automatically.
+
+`tools/browser-package-load-probe.mjs` automates this using Chrome's native file
+picker through `tools/browser-check.mjs --upload-plan <plan.json>`. The plan is a
+JSON array of five arrays of absolute file paths: a malformed archive, roc-time,
+roc-time again (wrong package for the parser prompt), roc-parser 2.0.0, and Unicode
+4.2.0. Run with `--page 'web/edit.html?example=meeting-windows'` and the probe as
+`--script`; add `--viewport 390x960` for compact layout.
+
+## Optional download service
 
 The bundled `roclet-serve` exposes `/api/packages/`. It accepts GitHub release
 `.tar.zst` archives containing Roc content hashes, verifies BLAKE3 before caching,
@@ -17,9 +42,9 @@ limits redirects to GitHub asset hosts, bounds archive size and cache memory,
 and applies a download deadline. The browser's compiler independently verifies
 and unbundles the archive before persisting it under its original URL identity.
 
-`web/package-config.json` selects the endpoint. The default works with the
-bundled local server. A static host can select an external HTTPS endpoint; see
-[deployment instructions](installation.md#package-downloads-on-a-static-host).
+`web/package-config.json` defaults to `"endpoint": null`. Set an endpoint to
+opt into proxy downloads: `"../api/packages/"` with the bundled server, or an
+external HTTPS URL. See [deployment instructions](installation.md#optional-automatic-package-proxy).
 The configuration is loaded only when an uncached package needs downloading.
 
 The real released roc-parser 2.0.0 archive and its transitive Unicode 4.2.0
@@ -36,7 +61,7 @@ zig build
 In another terminal:
 
 ```sh
-node tools/browser-check.mjs --base-url http://127.0.0.1:4179 \
+node tools/browser-check.mjs --package-endpoint http://127.0.0.1:4179/api/packages/ \
   --page web/edit.html --script tools/browser-package-probe.mjs
 ```
 
@@ -78,7 +103,7 @@ their source. The probe deliberately breaks one expected value, verifies that
 the failed test keeps all independent tables visible, then restores it.
 
 ```sh
-node tools/browser-check.mjs --base-url http://127.0.0.1:4179 \
+node tools/browser-check.mjs --package-endpoint http://127.0.0.1:4179/api/packages/ \
   --page 'web/edit.html?example=meeting-windows' \
   --script tools/browser-time-probe.mjs \
   --screenshot /tmp/roclet-time.png
@@ -135,7 +160,7 @@ pass all 46 contracts at both widths, alongside the lifecycle and rich-output
 contracts. Document parity covers 226 complete native/WASM responses and 80
 fresh-worker runs; all 146 native document contracts also pass.
 
-Packaging verifies all 82 offline assets, including the demo and download
+Packaging verifies all 83 offline assets, including the demo and download
 configuration. Result rendering uses reusable functions, avoiding Roc’s empirical
 compile-time branch-coverage warning for a top-level match on the current value.
 No diagnostics are suppressed. The probe verifies the warning is absent for both

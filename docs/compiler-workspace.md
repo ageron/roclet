@@ -140,9 +140,9 @@ The merged ReleaseFast native/WASM pair passes:
   links, dependency changes, selected-cell execution, undo, and persistence.
 - Real released roc-parser 2.0.0 with transitive Unicode 4.2.0, and roc-time 0.2.0,
   through local and separate-origin archive proxy configurations.
-- Native unit/workspace checks, 11 Node unit contracts, nine Node workspace tests,
+- Native unit/workspace checks, 11 Node unit contracts, 13 Node workspace tests,
   five ordinary-Roc demo/fixture runs against an extracted Display package,
-  artifact verification, and packaging with 82 verified offline assets.
+  artifact verification, and packaging with 83 verified offline assets.
 
 The formatted calendar notebook evaluates six outputs and two assertions with
 one frontend build and one lowering, including fresh-worker restoration with
@@ -162,14 +162,26 @@ execution pass within the 512 MiB retained-revision arena.
 
 ## Package hosting
 
-Direct GitHub release downloads are blocked by browser CORS. The bundled
-`roclet-serve` provides a bounded, hash-verifying archive proxy. A configurable
-endpoint supports static hosting while preserving original package identities
-and compilation in the browser. GitHub Pages needs a separately deployed HTTPS
-endpoint for first-time downloads of external packages; this repository does not
-provision that service. The pinned Display implementation is embedded and works
-offline without a proxy.
+Package downloads are direct by default. When CORS restrictions or network errors
+prevent downloading, the notebook shows the original archive URL and a file
+picker. The user downloads and selects the bundle; Roc validates its content hash
+and archive before mounting it and persisting the verified bytes. Incorrect files
+can be retried, missing transitive dependencies prompt separately, and compilation
+resumes after loading. The execution timeout pauses while awaiting user input.
+This works on GitHub Pages and other completely static hosts without a backend.
+
+The static flow passes real-file-picker Chrome tests at desktop and compact
+widths using released roc-time, roc-parser, and Unicode archives. The probes
+reject malformed files and a valid archive for the wrong package, verify Cancel
+and retry, and restore user-loaded packages after worker restart with package
+networking disabled. The desktop
+probe waits 16 seconds to check that user interaction does not time out execution.
+
+An optional bounded, hash-verifying GitHub archive proxy is included in
+`roclet-serve`. Configure its endpoint for automatic downloads from GitHub Releases;
+otherwise users load bundles through the default static workflow. The pinned
+Display implementation is embedded and works offline without prompting.
 
 See the [real-package validation report](browser-package-validation.md) for
 reproduction and [hosting instructions](installation.md#package-downloads-on-a-static-host)
-for endpoint configuration and deployment.
+for the static workflow and optional proxy configuration.

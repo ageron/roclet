@@ -122,3 +122,59 @@ test('configured downloader routes GitHub releases while retaining other package
   const direct=await configuredPackageFetch({configUrl,fetch:async url=>String(url)===configUrl.href?Response.json({endpoint:null}):(requested.push({url:String(url)}),new Response())});
   await direct(source,{});assert.equal(requested.at(-1).url,source);
 });
+
+test('file fallback verifies each package and transitive dependency before caching, then restores offline',async()=>{
+  const cache=new BuildCache('file-fallback:packages',{indexedDB:null});await cache.clear();
+  const urls=['https://packages.invalid/main.tar.zst','https://packages.invalid/dependency.tar.zst'],mounted=new Set(),prompts=[];
+  const transport=()=>mounted.has(urls[0]) && mounted.has(urls[1])?{status:'ok'}:{packagesRequired:[{url:mounted.has(urls[0])?urls[1]:urls[0]}]};
+  transport.installPackage=(url,bytes)=>{if(bytes[0]!==urls.indexOf(url)+1)return false;mounted.add(url);return true;};
+  let selections=0;
+  const packages=new BrowserPackages(cache,{fetch:async()=>{throw new TypeError('Failed to fetch');},loadBundle:async details=>{
+    prompts.push(details);selections++;
+    if(selections===2) assert.deepEqual(decodeCacheStream(await cache.load()),[],'Rejected file must never enter the cache');
+    return new Uint8Array([selections===1?99:urls.indexOf(details.url)+1]);
+  }});
+  assert.equal((await packages.evaluate(transport,{})).status,'ok');
+  assert.deepEqual(prompts.map(p=>[p.url,p.retry]),[[urls[0],false],[urls[0],true],[urls[1],false]]);
+  assert.match(prompts[1].error,/invalid archive or content hash/);
+  assert.equal(decodeCacheStream(await cache.load()).length,2);
+  mounted.clear();
+  const offline=new BrowserPackages(new BuildCache('file-fallback:packages',{indexedDB:null}),{fetch:()=>{throw Error('Offline');},loadBundle:()=>{throw Error('Verified packages should not prompt');}});
+  assert.equal((await offline.evaluate(transport,{})).status,'ok');await cache.clear();
+});
+
+test('cancelling a file fallback leaves no cached package',async()=>{
+  const cache=new BuildCache('cancel-file:packages',{indexedDB:null});await cache.clear();
+  const transport=()=>({packagesRequired:[{url:'https://packages.invalid/main.tar.zst'}]});
+  transport.installPackage=()=>{throw Error('No archive was selected');};
+  const packages=new BrowserPackages(cache,{fetch:async()=>new Response('',{status:404}),loadBundle:()=>{throw new DOMException('Cancelled','AbortError');}});
+  await assert.rejects(packages.evaluate(transport,{}),{name:'AbortError'});
+  assert.deepEqual(decodeCacheStream(await cache.load()),[]);
+});
+
+test('session pauses for file selection and rejects stale selections after worker cancellation',async()=>{
+  const workers=[];class Worker {constructor(){this.sent=[];workers.push(this);} postMessage(data){this.sent.push(data);} terminate(){this.terminated=true;}}
+  const session=new DocumentSession(new ArrayBuffer(1),Worker),waiting=[];let select,signal;
+  const request=session.request({source:'one'},{onPackageWaiting:value=>waiting.push(value),loadPackage:details=>{signal=details.signal;return new Promise(resolve=>{select=resolve;});}});
+  workers[0].onmessage({data:{packageNeeded:{url:'https://packages.invalid/main.tar.zst',error:'Failed to fetch'}}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(signal.aborted,false);assert(session.pending);assert.deepEqual(waiting,[true]);
+  select(new Uint8Array([1]));await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(workers[0].sent.at(-1).packageBundle.bytes[0],1);assert.deepEqual(waiting,[true,false]);
+  workers[0].onmessage({data:{result:{status:'ok'}}});assert.equal((await request).status,'ok');assert(signal.aborted);
+  let late;
+  const cancelled=session.request({source:'two'},{loadPackage:details=>{signal=details.signal;return new Promise(resolve=>{late=resolve;});}});
+  workers[0].onmessage({data:{packageNeeded:{url:'https://packages.invalid/other.tar.zst'}}});await new Promise(resolve=>setImmediate(resolve));
+  const rejection=assert.rejects(cancelled,{name:'AbortError'});session.stop();await rejection;assert(signal.aborted);
+  const count=workers[0].sent.length;late(new Uint8Array([9]));await new Promise(resolve=>setImmediate(resolve));assert.equal(workers[0].sent.length,count);
+});
+
+test('notebook execution timeout pauses while a user chooses a package file',async()=>{
+  const {Notebook,newDraft}=await import('../web/edit-model.mjs');let stopped=false;
+  const session={invalidate(){},stop(){stopped=true;},async request(request,{onPackageWaiting}){
+    onPackageWaiting(true);await new Promise(resolve=>setTimeout(resolve,80));assert.equal(stopped,false);
+    onPackageWaiting(false);return {status:'ok',model:{cells:[]},evaluation:{values:[],tests:[],events:[]}};
+  }};
+  const notebook=new Notebook(null,{save:async()=>{}},{session,timeout:20});notebook.state=newDraft();notebook.state.autoRun=false;
+  assert.equal((await notebook.run()).status,'ok');assert(notebook.status.startsWith('Current'));notebook.dispose();
+});

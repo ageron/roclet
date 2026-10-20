@@ -99,12 +99,21 @@ files use Roc's file import, for example
 Packages use ordinary Roc app-header declarations and compiler-resolved content
 identities. A synchronous compile can return `packagesRequired` containing URLs.
 The worker downloads those archives asynchronously, asks Roc to validate their
-content hashes and unbundle them, then resumes compilation. The configurable
-archive downloader uses the bundled server for GitHub releases; static hosts can
-select a separate HTTPS endpoint in `web/package-config.json`. Other package
-servers must allow browser CORS. Verified archives are cached separately and can be restored
-into a fresh worker without network access. JavaScript does not resolve Roc
-imports or implement another package manager.
+content hashes and unbundle them, then resumes compilation. Downloads are direct
+by default (`endpoint: null`). If downloading fails, the notebook offers the
+original package URL and a file picker for the downloaded `.tar.zst`. Selected
+bytes go to the same compiler verification path; invalid files are rejected
+without caching, and the user can retry. Missing transitive dependencies prompt
+in turn. The execution timeout pauses during file selection. Cancelling or
+editing the document aborts the pending selection and prevents stale bytes from
+reaching a replacement worker.
+
+Verified archives are cached separately and can be restored into a fresh worker
+without network access. A completely static host supports this flow. An optional
+GitHub archive proxy can be configured in `web/package-config.json`; the bundled
+server exposes `/api/packages/`, or a deployment can use an external HTTPS
+endpoint. JavaScript does not resolve Roc imports or implement another package
+manager.
 
 The browser shares an already compiled `WebAssembly.Module` across worker
 restarts. Stop/edit cancellation can therefore replace a worker without copying

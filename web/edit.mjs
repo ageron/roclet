@@ -5,6 +5,7 @@ import { CellEditor, editorFor } from './cell-editor.mjs';
 import { symbolAt, completionOptions } from './compiler-tools.mjs';
 import { CompilerHighlighter } from './roc-highlighting.mjs';
 import { DraftStore } from './edit-store.mjs';
+import { loadPackageBundle } from './package-dialog.mjs';
 import { renderMarkdown } from './markdown-view.mjs';
 import { renderDisplay } from './display-view.mjs';
 import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './edit-cells.mjs';
@@ -621,7 +622,7 @@ try {
     onSelection:positions=>{if(notebook?.state){notebook.state.headerSelection=positions;notebook.group=null;}},
     onComposition:value=>{composing=value;if(value)clearTimeout(notebook.timer);else notebook.schedule();},
   });
-  notebook = new Notebook(binary, store, {onChange:reflect});
+  notebook = new Notebook(binary, store, {onChange:reflect,loadPackage:loadPackageBundle});
   const dispose=notebook.dispose.bind(notebook);
   notebook.dispose=()=>{highlighter.dispose();sourceEditor.destroy();headerEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
   bind(); await notebook.initialize();

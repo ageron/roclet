@@ -11,6 +11,7 @@ const root=resolve(import.meta.dirname,'..'),page=option('--page','web/workspace
 const timeout=Number(option('--timeout','120000')),profile=await mkdtemp(resolve(tmpdir(),'roclet-browser-'));
 const networkLog=option('--network-log',null),requests=new Map(),networkFailures=[];
 const packageEndpoint=option('--package-endpoint',null);
+const uploadPlanFile=option('--upload-plan',null),uploads=uploadPlanFile?JSON.parse(await readFile(uploadPlanFile,'utf8')):[];
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const types={'.mjs':'text/javascript','.js':'text/javascript','.wasm':'application/wasm','.html':'text/html; charset=utf-8','.json':'application/json','.css':'text/css','.svg':'image/svg+xml'};
 const server=createServer(async(req,res)=>{
@@ -48,6 +49,14 @@ try {
     const value=JSON.parse(data);
     if(value.id){const item=pending.get(value.id);pending.delete(value.id);value.error?item.reject(new Error(JSON.stringify(value.error))):item.resolve(value.result);}
     else if(value.method==='Runtime.exceptionThrown')exceptions.push(value.params.exceptionDetails.exception?.description??value.params.exceptionDetails.text);
+    else if(value.method==='Page.fileChooserOpened' && uploadPlanFile) {
+      const files=uploads.shift();
+      if(!files) exceptions.push('Unexpected file picker: upload plan exhausted');
+      else send('DOM.setFileInputFiles',{backendNodeId:value.params.backendNodeId,files:files.map(path=>resolve(path))}).catch(error=>exceptions.push(error.message));
+    }
+    else if(value.method==='Runtime.bindingCalled' && value.params.name==='__rocletFilePicker') {
+      send('Runtime.evaluate',{expression:`document.querySelector(${JSON.stringify(value.params.payload)}).click()`,userGesture:true}).catch(error=>exceptions.push(error.message));
+    }
     else if(networkLog && value.method==='Network.requestWillBeSent')requests.set(value.params.requestId,{url:value.params.request.url,type:value.params.type});
     else if(networkLog && value.method==='Network.loadingFailed')networkFailures.push({...requests.get(value.params.requestId),errorText:value.params.errorText,blockedReason:value.params.blockedReason,corsErrorStatus:value.params.corsErrorStatus});
   });
@@ -58,6 +67,7 @@ try {
     return result.result?.value;
   };
   await send('Page.enable');await send('Runtime.enable');
+  if(uploadPlanFile) {await send('Page.setInterceptFileChooserDialog',{enabled:true});await send('Runtime.addBinding',{name:'__rocletFilePicker'});}
   if(networkLog)await send('Network.enable');
   // Native focus events are required by editor and iframe UI contracts.
   // Headless Chrome otherwise changes activeElement in a background document
@@ -83,9 +93,10 @@ try {
     }
   }
   const screenshot=option('--screenshot',null);
-  if(screenshot){const {data}=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});await writeFile(screenshot,Buffer.from(data,'base64'));console.log(`Screenshot: ${screenshot}`);}
+  if(screenshot){const {data}=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:!args.includes('--viewport-screenshot')});await writeFile(screenshot,Buffer.from(data,'base64'));console.log(`Screenshot: ${screenshot}`);}
   if(networkLog)await writeFile(networkLog,JSON.stringify(networkFailures,null,2)+'\n');
   if(exceptions.length)throw new Error(exceptions.join('\n'));
+  if(uploads.length)throw new Error(`${uploads.length} file selections from the upload plan were not exercised`);
 } finally {
   socket?.close();chrome.kill();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
   if(chrome.exitCode==null)await new Promise(resolve=>{chrome.once('exit',resolve);setTimeout(resolve,3000);});

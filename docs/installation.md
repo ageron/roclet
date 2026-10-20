@@ -102,10 +102,13 @@ Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
   beside their source, and dependency edits rerun affected tests. Failed tests
   keep independent results visible. Tests in imported packages do not run.
 - Declare packages in the notebook's app header using normal Roc dependency
-  syntax. The bundled server proxies GitHub release archives to handle browser
-  CORS restrictions. Roc verifies their original content hashes, and verified
-  packages are cached locally for reuse without a network connection. Other
-  package hosts must allow browser requests themselves.
+  syntax. Roclet tries downloading directly. If the host blocks browser access
+  or the download fails, a **Load package bundle** dialog links to the original
+  archive. Download the `.tar.zst`, click **Load bundle…**, and select the file.
+  Roc verifies its content hash before using or caching it, then resumes the
+  notebook. An incorrect file can be retried; Cancel leaves the notebook editable.
+  Additional dependencies may request their own bundle. Verified packages are
+  cached locally for reuse without a network connection.
 
 For example, attach `Shapes/Wall.roc` and import it with `import Shapes/Wall`.
 A text attachment can be imported with
@@ -115,7 +118,8 @@ file invalidates the results that depend on the workspace.
 The [demos](../demos/README.md) have **Open demo** links for the hosted app.
 For local use, download the source file and open it in Roclet. The
 [meeting-window demo](../demos/04-meeting-windows.roc) uses the released roc-time
-0.2.0 package. With the bundled server running, open
+0.2.0 package. Download and load its bundle when prompted on first use. With the
+bundled server running, open
 <http://127.0.0.1:4173/web/edit.html?example=meeting-windows>.
 
 Roclet's native runner accepts notebooks too:
@@ -159,22 +163,36 @@ preserving relative paths. It contains the compiler, demos, and offline assets.
 
 ### Package downloads on a static host
 
-GitHub release downloads do not permit browser CORS requests. The default
-[`web/package-config.json`](../web/package-config.json) points to the bundled
-server's `/api/packages/` endpoint, which works automatically for local use.
-GitHub Pages cannot run that endpoint. For a static deployment, host the same
-service separately behind HTTPS:
+No application backend is required. The default
+[`web/package-config.json`](../web/package-config.json) has `"endpoint": null`,
+so package downloads go directly to their original URLs. Hosts that permit CORS
+work automatically. GitHub release downloads do not permit browser CORS requests;
+Roclet then offers a link to download the archive through the browser and a
+**Load bundle…** file picker. The file is read locally and verified by Roc against
+the hash in its original package URL before use or caching. A file picker is an
+explicit user permission to read a local file and does not require host CORS.
+
+Load each missing dependency when prompted. Later runs and worker restarts reuse
+verified archives from browser storage. This flow works on GitHub Pages and
+other completely static hosts, including when no proxy has been deployed.
+
+### Optional automatic package proxy
+
+To download GitHub release packages automatically, configure a proxy endpoint.
+The bundled server already exposes `/api/packages/`; for local use, set
+`"endpoint": "../api/packages/"` in `web/package-config.json`. For an external
+service, run the same server behind HTTPS:
 
 ```sh
 ./roclet-serve . 4173 --proxy-only --bind 0.0.0.0
 ```
 
-Put an HTTPS reverse proxy in front of that port. Set `endpoint` in
-`web/package-config.json` to the public endpoint, for example
-`"https://packages.example.org/api/packages/"`, **before** running
-`zig build package`. Keep the trailing slash. Repackage after every configuration
-change so the offline asset manifest matches the published bytes. This repository
-does not provision or deploy an external proxy service.
+Put an HTTPS reverse proxy in front of that port and set `endpoint` to its public
+URL, for example `"https://packages.example.org/api/packages/"`. Keep the trailing
+slash. Configure the endpoint **before** running `zig build package`; repackage
+after configuration changes so the offline manifest matches the published bytes.
+GitHub Pages cannot run the proxy itself. Deploying this optional service is
+outside this repository; manual bundle loading remains available if it fails.
 
 The service accepts only GitHub `.tar.zst` release archives with Roc content
 hashes. It validates redirect destinations and archive hashes, limits archives
@@ -183,10 +201,6 @@ deadline. Its memory cache holds at most eight archives and 64 MiB. Public CORS
 responses allow the browser app to use a separately hosted endpoint. Notebook
 sources and compilation stay in the browser; only archive downloads use the
 service. Browser cache identities retain the original package URLs.
-
-Set `endpoint` to `null` to download directly from hosts that permit CORS.
-Already verified browser packages can be restored without contacting the service.
-
 
 Existing offline users can prepare the updated version through
 **File → Offline & storage**, then close all Roclet tabs and reopen.

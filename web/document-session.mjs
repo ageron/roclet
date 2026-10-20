@@ -51,11 +51,12 @@ export class DocumentSession {
     this.files = new Map();
     this.graph = null;
     this.engineBaseline = false;
+    this.pending?.controller.abort();
     this.pending?.reject(new DOMException('Stopped', 'AbortError'));
     this.pending = null;
   }
   invalidate() { if (this.pending) this.stop(); }
-  request(request) {
+  request(request,{loadPackage,onPackageWaiting}={}) {
     this.invalidate();
     const fresh = !this.worker;
     const worker = this.worker ??= new this.WorkerType(new URL('./format-worker.mjs', import.meta.url), { type: 'module' });
@@ -71,13 +72,30 @@ export class DocumentSession {
       if(previous && JSON.stringify(previous)===this.graph && (!current || placeholder || JSON.stringify(current)===this.graph)) request={...request,reactivity};
     }
     return new Promise((resolve, reject) => {
-      this.pending = { resolve, reject };
+      const controller=new AbortController();
+      this.pending = { resolve, reject, controller };
       worker.onmessage = ({ data }) => {
         if (this.worker !== worker || this.pending?.resolve !== resolve) return;
+        if(data.packageNeeded) {
+          if(!loadPackage) {
+            this.pending=null;this.stop();controller.abort();reject(new Error(`Cannot download Roc package ${data.packageNeeded.url}: ${data.packageNeeded.error}`));return;
+          }
+          onPackageWaiting?.(true);
+          Promise.resolve().then(()=>loadPackage({...data.packageNeeded,signal:controller.signal})).then(bytes=>{
+            if(this.worker!==worker || this.pending?.resolve!==resolve) return;
+            onPackageWaiting?.(false);
+            worker.postMessage({packageBundle:{bytes}},[bytes.buffer]);
+          }).catch(error=>{
+            if(this.worker!==worker || this.pending?.resolve!==resolve) return;
+            this.pending=null;this.stop();controller.abort();reject(error);
+          });
+          return;
+        }
         this.pending = null;
+        controller.abort();
         if (data.error) {
           this.stop();
-          reject(new Error(data.error));
+          const error=new Error(data.error);error.name=data.errorName??'Error';reject(error);
         } else {
           this.engineBaseline=!!data.result.workspaceCache;
           if(data.result.graph && ['ok','partial'].includes(data.result.status)) this.graph=JSON.stringify(data.result.graph);
@@ -87,6 +105,7 @@ export class DocumentSession {
       worker.onerror = error => {
         if (this.worker !== worker) return;
         this.pending = null;
+        controller.abort();
         this.stop();
         reject(new Error(error.message));
       };

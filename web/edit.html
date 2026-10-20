@@ -158,6 +158,15 @@ dialog { background:var(--page); }
 <textarea id="project-source" aria-label="Project file source" rows="12" spellcheck="false"></textarea>
 <button id="project-save">Save file</button><p id="project-status" role="status"></p>
 </dialog>
+<dialog id="package-dialog" aria-labelledby="package-title"><div class="dialog-title"><h2 id="package-title">Load package bundle</h2><button data-close aria-label="Cancel package loading">×</button></div>
+<p>This package couldn't be downloaded automatically. Its host may block browser access, or the network may be unavailable.</p>
+<p><a id="package-download" target="_blank" rel="noopener noreferrer">Download bundle ↗</a></p>
+<p id="package-url" class="quiet" style="overflow-wrap:anywhere"></p>
+<p>Download the <code>.tar.zst</code> file, then load it below. Roclet verifies the package hash before using it and caches verified bundles in this browser. Additional dependencies may ask for their own bundle.</p>
+<button id="package-load">Load bundle…</button><input id="package-file" type="file" accept=".tar.zst" aria-label="Load downloaded package bundle" hidden>
+<button data-close>Cancel</button><p id="package-status" role="status" aria-live="polite"></p>
+<details><summary>Download details</summary><pre id="package-error" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
+</dialog>
 <dialog id="dependencies-dialog" aria-labelledby="dependencies-title"><div class="dialog-title"><h2 id="dependencies-title">Dependencies & timing</h2><button data-close aria-label="Close dependencies">×</button></div><div id="dependencies-content"></div></dialog>
 <dialog id="rename-dialog" aria-labelledby="rename-title"><div class="dialog-title"><h2 id="rename-title">Rename binding</h2><button data-close aria-label="Close rename">×</button></div><p>Update this definition and its resolved references across the notebook.</p><input id="rename-name" aria-label="New binding name" autocomplete="off"><button id="rename-apply">Rename</button><p id="rename-error" role="status"></p></dialog>
 <dialog id="generated-dialog" aria-labelledby="generated-title"><div class="dialog-title"><h2 id="generated-title">Runnable Roc</h2><button data-close aria-label="Close runnable Roc">×</button></div><pre id="generated"></pre></dialog>
