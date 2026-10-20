@@ -48,6 +48,16 @@ pub const Suite = struct {
         try expect(eq(str(result, "status"), str(wanted, "status")));
         const model = field(result, "model");
         const cells = field(model, "cells").array.items;
+        if (wanted.object.get("compact")) |_| {
+            for ([_][]const u8{ "draft", "source", "program", "execution" }) |key| try expect(result.object.get(key) == null);
+            try expect(model.object.get("original") == null);
+            try expect(result.object.get("mappings") != null);
+            for (cells) |cell| {
+                for ([_][]const u8{ "facts", "blocks", "first_block", "marker_lines", "source_map" }) |key| try expect(cell.object.get(key) == null);
+                for ([_][]const u8{ "source", "body_start", "output", "outputs" }) |key| try expect(cell.object.get(key) != null);
+            }
+        }
+
         for ([_][]const u8{ "kinds", "ids" }) |key| if (wanted.object.get(key)) |expected| {
             var index: usize = 0;
             for (cells) |cell| {
@@ -90,10 +100,39 @@ pub const Suite = struct {
         if (wanted.object.get("absent")) |items| for (items.array.items) |item| try expect(std.mem.find(u8, str(result, "source"), item.string) == null);
         if (wanted.object.get("no_evaluation")) |_| try expect(result.object.get("evaluation") == null);
         if (wanted.object.get("exact")) |_| try expect(eq(str(request, "source"), str(result, "source")));
+        if (wanted.object.get("tests_passed")) |expected| {
+            const tests = field(field(result, "evaluation"), "tests").array.items;
+            try expect(tests.len == expected.array.items.len);
+            for (tests, expected.array.items) |actual, passed| try expect(field(actual, "passed").bool == passed.bool);
+        }
+        if (wanted.object.get("test_location_text")) |expected| {
+            const tests = field(field(result, "evaluation"), "tests").array.items;
+            try expect(tests.len > 0);
+            const start: usize = @intCast(field(tests[0], "start").integer);
+            const end: usize = @intCast(field(tests[0], "end").integer);
+            const input = str(request, "source");
+            try expect(end <= input.len and eq(input[start..end], expected.string));
+            try expect(field(tests[0], "cell") == .integer);
+        }
         if (wanted.object.get("evaluated_values")) |expected| {
             const values = field(field(result, "evaluation"), "values").array.items;
             try expect(values.len == expected.array.items.len);
             for (values, expected.array.items) |actual, value_text| try expect(eq(str(actual, "text"), value_text.string));
+        }
+        if (wanted.object.get("evaluation_diagnostic_contains")) |expected| {
+            const diagnostics = field(field(result, "evaluation"), "diagnostics").array.items;
+            for (expected.array.items) |snippet| {
+                var found = false;
+                for (diagnostics) |diagnostic| if (std.mem.find(u8, str(diagnostic, "message"), snippet.string) != null) {
+                    found = true;
+                };
+                try expect(found);
+            }
+        }
+        if (wanted.object.get("root_errors")) |expected| {
+            const errors = field(field(result, "evaluation"), "root_errors").array.items;
+            try expect(errors.len == expected.array.items.len);
+            for (errors, expected.array.items) |actual, root| try expect(eq(str(actual, "root"), root.string));
         }
         if (wanted.object.get("display_kinds")) |expected| {
             const outputs = field(field(result, "evaluation"), "values").array.items;

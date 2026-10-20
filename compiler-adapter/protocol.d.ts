@@ -24,6 +24,11 @@ export interface Snapshot extends Token {
   cells: Cell[];
   roots: string[];
   modules?: { name: string; content: string }[];
+  /** Parser-backed top-level notebook tests, identified without rewriting source. */
+  expectations?: { root: string; start: number; end: number; cell?: number }[];
+  /** Browser session desired module set; changed UTF-8 files are mounted once.
+   * Main.roc is generated; ordinary modules live under /workspace/. */
+  files?: {path: string; source: string}[];
   /** Opt in to independent runtime failures; compile errors remain module-wide. */
   isolate_errors?: boolean;
 }
@@ -54,6 +59,7 @@ export interface Response extends Token {
   root_errors: {root: string; status: string; failure: string | null}[];
   evaluated_roots: string[];
   values: { root: string; text: string; display?: DisplayValue }[];
+  tests: { root: string; passed: boolean; message: string; cell?: number; start?: number; end?: number; location?: {line:number; column:number}; scope?: 'cell' | 'source' }[];
   events: Observation[];
   diagnostics: {
     title: string;
@@ -63,6 +69,22 @@ export interface Response extends Token {
     location: null | { start_line: number; start_column: number; end_line: number; end_column: number };
   }[];
   failure: string | null;
+  workspaceCache?: CompilerCacheStats;
+  /** Requests are emitted by Roc's own package resolver; browser fetches archives. */
+  packagesRequired?: {url: string; destination: string}[];
+}
+export interface CompilerCacheStats {
+  hits: number;
+  misses: number;
+  stores: number;
+  bytes_read: number;
+  bytes_written: number;
+  /** One prepared notebook graph/image serves every selected output. */
+  frontend_builds?: number;
+  lowerings?: number;
+  executions?: number;
+  prepared_hits?: number;
+  [counter: string]: number | undefined;
 }
 
 /** M1 formats. Conversion and parsing never execute notebook expressions. */
@@ -75,16 +97,21 @@ export interface DocumentRequest {
   target?: 'roc' | 'markdown';
   source: string;
   modules?: { name: string; content: string }[];
+  /** Desired ordinary module files, sent as raw byte changes by DocumentSession. */
+  files?: {path: string; source: string}[];
   /** M2 notebook editing retains explicit cell kinds without parsing an incomplete aggregate. */
   draft?: DocumentDraft;
-  /** evaluate only: output belonging to this model-cell index; the whole module is still checked. */
+  /** evaluate only: force the output and top-level expects in this cell; the whole module is checked. */
   selectedCell?: number;
   /** Evaluate only invalidated/forced roots. Prior strings are never execution inputs. */
-  reactivity?: {known: boolean; previous: DependencyGraph; current: DependencyGraph; roots: string[]; available: string[]; force: string[]};
+  /** Persistent browser engines may omit the confirmed baseline graphs. */
+  reactivity?: {known: boolean; previous?: DependencyGraph; current?: DependencyGraph; roots: string[]; available: string[]; force: string[]};
   forceAll?: boolean;
   isolateErrors?: boolean;
   /** Return typed MD4C rendering events for prose; never executable HTML. */
   render?: boolean;
+  /** analyze/evaluate only: omit duplicate sources and internal parser payloads. */
+  compact?: boolean;
 }
 export interface DocumentDraft {
   preamble: string;
@@ -109,15 +136,17 @@ export interface DocumentCell extends ByteSpan {
   /** Explicit or inferred; may be empty. Inferred IDs are not persistent IDs. */
   id: string;
   output: string;
+  /** Top-level expect execution roots associated with this code cell. */
+  expectations: string[];
   /** Saved, unverified data, never evaluation input. */
   outputs: { kind: string; source: string }[];
   body_start: number;
-  source_map: (ByteSpan & { original_start: number; original_end: number })[];
+  source_map?: (ByteSpan & { original_start: number; original_end: number })[];
   /** Version-pinned compiler/Markdown facts; recompute when source changes. */
-  facts: unknown;
-  blocks: unknown[];
-  first_block: unknown;
-  marker_lines: number[];
+  facts?: unknown;
+  blocks?: unknown[];
+  first_block?: unknown;
+  marker_lines?: number[];
 }
 export interface DependencyGraph {
   context: string;
@@ -131,25 +160,31 @@ export interface RecomputePlan {
   explanations: {root: string; reason: string; dependencies: string[]}[];
 }
 export interface DocumentResponse {
+  workspaceCache?: CompilerCacheStats;
+  packagesRequired?: {url: string; destination: string}[];
+  /** Browser transport byte counts; fileBytes includes changed source only. */
+  transportMetrics?: {requestBytes: number; responseBytes: number; fileBytes: number};
   graph?: DependencyGraph;
   plan: RecomputePlan;
   protocol: 1;
   status: 'ok' | 'partial' | 'diagnostic' | 'runtime_error' | 'protocol_error';
-  source: string;
+  source?: string;
   model: {
     format: 'roc' | 'markdown';
-    original: string;
+    original?: string;
     preamble: string;
     metadata: string;
     cells: DocumentCell[];
     diagnostics: DocumentDiagnostic[];
   };
-  execution: string;
+  execution?: string;
   /** Lowered user module, excluding all generated script helpers and main!. */
-  program: string;
+  program?: string;
   /** Safe editable representation; inline snapshot comments are not repeated in outputs. */
-  draft: DocumentDraft;
+  draft?: DocumentDraft;
   roots: string[];
+  /** Checked test roots map to unchanged generated program spans. */
+  expectations: {root: string; start: number; end: number; cell: number}[];
   /** Source positions are body_start + normalized cell offsets; compose with source_map. */
   mappings: { generated_start: number; generated_end: number; source_start: number; source_end: number; cell: number }[];
   evaluation?: {
@@ -157,6 +192,7 @@ export interface DocumentResponse {
     events: { kind: string; message: string; root?: string; cell?: number | null; sequence?: number }[];
     /** evaluate returns separate designated values and root-attributed observations. */
     values?: { root: string; text: string; display?: DisplayValue }[];
+    tests?: Response['tests'];
     diagnostics: unknown[];
     definitions: unknown[];
     dependency_scope?: 'definitions' | 'module';

@@ -2,7 +2,7 @@ const encoder = new TextEncoder();
 export const PROTOCOL = 1;
 export const CAPABILITIES = Object.freeze({
   protocol: PROTOCOL,
-  compilerCommit: '38a3029aa71b239c79b380adab7e90d4a848df96',
+  compilerCommit: '7894793d1454103d47c4368c942b3fec1406e8fd',
   completeModule: true,
   forwardReferences: true,
   definitionTypesAndRegions: true,

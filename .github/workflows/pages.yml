@@ -34,17 +34,20 @@ jobs:
       - uses: actions/cache@v4
         id: compiler
         with:
-          path: artifacts
-          key: roclet-linux-v1-${{ hashFiles('compiler.lock.json', 'build.zig', 'tools/build-tool.zig', 'compiler-adapter/**', 'core/**', 'package/**', 'vendor/**') }}
-      - name: Build pinned compiler
-        if: steps.compiler.outputs.cache-hit != 'true'
+          path: |
+            artifacts
+            .toolchain
+            .zig-cache
+            ~/.cache/zig
+          key: roclet-linux-v1-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'tools/**', 'compiler-adapter/**', 'core/**', 'package/**', 'vendor/**') }}
+      - name: Prepare pinned compiler dependency
         shell: bash
         run: |
           set -euo pipefail
           git init "$RUNNER_TEMP/roc"
           git -C "$RUNNER_TEMP/roc" remote add origin "$(jq -r .compilerRepository compiler.lock.json)"
           git -C "$RUNNER_TEMP/roc" fetch --depth=1 origin "$(jq -r .compilerCommit compiler.lock.json)"
-          zig build -Droc-source="$RUNNER_TEMP/roc" -Dcompiler-jobs=1
+          sh tools/prepare-compiler.sh "$RUNNER_TEMP/roc"
       - name: Test and package
         run: |
           zig build test

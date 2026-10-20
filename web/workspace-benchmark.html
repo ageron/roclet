@@ -1,0 +1,17 @@
+<!doctype html><meta charset="utf-8"><title>Roclet workspace benchmark</title>
+<style>body{font:16px/1.5 system-ui;margin:3rem;max-width:1000px}pre{white-space:pre-wrap}</style>
+<h1>Workspace compilation benchmark</h1><p>Warm Wall Area edits and imported module implementation edits. Every result is verified. Round-trip timings include the worker, compiler, and durable cache writes.</p>
+<p id="status">Loading compiler…</p><pre id="log"></pre>
+<script type="module">
+import {benchmarkWorkspace} from '../tests/workspace-benchmark.mjs';
+import {sha256} from './offline-cache.mjs';
+const status=document.querySelector('#status'),log=document.querySelector('#log');
+try {
+  const [bytes,manifest]=await Promise.all([fetch('../artifacts/roclet.wasm').then(r=>r.arrayBuffer()),fetch('../artifacts/manifest.json').then(r=>r.json())]);
+  const digest=await sha256(bytes);if(digest!==manifest.artifacts['roclet.wasm'].sha256)throw new Error('Compiler artifact does not match its manifest; publish the measured build first');
+  const result=await benchmarkWorkspace(bytes,{rounds:Number(new URL(location.href).searchParams.get('rounds')??15),buildMode:manifest.wasmOptimize,report:message=>{status.textContent=message;}});
+  result.compilerSha256=digest;result.compilerCommit=manifest.compilerCommit;
+  log.textContent=JSON.stringify(result,null,2);status.textContent=`PASS — ${manifest.wasmOptimize}, all edited outputs verified`;
+  document.documentElement.dataset.result='pass';document.documentElement.dataset.summary=JSON.stringify(result);
+}catch(error){status.textContent='FAIL';log.textContent=error.stack??error.message;document.documentElement.dataset.result='fail';}
+</script>

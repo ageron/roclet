@@ -14,7 +14,12 @@ const $ = id => document.getElementById(id);
 const cards = () => [...document.querySelectorAll('.cell')];
 const inputs = () => cards().map(c=>c.querySelector('.cm-content'));
 const selected = () => cards().flatMap((c,i)=>c.dataset.selected==='true'?[i]:[]);
-const key = (value, extra={}) => { const event=new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true,...extra}); document.activeElement.dispatchEvent(event); return event; };
+const key = (value, extra={}) => {
+  // Mod shortcuts use the editor's host-platform binding. Explicit Meta arrow
+  // navigation is also supported on other platforms and is tested as written.
+  if(extra.metaKey && !/Mac/.test(navigator.platform) && (!value.startsWith('Arrow') || extra.altKey)) extra={...extra,metaKey:false,ctrlKey:true};
+  const event=new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true,...extra}); document.activeElement.dispatchEvent(event); return event;
+};
 const input = (node,value) => { const view=editorFor(node).view; view.dispatch({changes:{from:0,to:view.state.doc.length,insert:value},selection:{anchor:value.length},userEvent:'input'}); };
 const isHidden = node => editorFor(node).dom.hidden;
 const source = node => editorFor(node).source;
@@ -57,7 +62,8 @@ try {
   clipboard('paste',cut.data); assert.equal(cards().length,4); assert.deepEqual(notebook.state.cells.map(c=>c.source),sources); assert(notebook.state.cells.every(c=>!prior.includes(c.key))); assert.equal(selected().length,4);
   key('z',{metaKey:true}); assert.equal(cards().length,0); key('z',{metaKey:true}); assert.deepEqual(notebook.state.cells.map(c=>c.key),prior);
   report('Esc/arrows/Shift-arrows and copy/cut/paste work across a whole notebook; each structural edit is undoable');
-  inputs()[1].focus(); const textArrow=key('ArrowDown',{shiftKey:true}), textAll=key('a',{metaKey:true}), textCopy=clipboard('copy');
+  inputs()[1].focus(); await new Promise(requestAnimationFrame);
+  const textArrow=key('ArrowDown',{shiftKey:true}), textAll=key('a',{metaKey:true}), textCopy=clipboard('copy');
   assert(textArrow.defaultPrevented); assert(textAll.defaultPrevented); assert(document.activeElement===inputs()[1]); assert.equal(textCopy.data.getData('text/plain'),source(inputs()[1])); assert.deepEqual(selected(),[1]);
   key('Escape'); const text=new DataTransfer(); text.setData('text/plain','42'); clipboard('paste',text); assert.equal(source(inputs()[2]),'42'); assert.deepEqual(selected(),[2]); key('z',{metaKey:true});
   report('text selection keeps editor shortcuts; plain text pasted in cell mode creates one code cell after the selection');
@@ -412,6 +418,29 @@ try {
   notebook.undo();notebook.undo();await notebook.run();
   cellAction(0,'Dependencies & timing');assert($('dependencies-dialog').open);assert.match($('dependencies-content').textContent,/length|width/);$('dependencies-dialog').close();
   report('dependency explanations and execution counts are available from the cell menu');
+  // Exercise the visible project dialog, including worker invalidation when an
+  // imported file changes or is removed from this notebook.
+  notebook.setAuto(false);
+  notebook.change(s=>{s.cells=[makeCell('code','import Geometry\nout_project = Geometry.value')];});
+  const openProject=()=>{$('document-menu').querySelector('summary').click();$('project-files').click();assert($('project-dialog').open);};
+  const closeProject=()=>{$('project-dialog').querySelector('[data-close]').click();assert(!$('project-dialog').open);};
+  openProject();$('project-path').value='Geometry.roc';$('project-source').value='Geometry := [].{ value : U64\nvalue = 7 }';$('project-save').click();
+  await until(()=>notebook.state.files?.[0]?.path==='Geometry.roc');
+  assert.equal($('project-select').value,'Geometry.roc');closeProject();
+  $('run').click();await until(()=>notebook.result?.evaluation?.values?.[0]?.text==='7');
+  const projectOutput=cards()[0].querySelector('.value');assert(projectOutput);
+  openProject();assert.equal($('project-path').value,'Geometry.roc');
+  $('project-source').value='Geometry := [].{ value : U64\nvalue = 8 }';$('project-save').click();closeProject();
+  assert.equal(notebook.result,null);assert.equal(projectOutput.querySelector('pre').textContent,'7');
+  $('run').click();await until(()=>notebook.result?.evaluation?.values?.[0]?.text==='8');
+  assert(cards()[0].querySelector('.value')===projectOutput);
+  await notebook.persist();assert.equal((await store.get(notebook.state.id)).files[0].source,notebook.state.files[0].source);
+  openProject();$('project-remove').click();assert.equal(notebook.state.files.length,0);assert($('project-remove').disabled);closeProject();
+  $('run').click();await until(()=>notebook.result!==null);
+  assert(['diagnostic','runtime_error'].includes(notebook.result.status));assert.equal(notebook.result.evaluation.values.length,0);
+  assert(notebook.result.evaluation.diagnostics.some(d=>d.message.includes('Geometry.roc')));assert.match($('document-diagnostics').textContent,/Geometry\.roc/);
+  report('Project files dialog adds and edits imported modules, persists their sources, updates the existing output and invalidates removed imports');
+
   await notebook.persist(); notebook.dispose(); store.close();
   await new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name); request.onsuccess=resolve;request.onerror=()=>reject(request.error);});
   parent.postMessage({rocletUiTest:true,status:`PASS — ${count} Roclet UI contracts`,log,result:'pass'},new URL(document.baseURI).origin);

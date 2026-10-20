@@ -1,0 +1,2 @@
+# Patch context contains significant single-space lines.
+compiler-adapter/embedding.patch -whitespace
