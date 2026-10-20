@@ -222,12 +222,13 @@ pub const Paths = struct {
     extras_prefix: []const u8 = "/workspace/",
 };
 
-/// Inputs to `runEcho`. See field doc comments for the contract on each.
+/// The pinned first-party Display package, served offline as a module.
+pub const display_package_url = std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n");
 pub fn isEmbeddedDisplayPackage(shorthand: []const u8, spec: []const u8) bool {
-    return std.mem.eql(u8, shorthand, "roclet") and std.mem.eql(u8, spec, std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n"));
+    return std.mem.eql(u8, shorthand, "roclet") and std.mem.eql(u8, spec, display_package_url);
 }
-/// Receives the checked application module once per request so the bridge can
-/// report definitions and dependencies into the response it is building.
+/// Receives the checked application module of a script run, so the caller can
+/// report its definitions and dependencies.
 pub const Analyzer = struct {
     ctx: *anyopaque,
     call: *const fn (ctx: *anyopaque, env: *can.ModuleEnv, prefix: u32) void,
@@ -237,6 +238,7 @@ pub const Analyzer = struct {
     }
 };
 
+/// Inputs to `runEcho`. See field doc comments for the contract on each.
 pub const RunOptions = struct {
     app_header: []const u8 = "",
     root_name: ?[]const u8 = null,
@@ -293,18 +295,9 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     const allocator = opts.runtime_fba.allocator();
     const diag = opts.diagnostics;
 
-    var header_writer: std.Io.Writer.Allocating = .init(allocator);
-    try header_writer.writer.writeAll("app [main!] { pf: platform \"./.roc_echo_platform/main.roc\"");
-    if (opts.app_header.len > 0) {
-        const packages = parseHeaderPackages(allocator, opts.fallback_io, opts.app_header) catch null;
-        if (packages) |entries| for (entries) |package| {
-            if (isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
-            try header_writer.writer.print(", {s}: ", .{package.shorthand});
-            try std.json.Stringify.value(package.spec, .{}, &header_writer.writer);
-        };
-    }
-    try header_writer.writer.writeAll(" }\n\nimport pf.Echo\n\n");
-    const header_str = header_writer.written();
+    // A script whose header does not parse still runs on the echo platform alone.
+    const packages = if (opts.app_header.len > 0) parseHeaderPackages(allocator, opts.fallback_io, opts.app_header) catch &.{} else &.{};
+    const header_str = try synthesizeAppHeader(allocator, &.{}, packages);
     const footer_str =
         "\n\necho! = |msg| Echo.line!(msg)\n";
 
@@ -727,6 +720,28 @@ var builtin_modules: ?eval.BuiltinModules = null;
 pub fn persistentBuiltins() !*eval.BuiltinModules {
     if (builtin_modules == null) builtin_modules = try eval.BuiltinModules.init(if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator);
     return &builtin_modules.?;
+}
+
+/// The synthetic app header shared by scripts and notebook revisions:
+/// `app [main!<, exposes...>] { pf: <the echo platform><, shorthand: "spec"...> }`
+/// then `import pf.Echo`. The embedded Display package is served as a module,
+/// never as a package dependency.
+pub fn synthesizeAppHeader(a: Allocator, exposes: []const []const u8, packages: []const compile.app_header.PackageEntry) Allocator.Error![]const u8 {
+    var header: std.Io.Writer.Allocating = .init(a);
+    errdefer header.deinit();
+    synthesizeInto(&header.writer, exposes, packages) catch return error.OutOfMemory;
+    return header.toOwnedSlice();
+}
+fn synthesizeInto(w: *std.Io.Writer, exposes: []const []const u8, packages: []const compile.app_header.PackageEntry) std.Io.Writer.Error!void {
+    try w.writeAll("app [main!");
+    for (exposes) |name| try w.print(", {s}", .{name});
+    try w.writeAll("] { pf: platform \"./.roc_echo_platform/main.roc\"");
+    for (packages) |package| {
+        if (isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
+        try w.print(", {s}: ", .{package.shorthand});
+        try std.json.Stringify.value(package.spec, .{}, w);
+    }
+    try w.writeAll(" }\n\nimport pf.Echo\n\n");
 }
 
 /// Parse an app header held in memory. The path is virtual: nothing is written

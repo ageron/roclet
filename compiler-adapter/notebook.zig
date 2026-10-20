@@ -127,23 +127,15 @@ pub const State = struct {
             output_index += 1;
         }
         if (opts.rich_support) self.wire_name = try std.fmt.allocPrint(a, "roclet_{s}_display_wire", .{hash_text});
-        var header: std.Io.Writer.Allocating = .init(a);
-        try header.writer.writeAll("app [main!");
-        for (self.labels) |label| try header.writer.print(", {s}, {s}", .{ label.text, label.value });
-        if (self.wire_name) |wire| try header.writer.print(", {s}", .{wire});
-        try header.writer.writeAll("] { pf: platform \"./.roc_echo_platform/main.roc\"");
-        if (opts.app_header.len != 0) {
-            for (try engine.parseHeaderPackages(a, eng.workspace.io(a), opts.app_header)) |package| {
-                if (engine.isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
-                try header.writer.print(", {s}: ", .{package.shorthand});
-                try std.json.Stringify.value(package.spec, .{}, &header.writer);
-            }
-        }
-        try header.writer.writeAll(" }\n\nimport pf.Echo\n\n");
-        self.prefix = @intCast(header.written().len);
+        var exposes: std.ArrayList([]const u8) = .empty;
+        for (self.labels) |label| try exposes.appendSlice(a, &.{ label.text, label.value });
+        if (self.wire_name) |wire| try exposes.append(a, wire);
+        const packages: []const compile.app_header.PackageEntry = if (opts.app_header.len != 0) try engine.parseHeaderPackages(a, eng.workspace.io(a), opts.app_header) else &.{};
+        const header = try engine.synthesizeAppHeader(a, exposes.items, packages);
+        self.prefix = @intCast(header.len);
         self.user_bytes = @intCast(opts.program.len);
         var source: std.Io.Writer.Allocating = .init(a);
-        try source.writer.writeAll(header.written());
+        try source.writer.writeAll(header);
         try source.writer.writeAll(opts.program);
         try source.writer.writeAll("\n\nmain! = |_args| Ok({})\necho! = |message| Echo.line!(message)\n");
         for (self.labels) |label| try source.writer.print("\n{s} = || Str.inspect({s})\n{s} = || {s}\n", .{ label.text, label.root, label.value, label.root });
@@ -162,7 +154,7 @@ pub const State = struct {
         build.setPostCheckPublicationMode(.none);
         build.compile_time_root_event_callback = .{ .context = &self.capture, .notify = engine.DebugCapture.observe };
         const owned_user_source = source.written()[self.prefix..][0..opts.program.len];
-        build.setSyntheticRootSourceMappingWithLineOffset(std.fs.path.basename(opts.paths.app_abs), owned_user_source, self.prefix, @intCast(std.mem.count(u8, header.written(), "\n")));
+        build.setSyntheticRootSourceMappingWithLineOffset(std.fs.path.basename(opts.paths.app_abs), owned_user_source, self.prefix, @intCast(std.mem.count(u8, header, "\n")));
         const cache = try a.create(compile.CacheManager);
         cache.* = compile.CacheManager.init(a, .{ .cache_dir = "/cache", .roc_ctx = fs.io() }, fs.io());
         build.setCacheManager(cache);

@@ -293,3 +293,54 @@ test "event buffer keeps protocol-1 observation bounds" {
     try std.testing.expectEqual(@as(usize, 512 * 1024), rich.events.items[2].message.len);
     try std.testing.expectEqual(@as(usize, 3), rich.events.items.len);
 }
+
+test "one app header synthesiser serves scripts and revisions" {
+    const runner = bridge.runner;
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expectEqualStrings(
+        "app [main!] { pf: platform \"./.roc_echo_platform/main.roc\" }\n\nimport pf.Echo\n\n",
+        try runner.synthesizeAppHeader(a, &.{}, &.{}),
+    );
+    const header = try std.fmt.allocPrint(a, "app [] {{ time: \"https://example.com/time.tar.zst\", roclet: \"{s}\", geo: \"./geo/main.roc\" }}", .{runner.display_package_url});
+    const packages = try runner.parseHeaderPackages(a, engine.workspace.io(a), header);
+    try std.testing.expectEqual(@as(usize, 3), packages.len);
+    // The embedded Display package is a module, never a package dependency.
+    try std.testing.expectEqualStrings(
+        "app [main!, out_text, out_value] { pf: platform \"./.roc_echo_platform/main.roc\", time: \"https://example.com/time.tar.zst\", geo: \"./geo/main.roc\" }\n\nimport pf.Echo\n\n",
+        try runner.synthesizeAppHeader(a, &.{ "out_text", "out_value" }, packages),
+    );
+}
+
+test "a script run reports its program response without the notebook revision" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const source = "main! = |args| {\n    dbg args\n    Ok({})\n}";
+    const outcome = try bridge.script.run(&engine, arena.allocator(), .{ .source = source, .user_bytes = @intCast(source.len), .args = &.{"x"} });
+    try std.testing.expectEqualStrings("ok", outcome.status);
+    try std.testing.expectEqual(@as(usize, 1), outcome.events.len);
+    try std.testing.expectEqual(platform.EventKind.dbg, outcome.events[0].kind);
+    try std.testing.expectEqualStrings("[\"x\"]", outcome.events[0].message);
+    try std.testing.expectEqualStrings("main!", outcome.definitions[0].name);
+    try std.testing.expect(engine.revision == null);
+    try std.testing.expectEqual(@as(u64, 1), engine.stats.analyses);
+    try std.testing.expectEqual(@as(u64, 1), engine.stats.executions);
+
+    // The same run through the JSON boundary, as `operation: "program"`.
+    const bytes = try bridge.process(&engine,
+        \\{"operation":"program","protocol":1,"source":"main! = |args| {\n    dbg args\n    Ok({})\n}","user_bytes":0,"args":["y"]}
+    );
+    defer response_allocator.free(bytes);
+    const parsed = try std.json.parseFromSlice(V, std.testing.allocator, bytes, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("ok", parsed.value.object.get("status").?.string);
+    const events = parsed.value.object.get("events").?.array.items;
+    try std.testing.expectEqual(@as(usize, 1), events.len);
+    try std.testing.expectEqualStrings("[\"y\"]", events[0].object.get("message").?.string);
+    try std.testing.expect(events[0].object.get("root") == null);
+}

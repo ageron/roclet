@@ -2,6 +2,8 @@
 const std = @import("std");
 const syntax = @import("syntax.zig");
 const notebook = @import("notebook.zig");
+const script = @import("script.zig");
+const Engine = @import("engine_state.zig").Engine;
 const frontend = @import("document_frontend.zig");
 const A = std.mem.Allocator;
 const V = std.json.Value;
@@ -304,9 +306,7 @@ pub fn process(gpa: A, bytes: []const u8, compiler: anytype) ![]u8 {
     const check_export = std.mem.eql(u8, action, "export") and std.mem.eql(u8, target, "roc");
     if ((std.mem.eql(u8, action, "check") or std.mem.eql(u8, action, "run") or check_export) and std.mem.eql(u8, string(result, "status", ""), "ok")) {
         const execution = string(result, "execution", "");
-        const checked = try compiler.compile(try json(a, .{ .protocol = 1, .source = execution, .user_bytes = execution.len, .check_only = check_export or std.mem.eql(u8, action, "check"), .app_header = app_header, .modules = request.object.get("modules") orelse try value(a, &[_]V{}) }));
-        defer gpa.free(checked);
-        const evaluation = try std.json.parseFromSliceLeaky(V, a, checked, .{ .allocate = .alloc_always });
+        const evaluation = try value(a, try runScript(compiler.engine, a, execution, check_export or std.mem.eql(u8, action, "check"), app_header, request.object.get("modules") orelse try value(a, &[_]V{})));
         try mapDiagnostics(a, &result, evaluation, source, execution);
         try result.object.put(a, "evaluation", evaluation);
         try result.object.put(a, "status", evaluation.object.get("status").?);
@@ -321,6 +321,14 @@ pub fn process(gpa: A, bytes: []const u8, compiler: anytype) ![]u8 {
     };
     if (compact) finishCompact(&result);
     return json(gpa, result);
+}
+
+/// Check (and for `run`, execute) the runnable `execution` text exactly as
+/// ordinary `roc` would, with the script pipeline.
+fn runScript(engine: *Engine, a: A, execution: []const u8, check_only: bool, app_header: []const u8, modules: V) !script.Outcome {
+    if (execution.len > notebook.source_limit) return script.rejected(engine, "Unsupported protocol or invalid source length (limit 1 MiB)");
+    const supplied = std.json.parseFromValueLeaky([]const notebook.Module, a, modules, .{}) catch return script.rejected(engine, "Malformed request");
+    return script.run(engine, a, .{ .source = execution, .user_bytes = @intCast(execution.len), .check_only = check_only, .app_header = app_header, .modules = supplied });
 }
 
 fn number(v: V, key: []const u8) u64 {
