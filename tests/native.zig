@@ -132,7 +132,7 @@ pub fn main(init: std.process.Init) !void {
     try imported.object.put(gpa, "modules", .{ .array = std.array_list.Managed(V).init(gpa) });
     try suite.run("removed import", imported, null, &.{}, false);
     try suite.source("valid after errors", "x = 42\nout_1 = x", &.{"out_1"}, &.{"42.0"}, &.{});
-    const core = try read(gpa, init.io, args[1], "core/Revision.roc");
+    const core = try read(gpa, init.io, args[1], "fixtures/modules/Revision.roc");
     const core_source =
         \\import Revision
         \\state = Revision.edit(Revision.initial)

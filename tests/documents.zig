@@ -39,10 +39,37 @@ pub const Suite = struct {
         try self.cases.append(self.a, try parse(self.a, try json(self.a, .{ .name = name, .request = request, .result = response })));
         return response;
     }
-    fn run(self: *Suite, fixture: V) !void {
+    fn run(self: *Suite, root: []const u8, fixture: V) !void {
         const name = str(fixture, "name");
-        const request = field(fixture, "request");
+        // A private copy: module files are read in and cells reordered without touching the fixture.
+        var request = try parse(self.a, try json(self.a, field(fixture, "request")));
+        if (fixture.object.get("modules_from")) |sources| {
+            var modules = if (request.object.get("modules")) |existing| existing.array else std.array_list.Managed(V).init(self.a);
+            for (sources.array.items) |source| {
+                const content = try std.Io.Dir.cwd().readFileAlloc(self.io, try std.fs.path.join(self.a, &.{ root, str(source, "path") }), self.a, .limited(1024 * 1024));
+                try modules.append(try parse(self.a, try json(self.a, .{ .name = str(source, "name"), .content = content })));
+            }
+            try request.object.put(self.a, "modules", .{ .array = modules });
+        }
         const wanted = field(fixture, "expect");
+        if (wanted.object.get("permute") == null) return self.check(name, request, wanted);
+        // Cell order must never matter: every permutation shares one expectation.
+        var count: usize = 0;
+        try self.permute(name, request, wanted, field(field(request, "draft"), "cells").array.items, 0, &count);
+    }
+    fn permute(self: *Suite, name: []const u8, request: V, wanted: V, cells: []V, index: usize, count: *usize) !void {
+        if (index == cells.len) {
+            try self.check(try std.fmt.allocPrint(self.a, "{s}/{d}", .{ name, count.* }), try parse(self.a, try json(self.a, request)), wanted);
+            count.* += 1;
+            return;
+        }
+        for (index..cells.len) |i| {
+            std.mem.swap(V, &cells[index], &cells[i]);
+            try self.permute(name, request, wanted, cells, index + 1, count);
+            std.mem.swap(V, &cells[index], &cells[i]);
+        }
+    }
+    fn check(self: *Suite, name: []const u8, request: V, wanted: V) !void {
         const result = try self.call(name, request);
         errdefer std.debug.print("FAIL {s}\n{s}\n", .{ name, json(self.a, result) catch "" });
         try expect(eq(str(result, "status"), str(wanted, "status")));
@@ -128,6 +155,27 @@ pub const Suite = struct {
                 };
                 try expect(found);
             }
+        }
+        if (wanted.object.get("definition_source_text")) |expected| {
+            // Map the first definition's region from the generated program back into the
+            // request's own UTF-8 bytes: the whole source, or the draft cell it came from.
+            const region = field(field(field(result, "evaluation"), "definitions").array.items[0], "region");
+            const start: usize = @intCast(field(region, "start").integer);
+            const end: usize = @intCast(field(region, "end").integer);
+            const draft = request.object.get("draft");
+            var found = false;
+            for (field(result, "mappings").array.items) |m| {
+                const generated_start: usize = @intCast(field(m, "generated_start").integer);
+                if (start < generated_start or start >= @as(usize, @intCast(field(m, "generated_end").integer))) continue;
+                const index: usize = @intCast(field(m, "cell").integer);
+                const input = if (draft) |d| str(field(d, "cells").array.items[index], "source") else str(request, "source");
+                const base: usize = if (draft != null) @intCast(field(cells[index], "body_start").integer) else 0;
+                const offset = @as(usize, @intCast(field(m, "source_start").integer)) + start - generated_start - base;
+                try expect(start <= end and offset + end - start <= input.len);
+                try expect(eq(input[offset..][0 .. end - start], expected.string));
+                found = true;
+            }
+            try expect(found);
         }
         if (wanted.object.get("root_errors")) |expected| {
             const errors = field(field(result, "evaluation"), "root_errors").array.items;
@@ -223,7 +271,7 @@ pub fn main(init: std.process.Init) !void {
     defer std.Io.Dir.cwd().deleteFile(init.io, temp) catch {};
     var suite: Suite = .{ .a = a, .io = init.io, .executable = args[2], .temp = temp };
     const fixtures = try parse(a, try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, "tests/documents.json" }), a, .limited(1024 * 1024)));
-    for (fixtures.array.items) |fixture| try suite.run(fixture);
+    for (fixtures.array.items) |fixture| try suite.run(root, fixture);
     // Published notebooks must already be in runnable form, not editing drafts.
     for ([_][]const u8{ "demos/01-reactivity.roc", "demos/02-a-little-data.roc", "demos/03-circle.roc", "fixtures/documents/rich-outputs.roc" }) |file| {
         const source = try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, file }), a, .limited(256 * 1024));
