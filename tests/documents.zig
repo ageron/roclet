@@ -39,6 +39,33 @@ pub const Suite = struct {
         try self.cases.append(self.a, try parse(self.a, try json(self.a, .{ .name = name, .request = request, .result = response })));
         return response;
     }
+    /// Serve `requests` in order with one engine (`--bridge a.json b.json ...`),
+    /// so later requests see the engine's reactive baseline. Each pair is
+    /// recorded as its own case, in order, for the browser replay.
+    pub fn callSequence(self: *Suite, names: []const []const u8, requests: []const V) ![]V {
+        std.debug.assert(names.len == requests.len);
+        var argv: std.ArrayList([]const u8) = .empty;
+        try argv.appendSlice(self.a, &.{ self.executable, "--bridge" });
+        for (requests, 0..) |request, i| {
+            const path = try std.fmt.allocPrint(self.a, "{s}.{d}", .{ self.temp, i });
+            try std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = try json(self.a, request) });
+            try argv.append(self.a, path);
+        }
+        defer for (argv.items[2..]) |path| std.Io.Dir.cwd().deleteFile(self.io, path) catch {};
+        const result = try std.process.run(self.a, self.io, .{ .argv = argv.items, .stdout_limit = .limited(64 * 1024 * 1024), .stderr_limit = .limited(1024 * 1024), .timeout = .{ .duration = .{ .raw = .fromSeconds(120), .clock = .awake } } });
+        if (result.term != .exited or result.term.exited != 0) {
+            std.debug.print("FAIL {s}: {s}\n", .{ names[0], result.stderr });
+            return error.AdapterFailed;
+        }
+        const responses = try self.a.alloc(V, requests.len);
+        var lines = std.mem.splitScalar(u8, std.mem.trimEnd(u8, result.stdout, "\n"), '\n');
+        for (responses, names, requests) |*response, name, request| {
+            response.* = try parse(self.a, lines.next() orelse return error.MissingSequenceResponse);
+            try self.cases.append(self.a, try parse(self.a, try json(self.a, .{ .name = name, .request = request, .result = response.* })));
+        }
+        if (lines.next() != null) return error.UnexpectedSequenceResponse;
+        return responses;
+    }
     fn run(self: *Suite, root: []const u8, fixture: V) !void {
         const name = str(fixture, "name");
         // A private copy: module files are read in and cells reordered without touching the fixture.

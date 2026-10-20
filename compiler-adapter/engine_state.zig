@@ -6,6 +6,7 @@ const std = @import("std");
 const Workspace = @import("workspace.zig").Workspace;
 const notebook = @import("notebook.zig");
 const runner = @import("engine.zig");
+const Baseline = @import("baseline.zig").Baseline;
 
 pub const Engine = struct {
     /// Owns engine-level allocations: native paths and the retained graph.
@@ -19,16 +20,20 @@ pub const Engine = struct {
     revision: ?*notebook.State = null,
     /// Counters reported as `workspaceCache`; zeroed by `beginRequest`.
     stats: runner.RequestStats = .{},
-    /// Last confirmed dependency graph, injected into `reactivity.previous`.
+    /// Last confirmed dependency graph, injected into a legacy request's
+    /// `reactivity.previous`.
     previous_graph: ?[]u8 = null,
+    /// The reactive baseline of participating requests. Outlives revisions.
+    baseline: Baseline,
 
     pub fn init(gpa: std.mem.Allocator, std_io: std.Io) Engine {
-        return .{ .gpa = gpa, .workspace = .{ .std_io = std_io } };
+        return .{ .gpa = gpa, .workspace = .{ .std_io = std_io }, .baseline = .init(gpa) };
     }
 
     pub fn deinit(self: *Engine) void {
         if (self.revision) |state| state.destroy();
         if (self.previous_graph) |graph| self.gpa.free(graph);
+        self.baseline.deinit();
         if (self.owns_paths) inline for (@typeInfo(runner.Paths).@"struct".field_names) |name| self.gpa.free(@field(self.paths, name));
         self.workspace.deinit();
         self.* = undefined;

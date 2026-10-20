@@ -114,5 +114,71 @@
     "reused": [
       "out_other"
     ]
+  },
+  {
+    "name": "forced-root",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "force": [
+      "out_right"
+    ],
+    "evaluate": [
+      "out_right"
+    ],
+    "reused": [
+      "out_left"
+    ]
+  },
+  {
+    "name": "failed-not-reused",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = {\n    crash \"boom\"\n    f(3)\n}\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\na = 2\nf = |x| x + a\nout_left = f(3)\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "beforeStatus": "partial",
+    "evaluate": [
+      "out_left"
+    ],
+    "reused": [
+      "out_right"
+    ]
+  },
+  {
+    "name": "failed-retried",
+    "before": "# %%\na = 2\nf = |x| x + a\nout_left = {\n    crash \"boom\"\n    f(3)\n}\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "after": "# %%\na = 2\nf = |x| x + a\nout_left = {\n    crash \"boom\"\n    f(3)\n}\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n",
+    "beforeStatus": "partial",
+    "evaluate": [
+      "out_left"
+    ],
+    "reused": [
+      "out_right"
+    ]
+  },
+  {
+    "name": "context-change",
+    "before": "# %%\nout_import = 7\n# %%\nout_other = 7\n",
+    "after": "# %%\nimport Fresh\nout_import = Fresh.value\n# %%\nout_other = 7\n",
+    "afterModules": [
+      {
+        "name": "Fresh",
+        "content": "Fresh := [].{ value = 7 }"
+      }
+    ],
+    "evaluate": [
+      "out_import",
+      "out_other"
+    ],
+    "reused": []
+  },
+  {
+    "name": "test-reuse",
+    "before": "# %%\na = 2\nout_left = a + 1\n# %%\nb = 3\nexpect b == 3\n",
+    "after": "# %%\na = 200\nout_left = a + 1\n# %%\nb = 3\nexpect b == 3\n",
+    "testMoved": true,
+    "evaluate": [
+      "out_left"
+    ],
+    "reused": [
+      "roclet_expect_1"
+    ]
   }
 ]

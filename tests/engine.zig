@@ -388,3 +388,107 @@ test "requests without a known operation are protocol errors" {
     try std.testing.expect(engine.revision == null);
     try std.testing.expectEqual(@as(u64, 0), engine.stats.frontend_builds);
 }
+
+/// One document request built from `data` through the JSON boundary.
+fn send(engine: *Engine, data: anytype) !Response {
+    const gpa = std.testing.allocator;
+    var request: std.Io.Writer.Allocating = .init(gpa);
+    defer request.deinit();
+    try std.json.Stringify.value(data, .{}, &request.writer);
+    const bytes = try bridge.process(engine, request.written());
+    defer response_allocator.free(bytes);
+    return .{ .parsed = try std.json.parseFromSlice(V, gpa, bytes, .{}) };
+}
+/// "root root* ...": each item's root, starred when it is reused.
+fn expectRoots(expected: []const u8, items: []V) !void {
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    for (items) |item| try out.writer.print("{s}{s} ", .{ item.object.get("root").?.string, if (item.object.get("reused").?.bool) "*" else "" });
+    try std.testing.expectEqualStrings(expected, out.written());
+}
+fn expectPlan(response: Response, field: []const u8, expected: []const []const u8) !void {
+    const items = response.field("plan").object.get(field).?.array.items;
+    try std.testing.expectEqual(expected.len, items.len);
+    for (expected, items) |root, item| try std.testing.expectEqualStrings(root, item.string);
+}
+
+const two_cells = "# %%\na = 2\nout_left = a + 1\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n";
+const two_cells_edited = "# %%\na = 4\nout_left = a + 1\n# %%\nb = 7\nout_right = {\n    dbg b\n    b * 2\n}\n";
+const Participation = struct { reset: bool = false };
+
+test "the engine baseline answers for every root and reuses only unchanged ones" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    var first = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells, .isolateErrors = true, .reactivity = Participation{ .reset = true } });
+    defer first.deinit();
+    try expectRoots("out_left out_right ", first.evaluation("values"));
+    try expectPlan(first, "reused", &.{});
+
+    // An analyze runs nothing yet still returns the retained independent value.
+    var checked = try send(&engine, .{ .operation = "document", .action = "analyze", .format = "roc", .source = two_cells_edited, .isolateErrors = true, .reactivity = Participation{} });
+    defer checked.deinit();
+    try expectPlan(checked, "reused", &.{"out_right"});
+    try std.testing.expectEqual(@as(i64, 0), checked.counter("executions"));
+    try expectRoots("out_right* ", checked.evaluation("values"));
+    try expectRoots("out_right* ", checked.evaluation("events"));
+    try std.testing.expectEqualStrings("14.0", checked.evaluation("values")[0].object.get("text").?.string);
+
+    // The analyze evaluated nothing for out_left, so the run evaluates it and
+    // reuses out_right with its transcript.
+    var run = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells_edited, .isolateErrors = true, .reactivity = Participation{} });
+    defer run.deinit();
+    try expectPlan(run, "evaluate", &.{"out_left"});
+    try std.testing.expectEqual(@as(i64, 1), run.counter("executions"));
+    try expectRoots("out_left out_right* ", run.evaluation("values"));
+    try expectRoots("out_right* ", run.evaluation("events"));
+    try std.testing.expectEqual(@as(i64, 0), run.evaluation("events")[0].object.get("sequence").?.integer);
+    try std.testing.expectEqual(@as(i64, 1), run.evaluation("events")[0].object.get("cell").?.integer);
+
+    // A selected cell is forced and never reused.
+    var selected = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells_edited, .isolateErrors = true, .selectedCell = 1, .reactivity = Participation{} });
+    defer selected.deinit();
+    try expectPlan(selected, "evaluate", &.{"out_right"});
+    try expectRoots("out_left* out_right ", selected.evaluation("values"));
+}
+
+test "stateless requests neither read nor change the engine baseline" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    var first = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells, .reactivity = Participation{} });
+    defer first.deinit();
+    const graph = engine.baseline.graph.?;
+    const tick = engine.baseline.tick;
+    const bytes = engine.baseline.bytes;
+    var stateless = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells_edited });
+    defer stateless.deinit();
+    try expectRoots("out_left out_right ", stateless.evaluation("values"));
+    try std.testing.expectEqual(graph, engine.baseline.graph.?);
+    try std.testing.expectEqual(tick, engine.baseline.tick);
+    try std.testing.expectEqual(bytes, engine.baseline.bytes);
+    try std.testing.expectEqual(@as(usize, 2), engine.baseline.entries.count());
+    // The stateless run did not become the baseline: the original source reuses both.
+    var again = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells, .reactivity = Participation{} });
+    defer again.deinit();
+    try expectPlan(again, "reused", &.{ "out_left", "out_right" });
+    try std.testing.expectEqual(@as(i64, 0), again.counter("executions"));
+}
+
+test "a failed root is retried and reset forgets the baseline" {
+    var engine = Engine.init(std.testing.allocator, .failing);
+    defer engine.deinit();
+    const source = "# %%\nout_good = 42\n# %%\nout_bad = {\n    crash \"boom\"\n    0\n}\n";
+    var first = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = source, .isolateErrors = true, .reactivity = Participation{} });
+    defer first.deinit();
+    try std.testing.expectEqualStrings("partial", first.field("status").string);
+    var second = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = source, .isolateErrors = true, .reactivity = Participation{} });
+    defer second.deinit();
+    try expectPlan(second, "evaluate", &.{"out_bad"});
+    try std.testing.expectEqualStrings("No successful result", second.field("plan").object.get("explanations").?.array.items[1].object.get("reason").?.string);
+    try expectRoots("out_good* ", second.evaluation("values"));
+    try std.testing.expectEqualStrings("out_bad", second.evaluation("root_errors")[0].object.get("root").?.string);
+
+    var reset = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = source, .isolateErrors = true, .reactivity = Participation{ .reset = true } });
+    defer reset.deinit();
+    try expectPlan(reset, "reused", &.{});
+    try expectRoots("out_good ", reset.evaluation("values"));
+}

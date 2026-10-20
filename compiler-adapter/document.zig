@@ -7,6 +7,7 @@ const notebook = @import("notebook.zig");
 const script = @import("script.zig");
 const Engine = @import("engine_state.zig").Engine;
 const frontend = @import("document_frontend.zig");
+const baseline = @import("baseline.zig");
 const A = std.mem.Allocator;
 const V = std.json.Value;
 fn json(a: A, data: anytype) ![]u8 {
@@ -46,7 +47,14 @@ pub const Request = struct {
     pub const Draft = union(enum) { absent, malformed, value: frontend.Draft };
     pub const Context = struct { preamble: []const u8, metadata: []const u8 };
     pub const SelectedCell = union(enum) { index: i64, invalid };
-    pub const Reactivity = union(enum) { absent, malformed, value: frontend.Reactive };
+    /// `legacy` carries a caller-held previous graph and `available` roots;
+    /// `participate` reads and updates the engine's own baseline.
+    pub const Reactivity = union(enum) { absent, malformed, legacy: frontend.Reactive, participate: Participation };
+    pub const Participation = struct {
+        force: []const []const u8 = &.{},
+        /// Forget the engine baseline before planning.
+        reset: bool = false,
+    };
     pub const Modules = struct {
         /// Null when `modules` is not a list of modules.
         items: ?[]const Module = &.{},
@@ -57,7 +65,8 @@ pub const Request = struct {
     };
 
     /// Read a parsed request object. `previous_graph` (the engine's last
-    /// confirmed graph) fills `reactivity.previous` when the client omits it.
+    /// confirmed graph) fills a legacy `reactivity.previous` when the client
+    /// omits it.
     pub fn fromValue(a: A, request: V, previous_graph: ?[]const u8, workspace_fingerprint: []const u8) !Request {
         const object = request.object;
         const format = string(request, "format", "roc");
@@ -85,12 +94,19 @@ pub const Request = struct {
         if (object.get("selectedCell")) |selected| result.selected_cell = if (selected == .integer) .{ .index = selected.integer } else .invalid;
         if (object.get("reactivity")) |raw| {
             result.reactivity = .malformed;
-            if (std.json.parseFromValueLeaky(frontend.Reactive, a, raw, .{ .ignore_unknown_fields = true })) |parsed| {
+            const legacy = raw == .object and for (legacy_reactivity) |key| {
+                if (raw.object.get(key) != null) break true;
+            } else false;
+            if (!legacy) {
+                if (std.json.parseFromValueLeaky(Participation, a, raw, .{ .ignore_unknown_fields = true })) |participation| {
+                    result.reactivity = .{ .participate = participation };
+                } else |_| {}
+            } else if (std.json.parseFromValueLeaky(frontend.Reactive, a, raw, .{ .ignore_unknown_fields = true })) |parsed| {
                 var reactive = parsed;
                 if (raw.object.get("previous") == null) if (previous_graph) |graph| {
                     reactive.previous = try std.json.parseFromSliceLeaky(frontend.Graph, a, graph, .{ .ignore_unknown_fields = true });
                 };
-                result.reactivity = .{ .value = reactive };
+                result.reactivity = .{ .legacy = reactive };
             } else |_| {}
         }
         if (object.get("modules")) |modules| {
@@ -102,6 +118,9 @@ pub const Request = struct {
         }
         return result;
     }
+    /// Members of a caller-held baseline (the request shape before the engine
+    /// owned it).
+    const legacy_reactivity = [_][]const u8{ "known", "previous", "current", "available", "roots" };
     fn string(o: V, key: []const u8, fallback: []const u8) []const u8 {
         const v = if (o == .object) o.object.get(key) else null;
         return if (v != null and v.? == .string) v.?.string else fallback;
@@ -238,6 +257,9 @@ const Graph = struct {
     definitions: []const frontend.Definition,
     scope: []const u8,
     context: []const u8,
+    fn planned(self: Graph) frontend.Graph {
+        return .{ .context = self.context, .scope = self.scope, .definitions = self.definitions };
+    }
 };
 const Rendering = struct { cell: usize, events: []const syntax.MarkdownEvent };
 const Evaluation = union(enum) { document: DocumentEvaluation, script: script.Outcome };
@@ -260,13 +282,38 @@ const DocumentEvaluation = struct {
     diagnostics: []const @import("engine.zig").Diagnostic,
     failure: ?[]const u8,
 };
-const Event = struct { kind: @import("platform.zig").EventKind, message: []const u8, root: []const u8, region: ?notebook.Region = null, sequence: usize, cell: ?usize };
+/// `reused` is null only for legacy reactive requests, which never merge.
+const Event = struct {
+    kind: @import("platform.zig").EventKind,
+    message: []const u8,
+    root: []const u8,
+    region: ?notebook.Region = null,
+    sequence: usize,
+    cell: ?usize,
+    reused: ?bool = null,
+    pub fn jsonStringify(self: Event, w: anytype) !void {
+        try w.beginObject();
+        inline for (.{ "kind", "message", "root", "region", "sequence", "cell" }) |name| {
+            try w.objectField(name);
+            try w.write(@field(self, name));
+        }
+        try writeReused(w, self.reused);
+        try w.endObject();
+    }
+};
+fn writeReused(w: anytype, reused: ?bool) !void {
+    if (reused) |flag| {
+        try w.objectField("reused");
+        try w.write(flag);
+    }
+}
 const Placement = struct { cell: u64, start: u64, end: u64, location: Location, scope: []const u8 };
 const TestResult = struct {
     root: []const u8,
     passed: bool,
     message: []const u8,
     placement: ?Placement = null,
+    reused: ?bool = null,
     pub fn jsonStringify(self: TestResult, w: anytype) !void {
         try w.beginObject();
         inline for (.{ "root", "passed", "message" }) |name| {
@@ -277,6 +324,7 @@ const TestResult = struct {
             try w.objectField(name);
             try w.write(@field(placement, name));
         };
+        try writeReused(w, self.reused);
         try w.endObject();
     }
 };
@@ -286,6 +334,7 @@ const Value = struct {
     display: ?V = null,
     /// Rendered Markdown of a `markdown` display, written as its `events`.
     markdown: ?[]const syntax.MarkdownEvent = null,
+    reused: ?bool = null,
     pub fn jsonStringify(self: Value, w: anytype) !void {
         try w.beginObject();
         try w.objectField("root");
@@ -308,6 +357,7 @@ const Value = struct {
                 try w.endObject();
             } else try w.write(display);
         }
+        try writeReused(w, self.reused);
         try w.endObject();
     }
 };
@@ -375,6 +425,10 @@ fn packageRocExport(a: A, source: []const u8) ![]const u8 {
 /// Serve one document request. Everything the response references is
 /// allocated in `a` (or borrowed from `request`).
 pub fn process(engine: *Engine, a: A, request: Request) !Response {
+    switch (request.reactivity) {
+        .participate => |participation| if (participation.reset) engine.baseline.clear(),
+        else => {},
+    }
     const source = request.source;
     if (source.len > 256 * 1024) return .reject("Document limit is 256 KiB");
     const format = request.format;
@@ -505,12 +559,14 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
             const graph = try dependencyGraph(a, program, checked.evaluation, request.modules.json, request.workspace_fingerprint);
             document.graph = graph;
             try document.put(a, .graph);
+            const current = graph.planned();
             var reactivity: frontend.Reactive = switch (request.reactivity) {
                 .absent => .{},
                 .malformed => return error.MalformedReactivity,
-                .value => |value| value,
+                .legacy => |value| value,
+                .participate => |participation| try engine.baseline.planInput(a, current, roots, participation.force),
             };
-            reactivity.current = .{ .context = graph.context, .scope = graph.scope, .definitions = graph.definitions };
+            reactivity.current = current;
             reactivity.roots = roots;
             if (request.force_all) reactivity.force = reactivity.roots;
             if (reactive) if (selected_cell) |cell| {
@@ -520,9 +576,21 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
             if (eql(action, "evaluate") and result.plan.evaluate.len > 0) try checked.evaluate(result.plan.evaluate);
         }
         const evaluation = checked.evaluation;
-        const events = try a.alloc(Event, evaluation.events.len);
-        for (events, evaluation.events, 0..) |*out, event, sequence| {
-            out.* = .{ .kind = event.kind, .message = event.message, .root = event.root, .region = event.region, .sequence = sequence, .cell = null };
+        // A participating request answers for every root: retained
+        // presentations of reused roots, fresh ones of evaluated roots.
+        var outcomes: baseline.Outcomes = .{ .values = evaluation.values, .tests = evaluation.tests, .events = evaluation.events };
+        const merging = request.reactivity == .participate and document.graph != null;
+        if (merging) {
+            const reused = result.plan.reused;
+            outcomes = try engine.baseline.merge(a, result.roots, reused, outcomes);
+            try engine.baseline.commit(document.graph.?.planned(), result.roots, reused, .{ .values = evaluation.values, .tests = evaluation.tests, .events = evaluation.events });
+        }
+        var reused_roots: std.StringHashMapUnmanaged(void) = .empty;
+        if (merging) for (result.plan.reused) |root| try reused_roots.put(a, root, {});
+        const legacy = request.reactivity == .legacy;
+        const events = try a.alloc(Event, outcomes.events.len);
+        for (events, outcomes.events, 0..) |*out, event, sequence| {
+            out.* = .{ .kind = event.kind, .message = event.message, .root = event.root, .region = event.region, .sequence = sequence, .cell = null, .reused = if (legacy) null else reused_roots.contains(event.root) };
             for (cells, 0..) |cell, index| {
                 var matches = eql(cell.output, event.root);
                 for (cell.expectations) |expectation| if (eql(expectation, event.root)) {
@@ -534,9 +602,9 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
                 }
             }
         }
-        const tests = try a.alloc(TestResult, evaluation.tests.len);
-        for (tests, evaluation.tests) |*out, test_result| {
-            out.* = .{ .root = test_result.root, .passed = test_result.passed, .message = test_result.message };
+        const tests = try a.alloc(TestResult, outcomes.tests.len);
+        for (tests, outcomes.tests) |*out, test_result| {
+            out.* = .{ .root = test_result.root, .passed = test_result.passed, .message = test_result.message, .reused = if (legacy) null else reused_roots.contains(test_result.root) };
             for (result.expectations) |expectation| if (eql(expectation.root, test_result.root)) {
                 const index = expectation.cell;
                 const start = expectation.start;
@@ -557,9 +625,9 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
                 break;
             };
         }
-        const values = try a.alloc(Value, evaluation.values.len);
-        for (values, evaluation.values) |*out, output| {
-            out.* = .{ .root = output.root, .text = output.text, .display = output.display };
+        const values = try a.alloc(Value, outcomes.values.len);
+        for (values, outcomes.values) |*out, output| {
+            out.* = .{ .root = output.root, .text = output.text, .display = output.display, .reused = if (legacy) null else reused_roots.contains(output.root) };
             if (output.display) |display| {
                 if (display == .object and eql(Request.string(display, "kind", ""), "markdown")) {
                     out.markdown = try syntax.renderMarkdown(a, Request.string(display, "content", ""));
@@ -718,6 +786,10 @@ fn dependencyGraph(a: A, program: []const u8, evaluation: notebook.Evaluation, m
     try context.writer.writeAll(modules_json);
     try context.writer.writeAll(workspace_fingerprint);
     return .{ .definitions = definitions, .scope = evaluation.dependency_scope, .context = try digest(a, context.written()) };
+}
+
+test {
+    _ = baseline;
 }
 
 test "compact execution response omits parser payloads and preserves editor and output contracts" {
