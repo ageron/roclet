@@ -32,6 +32,7 @@ fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
 fn mime(file: []const u8) []const u8 {
     const ext = std.fs.path.extension(file);
     if (std.mem.eql(u8, ext, ".png")) return "image/png";
+    if (std.mem.eql(u8, ext, ".svg")) return "image/svg+xml";
     if (std.mem.eql(u8, ext, ".html")) return "text/html; charset=utf-8";
     if (std.mem.eql(u8, ext, ".mjs") or std.mem.eql(u8, ext, ".js")) return "text/javascript; charset=utf-8";
     if (std.mem.eql(u8, ext, ".css")) return "text/css; charset=utf-8";

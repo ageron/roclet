@@ -1,12 +1,13 @@
 import { prepareOffline, offlineStatus, storageStatus } from './offline.mjs';
 import { captureExport, exportBundle, importBundle, exportReport, exportSite, download, downloadName } from './sharing.mjs';
-import { Notebook, newDraft, makeCell, validDraft } from './edit-model.mjs';
+import { Notebook, newDraft, makeCell, validDraft, cellsFrom } from './edit-model.mjs';
 import { CellEditor, editorFor } from './cell-editor.mjs';
 import { symbolAt, completionOptions } from './compiler-tools.mjs';
 import { CompilerHighlighter } from './roc-highlighting.mjs';
 import { DraftStore } from './edit-store.mjs';
 import { loadPackageBundle } from './package-dialog.mjs';
 import { renderMarkdown } from './markdown-view.mjs';
+import { settleMathStyles } from './math-view.mjs';
 import { renderDisplay } from './display-view.mjs';
 import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './edit-cells.mjs';
 const $ = id => document.getElementById(id);
@@ -436,7 +437,7 @@ function reflect(reason) {
   if (!notebook?.state) return;
   const s = notebook.state;
   if ($('title').value !== s.title) $('title').value = s.title;
-  document.title = `${s.title || 'Untitled'} — Roclet`;
+  document.title = `Roclet: ${s.title || 'Untitled'}`;
   $('auto').checked = s.autoRun; $('format').value = s.format;
   $('stop').hidden = !/Running|Saving before|Preparing document/.test(notebook.status);
   if ($('stop').hidden && document.activeElement === $('stop')) $('run').focus({preventScroll:true});
@@ -550,7 +551,7 @@ function bind() {
     if (event.target.closest('.menu-panel button,.menu-panel a')) closeMenus();
   });
   document.addEventListener('keydown', event => {
-    if (event.defaultPrevented || event.isComposing || composing || event.keyCode === 229 || document.querySelector('dialog[open]')) return;
+    if (document.documentElement.dataset.startup !== 'ready' || event.defaultPrevented || event.isComposing || composing || event.keyCode === 229 || document.querySelector('dialog[open]')) return;
     const mod = event.metaKey || event.ctrlKey, key = event.key.toLowerCase();
     const target = event.target, card = target.closest?.('.cell');
     const menu = target.closest?.('details[open]');
@@ -585,7 +586,7 @@ function bind() {
     else if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); event.stopPropagation(); removeCells(selection.selected); }
     else if (event.key === '?') { event.preventDefault(); event.stopPropagation(); help(); }
   }, true);
-  const ownsClipboard = event => notebook.state.mode === 'notebook' && selection.mode === 'cells' && $('notebook').contains(event.target) && !textTarget(event.target) && !event.target.closest?.('details,button,a');
+  const ownsClipboard = event => document.documentElement.dataset.startup === 'ready' && notebook.state.mode === 'notebook' && selection.mode === 'cells' && $('notebook').contains(event.target) && !textTarget(event.target) && !event.target.closest?.('details,button,a');
   for (const action of ['copy','cut']) document.addEventListener(action, event => {
     if (!ownsClipboard(event) || !selection.selected.length || !event.clipboardData || window.getSelection()?.toString()) return;
     const keys = selection.selected, cells = editable().filter(c => keys.includes(c.key)), encoded = encodeCells(cells);
@@ -606,7 +607,7 @@ function bind() {
       insertCells(selection.keys.indexOf(selection.selected.at(-1)) + 1, additions);
     });
   });
-  window.addEventListener('beforeunload', event => { if (notebook.saveStatus !== 'Saved in this browser') { event.preventDefault(); event.stopPropagation(); event.returnValue = ''; } });
+  window.addEventListener('beforeunload', event => { if (document.documentElement.dataset.startup === 'ready' && notebook.saveStatus !== 'Saved in this browser') { event.preventDefault(); event.stopPropagation(); event.returnValue = ''; } });
 }
 export async function startNotebook(drafts = new DraftStore()) {
 store = drafts;
@@ -627,7 +628,7 @@ try {
     onSelection:positions=>{if(notebook?.state){notebook.state.headerSelection=positions;notebook.group=null;}},
     onComposition:value=>{composing=value;if(value)clearTimeout(notebook.timer);else notebook.schedule();},
   });
-  notebook = new Notebook(binary, store, {onChange:reflect,loadPackage:loadPackageBundle});
+  notebook = new Notebook(binary, store, {onChange:reflect,loadPackage:loadPackageBundle,deferScheduling:true});
   const dispose=notebook.dispose.bind(notebook);
   notebook.dispose=()=>{highlighter.dispose();sourceEditor.destroy();headerEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
   bind();
@@ -661,7 +662,32 @@ try {
     try {const response=await fetch('./published.roclet.zip');if(!response.ok) throw new Error('Publication is missing.');const {record}=await importBundle(await response.arrayBuffer(),manifest);await notebook.replace(record);notice('Opened your own editable copy. Press Run to recompute.');history.replaceState(null,'',location.pathname);}
     catch(error) {notice(`Publication could not be opened: ${error.message}`);}
   }
-  document.documentElement.dataset.ready = 'true'; return notebook;
-} catch (error) { $('status').textContent = 'Roclet could not start'; notice(error.message); }
+  // Parse and render the chosen document before exposing the editor. Evaluation
+  // and external package downloads start only after the notebook is usable.
+  const parsed = notebook.result?.model ? notebook.result : await notebook.inspect('parse');
+  if (notebook.state.sourceCurrent && notebook.state.mode === 'notebook') {
+    notebook.state.cells = cellsFrom(parsed, notebook.state.cells);
+    notebook.state.preamble = parsed.model.preamble;
+    notebook.state.metadata = parsed.model.metadata;
+  }
+  notebook.publish(parsed); reflect('document'); reflect('result');
+  if ($('notebook-app').querySelector('.roclet-math')) {
+    await settleMathStyles();
+    // Apply the stylesheet before observing font readiness. KaTeX embeds its
+    // fonts, but their decoding can still change the initial equation layout.
+    $('notebook-app').getBoundingClientRect();
+    await document.fonts.ready;
+  }
+  sourceEditor.view.requestMeasure(); headerEditor.view.requestMeasure();
+  for (const view of cards.values()) view.editor.view.requestMeasure();
+  await new Promise(requestAnimationFrame);
+  $('notebook-app').inert = false;
+  document.documentElement.dataset.startup = 'ready';
+  document.documentElement.dataset.ready = 'true';
+  notebook.resumeScheduling(); return notebook;
+} catch (error) {
+  notebook?.dispose();
+  dispatchEvent(new CustomEvent('roclet-startup-error', {detail:error}));
+}
 
 }

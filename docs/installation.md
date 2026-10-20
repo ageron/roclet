@@ -100,6 +100,16 @@ Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/math-conformance.html` on your local server. `zig build test` does not launch Chrome.
 Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
 
+With Node.js 22+ and Chrome installed, run the browser-side unit tests and the
+startup and notebook UI checks from the command line:
+
+```sh
+node --test tests/*.test.mjs
+node tools/browser-check.mjs --page web/startup-conformance.html --timeout 180000
+node tools/browser-check.mjs --page web/edit-ui-conformance.html --timeout 180000
+node tools/browser-check.mjs --page 'web/edit-ui-conformance.html?compact' --timeout 180000
+```
+
 ## Save, open, and share
 
 - **Browser autosave** keeps a local draft; it does not write to a downloaded file.

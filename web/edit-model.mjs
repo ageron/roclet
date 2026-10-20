@@ -36,9 +36,10 @@ export function cellsFrom(result, previous = []) {
 // Browser-owned edit history, persistence and worker lifecycle. Parsing, output
 // selection, lowering and encoding are exclusively the shared Roc document core.
 export class Notebook {
-  constructor(bytes, store, { session = new DocumentSession(bytes), debounce = 550, timeout = 15000, onChange = () => {}, loadPackage } = {}) {
+  constructor(bytes, store, { session = new DocumentSession(bytes), debounce = 550, timeout = 15000, onChange = () => {}, loadPackage, deferScheduling = false } = {}) {
     this.store = store; this.session = session; this.debounce = debounce; this.timeout = timeout; this.onChange = onChange;
     this.loadPackage = loadPackage;
+    this.schedulingDeferred = deferScheduling;
     this.state = null; this.result = null; this.history = []; this.future = []; this.views = new Map();
     this.diagnosticsDeferred = false; this.lastChecked = null; this.baselineId = null; this.resetBaseline = false;
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
@@ -114,12 +115,14 @@ export class Notebook {
   }
   schedule() {
     clearTimeout(this.timer);
+    if (this.schedulingDeferred) { this.timer = null; return; }
     this.timer = setTimeout(async () => {
       this.timer = null;
       if (this.state.autoRun) void this.run(undefined, { automatic: true });
       else void this.check();
     }, this.debounce);
   }
+  resumeScheduling() { this.schedulingDeferred = false; this.schedule(); }
   finishEditing({ flush = true } = {}) {
     if (!this.diagnosticsDeferred) return;
     this.diagnosticsDeferred = false; this.emit('diagnostics');
