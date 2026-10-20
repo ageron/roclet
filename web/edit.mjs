@@ -6,7 +6,7 @@ import { CompilerHighlighter } from './roc-highlighting.mjs';
 import { DraftStore } from './edit-store.mjs';
 import { PackagePrompts } from './package-dialog.mjs';
 import { NotebookPanel, closeMenus, showHelp } from './notebook-panel.mjs';
-import { Workbench, clonePanel, examples, exampleTitle, parseLayout, layoutUrl, engineDetailsKey, readPreference, writePreference } from './workbench.mjs';
+import { Workbench, clonePanel, examples, exampleTitle, parseLayout, layoutUrl, statusDot, engineDetailsKey, readPreference, writePreference } from './workbench.mjs';
 const $ = id => document.getElementById(id);
 let compilerManifest, libraryToken = 0, bench;
 const storage = (() => { try { return globalThis.localStorage; } catch { return null; } })();
@@ -39,6 +39,29 @@ function reflectHeader(reason) {
   $('notebook-view').setAttribute('aria-pressed', s.mode === 'notebook'); $('source-view').setAttribute('aria-pressed', s.mode === 'source');
   if (!notebook.result) $('generated').textContent = '';
   if (reason === 'saved' || reason === 'activate') void refreshLibrary();
+}
+// Compact two-panel layout: one tab per panel with a status dot, following the
+// ARIA tabs pattern. Only the active panel is shown.
+function renderTabs() {
+  const strip = $('panel-tabs'), tabs = bench.mode === 'tabs';
+  strip.hidden = !tabs;
+  if (!tabs) { strip.replaceChildren(); return; }
+  bench.panels.forEach((panel, index) => {
+    const slot = bench.slotOf(panel), selected = panel === bench.active, dot = statusDot(panel.notebook);
+    let tab = strip.children[index];
+    if (!tab) {
+      tab = document.createElement('button'); tab.setAttribute('role', 'tab');
+      const mark = document.createElement('span'); mark.className = 'tab-dot'; mark.setAttribute('aria-hidden', 'true');
+      const title = document.createElement('span'); title.className = 'tab-title';
+      tab.append(mark, title); strip.append(tab);
+    }
+    tab.id = `${slot}-tab`; tab.dataset.slot = slot; tab.setAttribute('aria-controls', panel.root.id);
+    tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1;
+    tab.querySelector('.tab-dot').dataset.state = dot.state; tab.querySelector('.tab-title').textContent = panel.title;
+    tab.setAttribute('aria-label', `${panel.title}${dot.label ? `, ${dot.label}` : ''}`); tab.title = tab.getAttribute('aria-label');
+    tab.onclick = () => bench.activate(panel);
+  });
+  while (strip.children.length > bench.panels.length) strip.lastElementChild.remove();
 }
 async function openSideDialog() {
   closeMenus();
@@ -138,6 +161,13 @@ function bind() {
   $('persist-storage').onclick=()=>perform(async()=>{$('storage-state').textContent=await storageStatus(true);});
   $('find').onclick=()=>active().find();
   $('open-side').onclick=()=>void openSideDialog();
+  $('panel-tabs').addEventListener('keydown', event => {
+    const tabs = [...$('panel-tabs').children], at = tabs.indexOf(event.target);
+    if (at < 0 || !['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (at + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    bench.activate(bench.panels[next]); $('panel-tabs').children[next]?.focus();
+  });
   $('close-side').onclick=()=>closePanel('right');
   $('engine-details').onclick=()=>{
     preferences.engineDetails=!preferences.engineDetails;writePreference(storage,engineDetailsKey,preferences.engineDetails);
@@ -170,7 +200,7 @@ function bind() {
 export async function startNotebook(drafts = new DraftStore()) {
 // The panel markup exists before the compiler loads so its status is visible.
 const template = $('notebook-panel-template'), root = clonePanel(template, '');
-root.dataset.panel = 'left'; $('workbench').append(root);
+root.dataset.panel = 'left'; root.id = 'left-panel'; $('workbench').append(root);
 try {
   const [binary, manifest] = await Promise.all([fetch('../artifacts/roclet.wasm').then(r => { if (!r.ok) throw new Error('Build the compiler adapter first.'); return r.arrayBuffer(); }), fetch('../artifacts/manifest.json').then(r => r.json())]);
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', binary))].map(v => v.toString(16).padStart(2,'0')).join('');
@@ -181,14 +211,14 @@ try {
   const highlighter=new CompilerHighlighter(binary), prompts=new PackagePrompts();
   const createPanel = ({ slot, prefix, store, onActivate, onChange }) => {
     const panelRoot = slot === 'left' ? root : clonePanel(template, prefix);
-    panelRoot.dataset.panel = slot;
+    panelRoot.dataset.panel = slot; panelRoot.id = `${slot}-panel`;
     if (slot !== 'left') $('workbench').append(panelRoot);
     const panel = new NotebookPanel({ root:panelRoot, prefix, bytes:binary, highlighter, store, preferences, onActivate, onChange,
       loadPackage:details=>prompts.request({...details,requester:panel.title}) });
     panel.part('close-panel').onclick = () => closePanel(bench.slotOf(panel));
     return panel;
   };
-  bench = new Workbench({ container:$('workbench'), createPanel, store:drafts, narrow:matchMedia('(max-width: 899px)'), onChange:(_,reason)=>reflectHeader(reason) });
+  bench = new Workbench({ container:$('workbench'), createPanel, store:drafts, narrow:matchMedia('(max-width: 899px)'), onChange:(_,reason)=>reflectHeader(reason), onLayout:()=>renderTabs() });
   const panel = await bench.addPanel('left'), notebook = panel.notebook;
   // The left notebook stands for the page in existing tests: disposing it
   // disposes every panel and the shared highlighter.
