@@ -6,8 +6,8 @@ compiler pin is `7894793d1454103d47c4368c942b3fec1406e8fd`.
 Direct GitHub release downloads fail browser CORS (`MissingAllowOriginHeader`).
 The supported workflow uses a download proxy while retaining the original Roc
 package URL and hash. Notebook compilation and evaluation stay in the browser.
-The PR remains a draft; the hosted Pages deployment still needs a deployed HTTPS
-proxy endpoint before its package examples can download dependencies.
+A hosted Pages deployment needs a separately deployed HTTPS proxy endpoint
+before its external-package examples can download dependencies.
 
 ## Download service
 

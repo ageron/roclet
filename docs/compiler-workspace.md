@@ -1,4 +1,4 @@
-# Compiler workspace implementation contract
+# Compiler workspace
 
 Roclet's execution path prepares one UTF-8 module from notebook code cells and
 uses the embedded Roc compiler for ordinary module and package semantics. The
@@ -21,7 +21,7 @@ not prevent normal compilation. Package downloads and persistent cache entries
 have bounded storage; warm source edits do not need network requests.
 
 Browser requests retain the existing document API. Ordinary project files are
-represented by `files: [{path, source}]` at the Studio boundary and transferred
+represented by `files: [{path, source}]` at the notebook boundary and transferred
 to WASM only when changed. File removal and workspace replacement are explicit.
 Source-only changes must not repeatedly transfer previous compiler graphs or
 unused internal syntax data. Result objects retain the fields used by editors,
@@ -32,27 +32,6 @@ declared runtime-consumer contract permits it. Debug/compile-time observations,
 per-output runtime failures, revision rejection, and cancellation remain part of
 the behavior. Compiling user notebook programs to WebAssembly is outside this
 change; runtime interpretation remains supported.
-
-## Integration and verification
-
-The integration branch is `integration/compiler-workspace`. Separate worktrees
-implement the compiler engine, document frontend, and browser cache/transport.
-Small compiler embedding API changes live on `work/roclet-embedding` in a separate
-Roc worktree; the user's sibling checkout remains untouched.
-
-Completion requires native and browser evidence for:
-
-- Existing execution, document, reactivity, rich-output, math, sharing, and Studio
-  UI contracts, including compact layouts, Unicode spans, and worker cancellation.
-- Multiple ordinary modules, nested module paths, and dependency packages, with
-  changes to imported files invalidating both builds and displayed results.
-- Browser artifact-cache writes and actual cache hits after a fresh worker,
-  changed-source/import invalidation, corrupt-cache recovery, and offline reuse.
-- Reduced steady-state request bytes and raw file transfers only for changes.
-- Warm Wall Area and multi-module timings, reporting build mode and cold startup
-  separately. Performance builds use ReleaseFast with debug symbols retained;
-  safety validation is a separate build where needed.
-- Reproducible builds, portable project bundles, and complete offline assets.
 
 ## What changed
 
@@ -74,22 +53,22 @@ observations.
 JSON remains the small public request/result envelope. It no longer transports
 the document syntax model between internal compiler stages. The compiler receives
 source slices directly. Changed project files and binary compiler-cache entries
-use byte-oriented WASM entry points. Compact Studio responses omit unused
+use byte-oriented WASM entry points. Compact notebook responses omit unused
 intermediate syntax, duplicate source, and export encodings. Subsequent requests
 also omit the worker's already confirmed dependency graph.
 
 The worker keeps its virtual filesystem and live compiler cache between edits.
 IndexedDB stores checked/canonicalized artifacts under the compiler identity and
-actual WASM digest, with entry checksums and a global 32 MiB/512-entry artifact bound. Verified
-package archives have their own 32 MiB/512-entry eviction budget. The
+actual WASM digest, with entry checksums and a global 32 MiB/512-entry artifact
+bound. Verified package archives have their own 32 MiB/512-entry eviction budget. The
 live artifact cache has a separate 24 MiB/512-entry bound. Source files and
 verified package inputs are not evicted as compiler artifacts. Fresh workers
 restore artifacts; changed source and dependencies use the compiler's own keys
 for invalidation. Package resolution uses Roc's resolver and hash verification.
 
 The Roc dependency is pinned in `build.zig.zon`. `tools/prepare-compiler.sh`
-archives the pinned sibling revision and applies the reviewed embedding patch
-inside an immutable prepared checkout. The sibling working tree is not edited.
+archives the pinned compiler revision and applies the reviewed embedding patch
+inside a prepared checkout. The sibling working tree is not edited.
 The patch exposes typed embedding facts for notebook expressions, debug-event
 provenance, retained runtime ownership, and compile-time failure classification;
 the adapter does not infer compiler state from diagnostic text.
@@ -136,79 +115,61 @@ Run the benchmark with:
 node tools/browser-check.mjs --page web/workspace-benchmark.html --timeout 180000
 ```
 
-## Workspace baseline validation
+## Notebook assertions
 
-The compiler build, native tests, package generation, and artifact manifest
-check passed. The native ReleaseFast engine passed 36 compiler cases,
-121 document contracts (196 browser parity requests), and 30 complete M4
-responses. Unit tests also cover compact responses, source limits, publication
-hashing, cache envelopes, cache eviction, and verified package extraction; the
-workspace correctness tests use ReleaseSafe. The Node unit/workspace suites
-passed. Packaging produced the portable, site, and native-runner archives and
-verified 72 offline assets.
-
-The complete 121-document suite also passed against the Debug engine. A final
-Studio check caught a retained-compilation error path that discarded reports
-when an imported file was missing. The adapter now drains and preserves those
-compiler reports before retaining the failed revision. Its regression fixture
-requires the missing module's path in diagnostics and an empty value list.
-
-On the corrected published ReleaseFast WASM, Studio passed all 46 UI contracts
-at both desktop and compact widths, all 20 revision/persistence/editing/failure/
-cancellation contracts, and all 18 rich-output contracts. Screenshots were
-inspected for both layouts, including the visible missing-file diagnostic.
-
-The final six-suite Chrome run passed 11 browser unit checks and 36 compiler
-parity cases; all 196 complete document responses and 58 fresh-worker runs; all
-30 M4 parity cases plus reactive editing, rename, and failure isolation; seven
-math contracts; 11 sharing/offline contracts; and the workspace/cache/package
-suite. Missing-module diagnostics passed in both retained and fresh workers.
-The benchmark and all final browser suites verified the WASM digest above.
-
-Subsequent [real-package browser validation](browser-package-validation.md)
-found that direct GitHub release downloads are blocked by CORS. The bundled
-server now provides a bounded, hash-verifying archive proxy. A configurable HTTPS
-endpoint supports static hosting; original package identities and browser
-compilation are preserved. See the validation report for the real-release checks.
-
-
-## Package-download follow-up
-
-The configurable GitHub archive proxy and roc-time demonstration were validated
-on 2026-10-20 with the rebuilt ReleaseFast native/WASM pair. The new WASM digest
-is `3791ec6d865abce743e3d8a5c868418aeae740b3ff3bb73b88296ad0e7296b0f`.
-The native suites (121 documents, 36 compiler cases, and 30 M4 responses), all six
-browser suites above, artifact verification, and packaging passed again. The
-publication now contains 75 verified offline assets. The earlier timing table
-remains a measurement of its explicitly identified baseline artifact.
-
-The actual Studio downloads released roc-parser/Unicode and roc-time packages
-through the supported proxy path. Desktop/local-endpoint and compact/separate-
-origin roc-time tests verify editable scheduling results, reversed-date errors,
-worker restart, and fresh-worker execution with package networking disabled.
-The retained revision arena increased from 256 to 512 MiB so the larger package
-graphs also pass native lowering. See the
-[package validation report](browser-package-validation.md) for reproduction and
-[hosting instructions](installation.md#package-downloads-on-a-static-host) for
-the separately deployed HTTPS service required by GitHub Pages.
-
-
-## Notebook assertion follow-up
-
-Top-level `expect` statements now select Roc's checked test roots alongside the
+Top-level `expect` statements select Roc's checked test roots alongside the
 notebook's output roots. They share the revision's checked graph and lowered
 image, use resolved dependencies for reactive reruns, and display source-linked
 pass/fail results. Assertion failures preserve independent outputs; imported
 module/package test suites are not selected. See the
 [adapter contract](../compiler-adapter/README.md#notebook-assertions).
 
-The rebuilt ReleaseFast pair passes 141 native document contracts, 216 complete
-native/WASM comparisons and 78 fresh-worker runs, 36 compiler cases, 30 M4
-responses, and desktop/compact assertion and Studio UI probes. The formatted
-calendar demo evaluates six outputs and two assertions with one frontend build
-and one lowering, including restoration with package networking disabled.
-Compiler artifacts and package archives now have separate bounded eviction
-budgets so derived-artifact churn does not discard verified package inputs.
-The current WASM digest is
-`3c2bc4a897ef75df55f2282242784724f8d56214a53a6e149ce06ae1bad447ec`;
-the timing table above still describes its earlier baseline.
+## Validation
+
+The merged ReleaseFast native/WASM pair passes:
+
+- 146 native document contracts, 36 compiler cases, and 30 complete selective/full
+  evaluation responses.
+- 226 complete native/WASM document comparisons and 80 fresh-worker runs,
+  including Unicode mappings, failure isolation, missing-module diagnostics,
+  checked runnable exports, and the upstream pinned Display package.
+- 46 Edit UI contracts at each desktop/compact width, 20 lifecycle contracts,
+  18 rich-output contracts, seven math contracts, 11 sharing/offline contracts,
+  and the workspace/cache/package suite.
+- Desktop/compact top-level assertion and App header probes, including source
+  links, dependency changes, selected-cell execution, undo, and persistence.
+- Real released roc-parser 2.0.0 with transitive Unicode 4.2.0, and roc-time 0.2.0,
+  through local and separate-origin archive proxy configurations.
+- Native unit/workspace checks, 11 Node unit contracts, nine Node workspace tests,
+  five ordinary-Roc demo/fixture runs against an extracted Display package,
+  artifact verification, and packaging with 82 verified offline assets.
+
+The formatted calendar notebook evaluates six outputs and two assertions with
+one frontend build and one lowering, including fresh-worker restoration with
+package networking disabled. Compiler artifacts and verified package archives
+have separate bounded eviction budgets, so compiler-cache churn does not discard
+package inputs. Screenshots were inspected at desktop and compact widths.
+
+The validated browser artifact is 25,097,937 bytes, SHA-256
+`cd92bdd279d304fecf80ed7cc6602923808a72fa5131df04fa521eb8fa1f2c7e`.
+The performance table above describes its explicitly identified earlier artifact;
+those timings were not remeasured after the package/assertion changes.
+
+Workspace correctness tests use ReleaseSafe. The document suite also passes
+against the Debug engine. The expanded formatted roc-time notebook currently
+reports `OutOfMemory` with the Debug engine; native and browser ReleaseFast
+execution pass within the 512 MiB retained-revision arena.
+
+## Package hosting
+
+Direct GitHub release downloads are blocked by browser CORS. The bundled
+`roclet-serve` provides a bounded, hash-verifying archive proxy. A configurable
+endpoint supports static hosting while preserving original package identities
+and compilation in the browser. GitHub Pages needs a separately deployed HTTPS
+endpoint for first-time downloads of external packages; this repository does not
+provision that service. The pinned Display implementation is embedded and works
+offline without a proxy.
+
+See the [real-package validation report](browser-package-validation.md) for
+reproduction and [hosting instructions](installation.md#package-downloads-on-a-static-host)
+for endpoint configuration and deployment.

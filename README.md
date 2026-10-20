@@ -41,7 +41,7 @@ browser storage is separate from files on your computer.
 ## Early days
 
 Roclet is an experimental alpha. **Only Chrome has been tested.** Other browsers
-may work, but haven't been verified yet. Native builds have been tested on macOS
+may work, but haven't been verified yet. Native builds have been tested on Linux x86_64 and macOS
 with Apple Silicon.
 
 Roclet uses a pinned development version of Roc. Widgets and plots are still

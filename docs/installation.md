@@ -28,7 +28,7 @@ reopen to activate it.
 
 When a release provides `roclet.zip`, extract it and open a terminal in the
 extracted directory. The included server must match your operating system and
-architecture; the current native build is tested on macOS Apple Silicon only.
+architecture; native builds have been tested on Linux x86_64 and macOS Apple Silicon.
 
 ```sh
 ./roclet-serve . 4173

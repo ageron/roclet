@@ -36,7 +36,7 @@ actions include `parse`, `convert`, `normalize`, `view`, `export`, `compose`,
 and source strings, and internal parser facts. Editor cells, mappings,
 diagnostics, dependency graphs, plans, rendering, and evaluated values retain
 their ordinary shapes. Export/format actions still return complete documents.
-The Studio uses compact responses for interactive analysis and evaluation.
+The notebook uses compact responses for interactive analysis and evaluation.
 
 JSON remains the public control/result envelope. It carries document settings,
 revision tokens, diagnostics, graphs, and presentation data. Raw file contents,
@@ -88,7 +88,7 @@ move them into code cells to execute them.
 A browser session keeps one worker and WASM instance across completed requests.
 The compiler's builtins and virtual filesystem survive requests. Editable files
 live under `/workspace`; `Main.roc` and `main.roc` are reserved for the generated
-notebook. The Studio stores relative portable paths and translates them into
+notebook. The notebook stores relative portable paths and translates them into
 workspace paths. It sends only changed files and explicit removals, remounting the
 full desired set after worker replacement. **File → Project files** edits these
 sources; portable Roclet bundles include them once under `project/`.
