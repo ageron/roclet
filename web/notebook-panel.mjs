@@ -220,24 +220,65 @@ export class NotebookPanel {
       notebook.change(s=>{ const first=s.cells[indices[0]];first.source=sources.join('\n');first.attributes=cells.find(c=>c.attributes?.trim())?.attributes??'';first.outputs=[];s.cells=s.cells.filter((c,i)=>!indices.slice(1).includes(i)); });
       focusCell(key);
     }
-    // The find dialog is shared by the page; it searches the panel that opened it.
+    // Each panel owns its search controls, matches and cancellable worker.
+    let searchWorker, searchTimer, searchGeneration=0, searchMatches=[], searchIndex=-1, searchSnapshot='', searchRefresh;
+    const searchSources=()=>notebook.state.mode==='source'?[{key:null,source:notebook.state.source}]:editable().map(({key,source})=>({key,source}));
+    const searchIdentity=()=>JSON.stringify([notebook.state.id,notebook.state.mode,searchSources()]);
     function findNotebook() {
-      closeMenus();$('find-query').oninput=updateFind;$('find-dialog').showModal();$('find-query').focus();updateFind();
+      closeMenus();part('find-bar').hidden=false;part('find-query').focus();part('find-query').select();updateFind();
     }
-    function updateFind() {
-      const query=$('find-query').value.toLocaleLowerCase();$('find-results').replaceChildren();if(!query) return;
-      let count=0;
-      const sources=notebook.state.mode==='source'?[{source:notebook.state.source}]:editable();
-      for(const [index,cell] of sources.entries()) {
-        const lines=cell.source.split('\n');
-        for(const [line,text] of lines.entries()) {
-          const column=text.toLocaleLowerCase().indexOf(query);if(column<0) continue;
-          const hit=button(`${notebook.state.mode==='source'?'Source':`Cell ${index+1}`} · ${line+1}: ${text.slice(0,160)}`,()=>{
-            $('find-dialog').close();if(cell.key) {editCell(cell.key);cards.get(cell.key).editor.goTo(line+1,column+1);}else sourceEditor.goTo(line+1,column+1);
-          });$('find-results').append(hit);if(++count===100) return;
-        }
-      }
-      if(!count) $('find-results').textContent='No matches';
+    function closeFind() {
+      part('find-bar').hidden=true;searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++;
+      if(notebook.state.mode==='source')sourceEditor.focus();else editCell(selection.focus);
+    }
+    function searchStatus(message) {
+      part('find-results').textContent=message??(searchMatches.length?`${searchIndex+1} of ${searchMatches.length}`:'No matches');
+      for(const id of ['find-prev','find-next','replace-next','replace-all'])part(id).disabled=!searchMatches.length;
+    }
+    function revealMatch() {
+      const match=searchMatches[searchIndex];if(!match)return;
+      const focused=document.activeElement;
+      let editor=sourceEditor;
+      if(match.key){selection.select(match.key);selection.mode='text';selectionActive=true;renderSelection();editor=cards.get(match.key)?.editor;}
+      editor?.selectMatch(match.from,match.to);editor?.dom.scrollIntoView({block:'nearest'});
+      if(part('find-bar').contains(focused))focused.focus({preventScroll:true});
+      searchStatus();
+    }
+    function updateFind(preferred=null) {
+      if(part('find-bar').hidden)return;
+      searchWorker?.terminate();clearTimeout(searchTimer);const generation=++searchGeneration;
+      searchMatches=[];searchIndex=-1;searchSnapshot=searchIdentity();searchStatus(part('find-query').value?'Searching…':'Enter text to find');
+      if(!part('find-query').value)return;
+      const worker=searchWorker=new Worker(new URL('./notebook-search-worker.mjs',import.meta.url),{type:'module'});
+      const fail=message=>{if(generation!==searchGeneration)return;worker.terminate();clearTimeout(searchTimer);searchStatus(message);};
+      searchTimer=setTimeout(()=>fail('Search took too long. Try a simpler expression.'),1500);
+      worker.onerror=()=>fail('Search could not start. Please reload and try again.');
+      worker.onmessage=({data})=>{
+        if(generation!==searchGeneration)return;clearTimeout(searchTimer);worker.terminate();
+        if(searchSnapshot!==searchIdentity()){updateFind();return;}
+        if(data.error){searchStatus(data.error);return;}
+        searchMatches=data.matches;searchIndex=searchMatches.length?0:-1;
+        if(preferred){const keys=searchSources().map(c=>c.key), cell=keys.indexOf(preferred.key);const at=searchMatches.findIndex(m=>keys.indexOf(m.key)>cell||(m.key===preferred.key&&m.from>=preferred.from));if(at>=0)searchIndex=at;}
+        searchStatus();if(part('find-bar').contains(document.activeElement))revealMatch();
+      };
+      worker.postMessage({sources:searchSources(),query:part('find-query').value,caseSensitive:part('find-case').checked,regex:part('find-regex').checked,replacement:part('replace-query').value});
+    }
+    function stepFind(delta) {
+      if(searchSnapshot!==searchIdentity()){updateFind();return;}
+      if(!searchMatches.length)return;searchIndex=(searchIndex+delta+searchMatches.length)%searchMatches.length;revealMatch();
+    }
+    function replaceFind(all) {
+      if(searchSnapshot!==searchIdentity()){updateFind();return;}
+      if(!searchMatches.length)return;
+      const chosen=all?searchMatches:[searchMatches[searchIndex]], current=chosen[0];
+      const sources=new Map(searchSources().map(c=>[c.key,c.source]));
+      for(const match of [...chosen].reverse()){const source=sources.get(match.key);sources.set(match.key,source.slice(0,match.from)+match.insert+source.slice(match.to));}
+      notebook.change(s=>{
+        if(s.mode==='source')s.source=sources.get(null);
+        else for(const cell of s.cells)if(sources.has(cell.key)&&cell.source!==sources.get(cell.key)){cell.source=sources.get(cell.key);cell.outputs=[];delete cell.editorSelection;}
+      },{source:notebook.state.mode==='source'});
+      clearTimeout(searchRefresh);
+      updateFind(all?null:{key:current.key,from:current.from+current.insert.length+(current.from===current.to?1:0)});
     }
     function insertion(position) {
       const rail = document.createElement('div'); rail.className = 'insertion';
@@ -486,6 +527,7 @@ export class NotebookPanel {
       renderSelection();
       if (reason === 'result' || reason === 'edit' || reason === 'diagnostics') renderResults();
       if (!notebook.result && reason === 'status') renderResults();
+      if(!part('find-bar').hidden && searchSnapshot!==searchIdentity()){searchMatches=[];searchStatus('Searching…');clearTimeout(searchRefresh);searchRefresh=setTimeout(()=>updateFind(),120);}
     }
     const sourceEditor=new CellEditor(part('source'),{highlighter,
       label:'Roclet notebook source',onChange:(value,isComposing,positions)=>notebook.editSource(value,isComposing || composing,positions),
@@ -528,9 +570,15 @@ export class NotebookPanel {
       if(part('app-header').open)headerEditor.view.requestMeasure();
     };
     part('back-notebook').onclick = () => this.setMode('notebook');
+    for(const id of ['find-query','replace-query','find-case','find-regex'])part(id).oninput=()=>updateFind();
+    part('find-close').onclick=closeFind;part('find-prev').onclick=()=>stepFind(-1);part('find-next').onclick=()=>stepFind(1);
+    part('replace-next').onclick=()=>replaceFind(false);part('replace-all').onclick=()=>replaceFind(true);
     root.addEventListener('keydown', event => {
       if (!notebook.state || panel.loading || event.defaultPrevented || event.isComposing || composing || event.keyCode === 229 || document.querySelector('dialog[open]')) return;
       const mod = event.metaKey || event.ctrlKey, key = event.key.toLowerCase();
+      if(!part('find-bar').hidden && event.key==='Escape'){event.preventDefault();event.stopPropagation();closeFind();return;}
+      if(part('find-bar').contains(event.target)&&event.key==='Enter'){event.preventDefault();event.stopPropagation();stepFind(event.shiftKey?-1:1);return;}
+
       const target = event.target, card = target.closest?.('.cell');
       const menu = target.closest?.('details[open]');
       const inNotebook = notebook.state.mode === 'notebook' && part('notebook').contains(target);
@@ -621,7 +669,7 @@ export class NotebookPanel {
         if (schedule) notebook.resumeScheduling();
       }
     };
-    this.disposeEditors = () => { sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) view.editor.destroy(); };
+    this.disposeEditors = () => { searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++; sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) view.editor.destroy(); };
   }
   get title() { return this.notebook.state?.title || 'Untitled'; }
   get loading() { return this.root.dataset.loading === 'true'; }

@@ -112,6 +112,24 @@ try {
   }
   report('D1 each panel has its own title bar at the top and status bar at the bottom; titles, document title and layout (columns or tabs) are right');
 
+  // Search belongs to a panel, including its controls, query and undo history.
+  await show('left');bench.left.find();
+  part('left','find-query').value='Geometry';part('left','find-query').dispatchEvent(new Event('input'));
+  await until(()=>part('left','find-results').textContent==='1 of 2','left search');
+  await show('right');bench.right.find();
+  part('right','find-query').value='scale';part('right','find-query').dispatchEvent(new Event('input'));
+  part('right','replace-query').value='factor';part('right','replace-query').dispatchEvent(new Event('input'));
+  await until(()=>part('right','find-results').textContent==='1 of 3','right search');
+  const leftSource=JSON.stringify(L().state.cells),rightSource=R().state.cells.map(c=>c.source);
+  part('right','replace-all').click();await until(()=>part('right','find-results').textContent==='No matches','replacement');
+  assert.equal(JSON.stringify(L().state.cells),leftSource);
+  assert.equal(part('left','find-query').value,'Geometry');
+  assert.match(R().state.cells[3].source,/out_factord = factor/);
+  part('right','find-close').click();bench.right.undo(false);
+  assert.deepEqual(R().state.cells.map(c=>c.source),rightSource);
+  await show('left');part('left','find-close').click();
+  report('Find & Replace keeps independent queries and changes only the intended panel, with one-step undo');
+
   const [leftRun, rightRun] = await Promise.all([L().run(), R().run()]);
   assert(leftRun && rightRun, 'A concurrent run did not complete');
   assert(sent.left.at(-1).overlap || sent.right.at(-1).overlap, 'The two requests were never in flight at the same time');

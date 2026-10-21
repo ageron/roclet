@@ -1,5 +1,6 @@
 import { activateHover, closeHoverTooltips } from '@codemirror/view';
 import { EditorSelection } from '@codemirror/state';
+import { openSearchPanel } from '@codemirror/search';
 import { editorFor } from './cell-editor.mjs';
 import { startNotebook } from './edit.mjs';
 import { DraftStore } from './edit-store.mjs';
@@ -314,9 +315,16 @@ try {
   setCursor(0,2,0);key('-',{metaKey:true,shiftKey:true});key('Escape');key('ArrowUp',{shiftKey:true});key('m',{shiftKey:true});await until(()=>cards().length===2);assert.match(source(inputs()[0]),/alpha = 1\s+beta = 2/);
   key('ArrowDown',{shiftKey:true});key('m',{shiftKey:true});await until(()=>$('notice').textContent.includes('same type'));assert.equal(cards().length,2);
   report('split and merge are undoable; mixed cell kinds are kept intact');
-  key('f',{metaKey:true,shiftKey:true});assert($('find-dialog').open);$('find-query').value='beta';$('find-query').dispatchEvent(new Event('input'));assert.equal($('find-results').querySelectorAll('button').length,1);$('find-results').querySelector('button').click();await measure();assert(document.activeElement===inputs()[0]);assert.equal(viewAt(0).state.doc.lineAt(viewAt(0).state.selection.main.head).text,'beta = 2');
-  key('f',{metaKey:true});await measure();assert(cards()[0].querySelector('.cm-search input'));key('Escape');await measure();assert(!cards()[0].querySelector('.cm-search'));
-  report('notebook search navigates to the match; cell find/replace opens and dismisses independently');
+  key('f',{metaKey:true});assert(!$('find-bar').hidden);
+  $('find-query').value='beta';$('find-query').dispatchEvent(new Event('input'));
+  await until(()=>$('find-results').textContent==='1 of 1');await measure();
+  assert.equal(viewAt(0).state.sliceDoc(viewAt(0).state.selection.main.from,viewAt(0).state.selection.main.to),'beta');
+  $('replace-query').value='gamma';$('replace-query').dispatchEvent(new Event('input'));
+  await until(()=>$('find-results').textContent==='1 of 1');$('replace-all').click();
+  await until(()=>$('find-results').textContent==='No matches');assert.match(source(inputs()[0]),/gamma = 2/);
+  $('find-close').click();assert($('find-bar').hidden);key('z',{metaKey:true});assert.match(source(inputs()[0]),/beta = 2/);
+  key('f',{metaKey:true,shiftKey:true});assert(!$('find-bar').hidden);key('Escape');assert($('find-bar').hidden);
+  report('notebook Find & Replace navigates, replaces, undoes and closes with either search shortcut');
   notebook.change(s=>{s.cells=[makeCell('code','a = 3\nb')];});
   inputs()[0].focus();key('Enter',{metaKey:true});await until(()=>notebook.result?.status==='diagnostic');
   assert.equal(document.querySelectorAll('.value').length,0);
@@ -390,7 +398,7 @@ try {
   assert(document.activeElement===inputs()[0]);assert.deepEqual(cards().map(c=>c.querySelector('.value pre').textContent),['5.0','6.0']);
   report('automatic syntax errors stay hidden while typing; Escape and Cmd+Enter reveal them, resumed typing hides them and valid results still update');
   input(inputs()[0],'a = ');await until(()=>notebook.result?.status==='diagnostic');
-  key('ArrowLeft');key('f',{metaKey:true});await measure();assert(cards()[0].querySelector('.cm-search input'));
+  key('ArrowLeft');openSearchPanel(viewAt(0));await measure();assert(cards()[0].querySelector('.cm-search input'));
   assert.equal(document.querySelectorAll('.diagnostic').length,0);
   key('Escape');await measure();assert.equal(document.querySelectorAll('.diagnostic').length,0);
   inputs()[1].focus();await until(()=>document.querySelector('.diagnostic'));

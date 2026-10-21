@@ -139,6 +139,13 @@ dialog { background:var(--page); }
 .app-header > summary::before { content:'▸'; color:var(--muted); } .app-header[open] > summary::before { content:'▾'; }
 .app-header > summary span { color:var(--muted); font-size:.75rem; } .app-header-editor { border-top:1px solid var(--line); min-width:0; }
 @container panel (max-width:680px) { .app-header { margin-left:30px; } .app-header > summary { padding:.65rem .8rem; } }
+[data-part="find-bar"] { position:sticky; top:0; z-index:10; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface,Canvas); margin-bottom:16px; }
+.find-row {display:flex;align-items:center;gap:8px;flex-wrap:wrap}.find-row + .find-row{margin-top:8px}.find-row > input{flex:1;min-width:160px}.find-row label{display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:12px}[data-part="find-results"]{font-size:12px}[data-part="find-bar"][hidden]{display:none}
+.app-header { margin:0 0 1.2rem 42px; border:1px solid var(--line); border-radius:7px; background:var(--surface); min-width:0; }
+.app-header > summary { display:flex; align-items:center; flex-wrap:wrap; gap:.6rem; padding:.75rem 1rem; font-size:.84rem; }
+.app-header > summary::before { content:'▸'; color:var(--muted); } .app-header[open] > summary::before { content:'▾'; }
+.app-header > summary span { color:var(--muted); font-size:.75rem; } .app-header-editor { border-top:1px solid var(--line); min-width:0; }
+@media(max-width:680px) { .app-header { margin-left:30px; } .app-header > summary { padding:.65rem .8rem; } }
 </style>
 </head>
 <body>
@@ -160,7 +167,7 @@ dialog { background:var(--page); }
   </div></details>
   <details class="popover" id="edit-menu"><summary aria-label="Edit menu">Edit</summary><div class="menu-panel"><p class="menu-target" hidden></p>
     <button id="undo" disabled>Undo <kbd>⌘ / Ctrl Z</kbd></button><button id="redo" disabled>Redo <kbd>⇧ ⌘ / Ctrl Z</kbd></button>
-    <div class="menu-divider"></div><button id="find">Find in notebook <kbd>⇧ ⌘ / Ctrl F</kbd></button>
+    <div class="menu-divider"></div><button id="find">Find &amp; replace <kbd>⌘ / Ctrl F</kbd></button>
   </div></details>
   <details class="popover" id="view-menu"><summary aria-label="View menu">View</summary><div class="menu-panel"><p class="menu-target" hidden></p>
     <button id="notebook-view" aria-pressed="true">Notebook view</button><button id="source-view" aria-pressed="false">Source view</button>
@@ -184,6 +191,10 @@ dialog { background:var(--page); }
   <div class="run-actions"><label class="auto-label" title="Recompute after editing"><input data-part="auto" type="checkbox" checked>Auto-run</label><div class="run-slot"><button data-part="run" class="run-button" title="Run all cells">▷ Run all</button><button data-part="stop" class="stop" title="Stop execution" hidden>Stop</button></div><button data-part="close-panel" class="close-panel" title="Close this notebook panel" aria-label="Close this notebook panel" hidden>×</button></div>
   </div>
   <div class="shell">
+<section data-part="find-bar" aria-label="Find and replace" hidden>
+<div class="find-row"><input data-part="find-query" type="search" aria-label="Search notebook" placeholder="Find in notebook…"><label><input data-part="find-case" type="checkbox"> Match case</label><label><input data-part="find-regex" type="checkbox"> Regular expression</label><button data-part="find-prev" aria-label="Previous match">↑</button><button data-part="find-next" aria-label="Next match">↓</button><button data-part="find-close" aria-label="Close search">×</button></div>
+<div class="find-row"><input data-part="replace-query" aria-label="Replacement text" placeholder="Replace with…"><button data-part="replace-next">Replace next</button><button data-part="replace-all">Replace all</button><span data-part="find-results" role="status" aria-live="polite"></span></div>
+</section>
   <div data-part="notice" class="notice" role="alert" hidden></div><div data-part="document-diagnostics" class="document-diagnostics" aria-live="polite"></div>
   <details data-part="app-header" class="app-header"><summary><strong>App header</strong><span>Packages & imports</span></summary><div data-part="app-header-source" class="app-header-editor"></div></details>
   <section data-part="notebook" aria-label="Notebook cells" tabindex="-1" aria-describedby="navigation-help"><div data-part="cells"></div></section>
@@ -197,7 +208,7 @@ dialog { background:var(--page); }
 <dialog id="shortcuts-dialog" aria-labelledby="shortcuts-title"><div class="dialog-title"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button data-close aria-label="Close keyboard shortcuts">×</button></div>
   <p>Inside a cell, type and select text as usual. Press <kbd>Esc</kbd> to select the whole cell.</p>
   <dl class="shortcuts"><dt>Enter</dt><dd>Edit the selected cell</dd><dt>↑ / ↓</dt><dd>Select previous / next cell</dd><dt>Shift ↑ / ↓</dt><dd>Extend or shrink the cell selection</dd><dt>⌘ / Ctrl A</dt><dd>Select all cells</dd><dt>⌘ / Ctrl C, X, V</dt><dd>Copy, cut, paste cells after the selection</dd><dt>A / B</dt><dd>Insert code above / below the selection</dd><dt>Delete / Backspace</dt><dd>Delete selected cells (undoable)</dd><dt>⌘ / Ctrl Enter</dt><dd>Run the current cell</dd><dt>Shift Enter</dt><dd>Run, then select the next cell</dd><dt>Alt Enter</dt><dd>Insert below, then run the current cell</dd><dt>⌘ / Ctrl Z</dt><dd>Undo (add Shift to redo)</dd><dt>⌘ / Ctrl S</dt><dd>Download a copy</dd><dt>?</dt><dd>Show this help in cell selection mode</dd></dl>
-  <h3>While editing text</h3><dl class="shortcuts"><dt>↑ / ↓</dt><dd>Move a line; cross to the adjacent cell at an edge</dd><dt>Page Up / Down</dt><dd>Move one editor page, preserving the column</dd><dt>Cmd ↑ / ↓</dt><dd>Same as Page Up / Down</dd><dt>Home / Cmd ←</dt><dd>Move to indentation, then the start of the line</dd><dt>Ctrl Space</dt><dd>Complete a checked notebook name (with its type)</dd><dt>F2</dt><dd>Rename the binding under the cursor</dd><dt>Hover a name</dt><dd>Show its checked type</dd><dt>⌘ / Ctrl /</dt><dd>Comment/uncomment the current or selected lines</dd><dt>⌘ / Ctrl F</dt><dd>Find/replace in this cell</dd><dt>⇧ ⌘ / Ctrl F</dt><dd>Find across the notebook</dd><dt>⇧ ⌘ / Ctrl −</dt><dd>Split cell at cursor</dd><dt>Shift M</dt><dd>Merge selected cells (cell selection mode)</dd><dt>Alt / Option click</dt><dd>Add a cursor</dd><dt>⌘ / Ctrl Alt ↑ / ↓</dt><dd>Add a cursor above / below</dd><dt>⌘ / Ctrl D</dt><dd>Select the next occurrence</dd><dt>⌘ / Ctrl Shift L</dt><dd>Select all occurrences</dd><dt>Alt Shift drag</dt><dd>Select a rectangle</dd></dl><p>Multiple cursors edit within one cell. Shift extends text selections without leaving the cell. Vertical motion keeps its intended column across shorter lines and cells.</p>
+  <h3>While editing text</h3><dl class="shortcuts"><dt>↑ / ↓</dt><dd>Move a line; cross to the adjacent cell at an edge</dd><dt>Page Up / Down</dt><dd>Move one editor page, preserving the column</dd><dt>Cmd ↑ / ↓</dt><dd>Same as Page Up / Down</dd><dt>Home / Cmd ←</dt><dd>Move to indentation, then the start of the line</dd><dt>Ctrl Space</dt><dd>Complete a checked notebook name (with its type)</dd><dt>F2</dt><dd>Rename the binding under the cursor</dd><dt>Hover a name</dt><dd>Show its checked type</dd><dt>⌘ / Ctrl /</dt><dd>Comment/uncomment the current or selected lines</dd><dt>⌘ / Ctrl F</dt><dd>Find and replace in the active notebook</dd><dt>⇧ ⌘ / Ctrl F</dt><dd>Find and replace in the active notebook</dd><dt>⇧ ⌘ / Ctrl −</dt><dd>Split cell at cursor</dd><dt>Shift M</dt><dd>Merge selected cells (cell selection mode)</dd><dt>Alt / Option click</dt><dd>Add a cursor</dd><dt>⌘ / Ctrl Alt ↑ / ↓</dt><dd>Add a cursor above / below</dd><dt>⌘ / Ctrl D</dt><dd>Select the next occurrence</dd><dt>⌘ / Ctrl Shift L</dt><dd>Select all occurrences</dd><dt>Alt Shift drag</dt><dd>Select a rectangle</dd></dl><p>Multiple cursors edit within one cell. Shift extends text selections without leaving the cell. Vertical motion keeps its intended column across shorter lines and cells.</p>
   <p>Click a cell number to select it; Shift-click to select a range. Open ⋯ on any selected cell to move, collapse/expand, or merge the group. Click prose to edit Markdown. Tab moves between controls; it indents in an editor. Press Esc first to navigate controls.</p>
 </dialog>
 <dialog id="share-dialog" aria-labelledby="share-title"><div class="dialog-title"><h2 id="share-title">Export & share</h2><button data-close aria-label="Close export">×</button></div>
@@ -210,7 +221,6 @@ dialog { background:var(--page); }
 <p id="offline-state" role="status">Not prepared for offline use</p><button id="prepare-offline">Prepare for offline use</button>
 <p>This installs a verified copy of Roclet and its compiler. Bookmark this Roclet address, then reopen it to edit and run without a network connection. Updates take effect after all Roclet tabs are closed.</p>
 <p id="storage-state" role="status"></p><button id="persist-storage">Keep browser storage</button><p>Browser drafts belong to this origin and profile. Keep downloaded copies of important notebooks.</p></dialog>
-<dialog id="find-dialog" aria-labelledby="find-title"><div class="dialog-title"><h2 id="find-title">Find in notebook</h2><button data-close aria-label="Close search">×</button></div><p><input id="find-query" type="search" aria-label="Search notebook" placeholder="Find text…" style="width:100%"></p><div id="find-results" style="display:grid;gap:.3rem"></div></dialog>
 <dialog id="project-dialog" aria-labelledby="project-title"><div class="dialog-title"><h2 id="project-title">Project files</h2><button data-close aria-label="Close project files">×</button></div>
 <p>Add Roc modules and text files beside your notebook. Import a module with <code>import Geometry</code>. Download a Roclet bundle to include these files.</p>
 <p><label class="file-label">Add files…<input id="project-upload" type="file" multiple accept=".roc,.json,.csv,.txt,text/plain" aria-label="Add project files"></label></p>

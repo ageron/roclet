@@ -250,7 +250,7 @@ function bind() {
     const menu = target.closest?.('details[open]');
     if (event.key === 'Escape' && menu) { event.preventDefault(); event.stopPropagation(); menu.open = false; menu.querySelector('summary').focus(); return; }
     if (!active().notebook.state) return;
-    if (mod && event.shiftKey && key==='f') {event.preventDefault();event.stopPropagation();active().find();return;}
+    if (mod && key==='f') {event.preventDefault();event.stopPropagation();active().find();return;}
     if (mod && key === 's') { event.preventDefault(); event.stopPropagation(); $('download').click(); return; }
     if (target !== document.body) return;
     if (mod && key === 'z') { event.preventDefault(); event.stopPropagation(); active().notebook.undo(event.shiftKey, { editing: !!editorFor(target) }); }
