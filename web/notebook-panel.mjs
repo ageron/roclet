@@ -43,6 +43,12 @@ export class NotebookPanel {
       if (!node) parts.set(name, node = root.querySelector(`[data-part="${name}"]`));
       return node;
     };
+    // The title can change height with zoom or a narrow panel. Search sticks
+    // immediately below it, rather than competing for the same top edge.
+    const titleSize = new ResizeObserver(() => {
+      root.style.setProperty('--panel-title-height', `${part('title-bar').getBoundingClientRect().height}px`);
+    });
+    titleSize.observe(part('title-bar'));
     const panel = this;
     const cards = this.cards = new Map();
     const selection = this.selection = new CellSelection();
@@ -669,7 +675,7 @@ export class NotebookPanel {
         if (schedule) notebook.resumeScheduling();
       }
     };
-    this.disposeEditors = () => { searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++; sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) view.editor.destroy(); };
+    this.disposeEditors = () => { titleSize.disconnect(); searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++; sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) view.editor.destroy(); };
   }
   get title() { return this.notebook.state?.title || 'Untitled'; }
   get loading() { return this.root.dataset.loading === 'true'; }

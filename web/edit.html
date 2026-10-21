@@ -139,7 +139,7 @@ dialog { background:var(--page); }
 .app-header > summary::before { content:'▸'; color:var(--muted); } .app-header[open] > summary::before { content:'▾'; }
 .app-header > summary span { color:var(--muted); font-size:.75rem; } .app-header-editor { border-top:1px solid var(--line); min-width:0; }
 @container panel (max-width:680px) { .app-header { margin-left:30px; } .app-header > summary { padding:.65rem .8rem; } }
-[data-part="find-bar"] { position:sticky; top:0; z-index:10; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface,Canvas); margin-bottom:16px; }
+[data-part="find-bar"] { position:sticky; top:var(--panel-title-height, 46px); z-index:10; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface,Canvas); margin-bottom:16px; }
 .find-row {display:flex;align-items:center;gap:8px;flex-wrap:wrap}.find-row + .find-row{margin-top:8px}.find-row > input{flex:1;min-width:160px}.find-row label{display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:12px}[data-part="find-results"]{font-size:12px}[data-part="find-bar"][hidden]{display:none}
 .app-header { margin:0 0 1.2rem 42px; border:1px solid var(--line); border-radius:7px; background:var(--surface); min-width:0; }
 .app-header > summary { display:flex; align-items:center; flex-wrap:wrap; gap:.6rem; padding:.75rem 1rem; font-size:.84rem; }
