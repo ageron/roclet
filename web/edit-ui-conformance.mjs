@@ -1,5 +1,6 @@
 import { activateHover, closeHoverTooltips } from '@codemirror/view';
 import { EditorSelection } from '@codemirror/state';
+import { openSearchPanel } from '@codemirror/search';
 import { editorFor } from './cell-editor.mjs';
 import { startNotebook } from './edit.mjs';
 import { DraftStore } from './edit-store.mjs';
@@ -14,7 +15,12 @@ const $ = id => document.getElementById(id);
 const cards = () => [...document.querySelectorAll('.cell')];
 const inputs = () => cards().map(c=>c.querySelector('.cm-content'));
 const selected = () => cards().flatMap((c,i)=>c.dataset.selected==='true'?[i]:[]);
-const key = (value, extra={}) => { const event=new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true,...extra}); document.activeElement.dispatchEvent(event); return event; };
+const key = (value, extra={}) => {
+  // Mod shortcuts use the editor's host-platform binding. Explicit Meta arrow
+  // navigation is also supported on other platforms and is tested as written.
+  if(extra.metaKey && !/Mac/.test(navigator.platform) && (!value.startsWith('Arrow') || extra.altKey)) extra={...extra,metaKey:false,ctrlKey:true};
+  const event=new KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true,...extra}); document.activeElement.dispatchEvent(event); return event;
+};
 const input = (node,value) => { const view=editorFor(node).view; view.dispatch({changes:{from:0,to:view.state.doc.length,insert:value},selection:{anchor:value.length},userEvent:'input'}); };
 const isHidden = node => editorFor(node).dom.hidden;
 const source = node => editorFor(node).source;
@@ -57,7 +63,8 @@ try {
   clipboard('paste',cut.data); assert.equal(cards().length,4); assert.deepEqual(notebook.state.cells.map(c=>c.source),sources); assert(notebook.state.cells.every(c=>!prior.includes(c.key))); assert.equal(selected().length,4);
   key('z',{metaKey:true}); assert.equal(cards().length,0); key('z',{metaKey:true}); assert.deepEqual(notebook.state.cells.map(c=>c.key),prior);
   report('Esc/arrows/Shift-arrows and copy/cut/paste work across a whole notebook; each structural edit is undoable');
-  inputs()[1].focus(); const textArrow=key('ArrowDown',{shiftKey:true}), textAll=key('a',{metaKey:true}), textCopy=clipboard('copy');
+  inputs()[1].focus(); await new Promise(requestAnimationFrame);
+  const textArrow=key('ArrowDown',{shiftKey:true}), textAll=key('a',{metaKey:true}), textCopy=clipboard('copy');
   assert(textArrow.defaultPrevented); assert(textAll.defaultPrevented); assert(document.activeElement===inputs()[1]); assert.equal(textCopy.data.getData('text/plain'),source(inputs()[1])); assert.deepEqual(selected(),[1]);
   key('Escape'); const text=new DataTransfer(); text.setData('text/plain','42'); clipboard('paste',text); assert.equal(source(inputs()[2]),'42'); assert.deepEqual(selected(),[2]); key('z',{metaKey:true});
   report('text selection keeps editor shortcuts; plain text pasted in cell mode creates one code cell after the selection');
@@ -288,9 +295,16 @@ try {
   setCursor(0,2,0);key('-',{metaKey:true,shiftKey:true});key('Escape');key('ArrowUp',{shiftKey:true});key('m',{shiftKey:true});await until(()=>cards().length===2);assert.match(source(inputs()[0]),/alpha = 1\s+beta = 2/);
   key('ArrowDown',{shiftKey:true});key('m',{shiftKey:true});await until(()=>$('notice').textContent.includes('same type'));assert.equal(cards().length,2);
   report('split and merge are undoable; mixed cell kinds are kept intact');
-  key('f',{metaKey:true,shiftKey:true});assert($('find-dialog').open);$('find-query').value='beta';$('find-query').dispatchEvent(new Event('input'));assert.equal($('find-results').querySelectorAll('button').length,1);$('find-results').querySelector('button').click();await measure();assert(document.activeElement===inputs()[0]);assert.equal(viewAt(0).state.doc.lineAt(viewAt(0).state.selection.main.head).text,'beta = 2');
-  key('f',{metaKey:true});await measure();assert(cards()[0].querySelector('.cm-search input'));key('Escape');await measure();assert(!cards()[0].querySelector('.cm-search'));
-  report('notebook search navigates to the match; cell find/replace opens and dismisses independently');
+  key('f',{metaKey:true});assert(!$('find-bar').hidden);
+  $('find-query').value='beta';$('find-query').dispatchEvent(new Event('input'));
+  await until(()=>$('find-results').textContent==='1 of 1');await measure();
+  assert.equal(viewAt(0).state.sliceDoc(viewAt(0).state.selection.main.from,viewAt(0).state.selection.main.to),'beta');
+  $('replace-query').value='gamma';$('replace-query').dispatchEvent(new Event('input'));
+  await until(()=>$('find-results').textContent==='1 of 1');$('replace-all').click();
+  await until(()=>$('find-results').textContent==='No matches');assert.match(source(inputs()[0]),/gamma = 2/);
+  $('find-close').click();assert($('find-bar').hidden);key('z',{metaKey:true});assert.match(source(inputs()[0]),/beta = 2/);
+  key('f',{metaKey:true,shiftKey:true});assert(!$('find-bar').hidden);key('Escape');assert($('find-bar').hidden);
+  report('notebook Find & Replace navigates, replaces, undoes and closes with either search shortcut');
   notebook.change(s=>{s.cells=[makeCell('code','a = 3\nb')];});
   inputs()[0].focus();key('Enter',{metaKey:true});await until(()=>notebook.result?.status==='diagnostic');
   assert.equal(document.querySelectorAll('.value').length,0);
@@ -364,7 +378,7 @@ try {
   assert(document.activeElement===inputs()[0]);assert.deepEqual(cards().map(c=>c.querySelector('.value pre').textContent),['5.0','6.0']);
   report('automatic syntax errors stay hidden while typing; Escape and Cmd+Enter reveal them, resumed typing hides them and valid results still update');
   input(inputs()[0],'a = ');await until(()=>notebook.result?.status==='diagnostic');
-  key('ArrowLeft');key('f',{metaKey:true});await measure();assert(cards()[0].querySelector('.cm-search input'));
+  key('ArrowLeft');openSearchPanel(viewAt(0));await measure();assert(cards()[0].querySelector('.cm-search input'));
   assert.equal(document.querySelectorAll('.diagnostic').length,0);
   key('Escape');await measure();assert.equal(document.querySelectorAll('.diagnostic').length,0);
   inputs()[1].focus();await until(()=>document.querySelector('.diagnostic'));
@@ -412,6 +426,29 @@ try {
   notebook.undo();notebook.undo();await notebook.run();
   cellAction(0,'Dependencies & timing');assert($('dependencies-dialog').open);assert.match($('dependencies-content').textContent,/length|width/);$('dependencies-dialog').close();
   report('dependency explanations and execution counts are available from the cell menu');
+  // Exercise the visible project dialog, including worker invalidation when an
+  // imported file changes or is removed from this notebook.
+  notebook.setAuto(false);
+  notebook.change(s=>{s.cells=[makeCell('code','import Geometry\nout_project = Geometry.value')];});
+  const openProject=()=>{$('document-menu').querySelector('summary').click();$('project-files').click();assert($('project-dialog').open);};
+  const closeProject=()=>{$('project-dialog').querySelector('[data-close]').click();assert(!$('project-dialog').open);};
+  openProject();$('project-path').value='Geometry.roc';$('project-source').value='Geometry := [].{ value : U64\nvalue = 7 }';$('project-save').click();
+  await until(()=>notebook.state.files?.[0]?.path==='Geometry.roc');
+  assert.equal($('project-select').value,'Geometry.roc');closeProject();
+  $('run').click();await until(()=>notebook.result?.evaluation?.values?.[0]?.text==='7');
+  const projectOutput=cards()[0].querySelector('.value');assert(projectOutput);
+  openProject();assert.equal($('project-path').value,'Geometry.roc');
+  $('project-source').value='Geometry := [].{ value : U64\nvalue = 8 }';$('project-save').click();closeProject();
+  assert.equal(notebook.result,null);assert.equal(projectOutput.querySelector('pre').textContent,'7');
+  $('run').click();await until(()=>notebook.result?.evaluation?.values?.[0]?.text==='8');
+  assert(cards()[0].querySelector('.value')===projectOutput);
+  await notebook.persist();assert.equal((await store.get(notebook.state.id)).files[0].source,notebook.state.files[0].source);
+  openProject();$('project-remove').click();assert.equal(notebook.state.files.length,0);assert($('project-remove').disabled);closeProject();
+  $('run').click();await until(()=>notebook.result!==null);
+  assert(['diagnostic','runtime_error'].includes(notebook.result.status));assert.equal(notebook.result.evaluation.values.length,0);
+  assert(notebook.result.evaluation.diagnostics.some(d=>d.message.includes('Geometry.roc')));assert.match($('document-diagnostics').textContent,/Geometry\.roc/);
+  report('Project files dialog adds and edits imported modules, persists their sources, updates the existing output and invalidates removed imports');
+
   await notebook.persist(); notebook.dispose(); store.close();
   await new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name); request.onsuccess=resolve;request.onerror=()=>reject(request.error);});
   parent.postMessage({rocletUiTest:true,status:`PASS — ${count} Roclet UI contracts`,log,result:'pass'},new URL(document.baseURI).origin);

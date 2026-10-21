@@ -1,6 +1,7 @@
 .toolchain/
 .zig-cache/
 zig-out/
+zig-pkg/
 artifacts/
 .DS_Store
 

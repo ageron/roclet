@@ -87,6 +87,11 @@ dialog { background:var(--page); }
 .cm-editor .cm-selectionMatch { background:var(--selection); }
 #find-bar { position:sticky; top:0; z-index:10; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--surface,Canvas); margin-bottom:16px; }
 .find-row {display:flex;align-items:center;gap:8px;flex-wrap:wrap}.find-row + .find-row{margin-top:8px}.find-row > input{flex:1;min-width:160px}.find-row label{display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:12px}#find-results{font-size:12px}#find-bar[hidden]{display:none}
+.app-header { margin:0 0 1.2rem 42px; border:1px solid var(--line); border-radius:7px; background:var(--surface); min-width:0; }
+.app-header > summary { display:flex; align-items:center; flex-wrap:wrap; gap:.6rem; padding:.75rem 1rem; font-size:.84rem; }
+.app-header > summary::before { content:'▸'; color:var(--muted); } .app-header[open] > summary::before { content:'▾'; }
+.app-header > summary span { color:var(--muted); font-size:.75rem; } .app-header-editor { border-top:1px solid var(--line); min-width:0; }
+@media(max-width:680px) { .app-header { margin-left:30px; } .app-header > summary { padding:.65rem .8rem; } }
 </style>
 </head>
 <body>
@@ -100,6 +105,7 @@ dialog { background:var(--page); }
     <button id="recovery-copy" hidden>Save a recovery copy</button><button id="new">New notebook</button><button id="rich-example">Rich outputs example</button>
     <label class="file-label">Open…<input id="open" type="file" accept=".roc,.md,.roclet.zip,.zip,text/plain,text/markdown,application/zip" aria-label="Open Roclet notebook"></label>
     <button id="download">Download a copy <kbd>⌘ / Ctrl S</kbd></button>
+    <button id="project-files">Project files…</button>
     <button id="share">Export & share…</button><button id="offline">Offline & storage…</button>
     <label>File format<select id="format"><option value="roc">Roc</option><option value="markdown">Markdown</option></select></label>
     <label>Recent documents<select id="recent" aria-label="Recent documents"></select></label>
@@ -127,6 +133,7 @@ dialog { background:var(--page); }
 </section>
   <div class="document-status"><span id="status" role="status">Loading the local compiler…</span><span id="save-status" role="status">Opening browser storage…</span></div>
   <div id="notice" role="alert" hidden></div><div id="document-diagnostics" aria-live="polite"></div>
+  <details id="app-header" class="app-header"><summary><strong>App header</strong><span>Packages & imports</span></summary><div id="app-header-source" class="app-header-editor"></div></details>
   <section id="notebook" aria-label="Notebook cells" tabindex="-1" aria-describedby="navigation-help"><div id="cells"></div></section>
   <section id="source-pane" hidden><div class="source-heading"><p id="raw-help">Complete editable source</p><button id="back-notebook">← Notebook</button></div><div id="source" class="raw"></div></section>
   <footer><span id="selection-status" role="status"></span><button id="help" class="quiet">Keyboard shortcuts <kbd>?</kbd></button></footer>
@@ -149,6 +156,23 @@ dialog { background:var(--page); }
 <p>This installs a verified copy of Roclet and its compiler. Bookmark this Roclet address, then reopen it to edit and run without a network connection. Updates take effect after all Roclet tabs are closed.</p>
 <p id="storage-state" role="status"></p><button id="persist-storage">Keep browser storage</button><p>Browser drafts belong to this origin and profile. Keep downloaded copies of important notebooks.</p></dialog>
 
+<dialog id="project-dialog" aria-labelledby="project-title"><div class="dialog-title"><h2 id="project-title">Project files</h2><button data-close aria-label="Close project files">×</button></div>
+<p>Add Roc modules and text files beside your notebook. Import a module with <code>import Geometry</code>. Download a Roclet bundle to include these files.</p>
+<p><label class="file-label">Add files…<input id="project-upload" type="file" multiple accept=".roc,.json,.csv,.txt,text/plain" aria-label="Add project files"></label></p>
+<p><label>File <select id="project-select" aria-label="Project file"></select></label><button id="project-remove">Remove file</button></p>
+<p><label>Path <input id="project-path" aria-label="Project file path" placeholder="Geometry.roc"></label></p>
+<textarea id="project-source" aria-label="Project file source" rows="12" spellcheck="false"></textarea>
+<button id="project-save">Save file</button><p id="project-status" role="status"></p>
+</dialog>
+<dialog id="package-dialog" aria-labelledby="package-title"><div class="dialog-title"><h2 id="package-title">Load package bundle</h2><button data-close aria-label="Cancel package loading">×</button></div>
+<p>This package couldn't be downloaded automatically. Its host may block browser access, or the network may be unavailable.</p>
+<p><a id="package-download" target="_blank" rel="noopener noreferrer">Download bundle ↗</a></p>
+<p id="package-url" class="quiet" style="overflow-wrap:anywhere"></p>
+<p>Download the <code>.tar.zst</code> file, then load it below. Roclet verifies the package hash before using it and caches verified bundles in this browser. Additional dependencies may ask for their own bundle.</p>
+<button id="package-load">Load bundle…</button><input id="package-file" type="file" accept=".tar.zst" aria-label="Load downloaded package bundle" hidden>
+<button data-close>Cancel</button><p id="package-status" role="status" aria-live="polite"></p>
+<details><summary>Download details</summary><pre id="package-error" style="white-space:pre-wrap;overflow-wrap:anywhere"></pre></details>
+</dialog>
 <dialog id="dependencies-dialog" aria-labelledby="dependencies-title"><div class="dialog-title"><h2 id="dependencies-title">Dependencies & timing</h2><button data-close aria-label="Close dependencies">×</button></div><div id="dependencies-content"></div></dialog>
 <dialog id="rename-dialog" aria-labelledby="rename-title"><div class="dialog-title"><h2 id="rename-title">Rename binding</h2><button data-close aria-label="Close rename">×</button></div><p>Update this definition and its resolved references across the notebook.</p><input id="rename-name" aria-label="New binding name" autocomplete="off"><button id="rename-apply">Rename</button><p id="rename-error" role="status"></p></dialog>
 <dialog id="generated-dialog" aria-labelledby="generated-title"><div class="dialog-title"><h2 id="generated-title">Runnable Roc</h2><button data-close aria-label="Close runnable Roc">×</button></div><pre id="generated"></pre></dialog>

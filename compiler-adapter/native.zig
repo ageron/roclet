@@ -1,6 +1,6 @@
 //! Filesystem and process host. All document policy is shared with WASM.
 const std = @import("std");
-const bridge = @import("roclet.zig");
+const bridge = @import("bridge.zig");
 pub const std_options = bridge.std_options;
 const usage =
     \\Usage: roclet [run] FILE.roc|FILE.md|snapshot.json
@@ -21,6 +21,7 @@ fn stringify(a: std.mem.Allocator, data: anytype) ![]u8 {
 }
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
+    bridge.setNativeIo(init.io);
     const args = try init.minimal.args.toSlice(a);
     if (args.len == 1 or (args.len == 2 and std.mem.eql(u8, args[1], "--help"))) {
         try std.Io.File.stdout().writeStreamingAll(init.io, usage);
@@ -61,6 +62,10 @@ pub fn main(init: std.process.Init) !void {
     if (std.mem.eql(u8, target, "md")) target = "markdown";
     const bytes = try std.Io.Dir.cwd().readFileAlloc(init.io, file, a, .limited(4 * 1024 * 1024));
     const is_document = !raw and !std.mem.eql(u8, format, "json");
+    if (is_document) {
+        const actual = try std.Io.Dir.cwd().realPathFileAlloc(init.io, file, a);
+        try bridge.setNativeSourceDirectory(std.fs.path.dirname(actual) orelse ".");
+    }
     if (convert and !is_document) return error.ExpectedDocumentExtension;
     const request = if (is_document) try stringify(a, .{ .operation = "document", .action = if (normalize) "normalize" else if (convert and std.mem.eql(u8, target, "roc")) "export" else if (std.mem.eql(u8, action, "run")) "evaluate" else action, .format = format, .target = target, .source = bytes }) else bytes;
     const result = try bridge.process(request);

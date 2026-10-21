@@ -1,5 +1,6 @@
 import { DocumentSession } from './document-session.mjs';
 import { renameEdits } from './compiler-tools.mjs';
+import { projectFiles, projectPath } from './project-files.mjs';
 
 const clone = value => structuredClone(value);
 const key = () => crypto.randomUUID();
@@ -12,15 +13,17 @@ export function newDraft(title = 'Untitled', demo = false) {
     makeCell('code', 'area = width * height\nout_dimensions = {\n    dbg area\n    area\n}'),
   ] : [makeCell()];
   return { schema: 1, id: key(), title, format: 'roc', preamble: 'app [main!] {}', metadata: '', cells,
-    source: '', sourceCurrent: false, mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
+    source: '', sourceCurrent: false, files: [], mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
 }
 export function validDraft(record) {
+  try { projectFiles(record?.files); } catch { return false; }
   return record?.schema === 1 && typeof record.id === 'string' && typeof record.title === 'string'
     && ['roc', 'markdown'].includes(record.format) && typeof record.source === 'string'
     && Array.isArray(record.cells) && record.cells.every(c => typeof c.key === 'string' && typeof c.source === 'string' && ['code','markdown','generated'].includes(c.kind));
 }
 export function requestFor(state, action, target = state.format) {
   const request = { operation: 'document', action, format: state.format, target, source: state.sourceCurrent ? state.source : '', render: true };
+  request.files = projectFiles(state.files).map(file => ({...file, path:`/workspace/${file.path}`}));
   if (state.sourceCurrent) request.context = { preamble: state.preamble, metadata: state.metadata };
   else request.draft = { preamble: state.preamble, metadata: state.metadata, cells: state.cells.map(({ kind, source, attributes, outputs }) => ({ kind, source, attributes, outputs })) };
   return request;
@@ -31,23 +34,39 @@ export function cellsFrom(result, previous = []) {
 }
 
 // Presentation reuse only: these strings never enter compiler evaluation.
-function mergeCheckedResults(previous, result) {
+function mergeCheckedResults(previous, result, state) {
   if (!result.graph || !result.evaluation) return result;
   const reused = new Set(result.plan?.reused ?? []);
   const old = previous?.evaluation;
-  const positions = new Map(result.model.cells.map((cell, i) => [cell.output, i]));
+  const positions = new Map(result.model.cells.flatMap((cell, i) => [cell.output,...(cell.expectations ?? [])].map(root=>[root,i])));
   const values = [...(old?.values ?? []).filter(v => reused.has(v.root)), ...(result.evaluation.values ?? [])];
   values.sort((a,b) => positions.get(a.root) - positions.get(b.root));
   const events = [...(old?.events ?? []).filter(e => reused.has(e.root)), ...result.evaluation.events]
     .map(e => ({...e, cell:positions.get(e.root) ?? null})).sort((a,b) => (a.cell ?? -1) - (b.cell ?? -1));
-  return {...result, evaluation:{...result.evaluation, values, events:events.map((e,sequence) => ({...e,sequence}))}};
+  const tests = [...(old?.tests ?? []).filter(t=>reused.has(t.root)), ...(result.evaluation.tests ?? [])]
+    .map(test=>{
+      const cell=positions.get(test.root) ?? null;
+      if(!reused.has(test.root)) return {...test,cell};
+      // Reused statuses still use this revision's compiler-provided source map.
+      const expectation=result.expectations?.find(e=>e.root===test.root);
+      const mapping=result.mappings?.find(m=>m.cell===cell && m.generated_start<=expectation?.start && expectation.start<m.generated_end);
+      if(!mapping) return {...test,cell};
+      const absolute=mapping.source_start+expectation.start-mapping.generated_start;
+      const raw=state.sourceCurrent, start=raw?absolute:absolute-result.model.cells[cell].body_start;
+      const source=raw?state.source:result.model.cells[cell].source;
+      const prefix=new TextDecoder().decode(new TextEncoder().encode(source).subarray(0,start));
+      const lines=prefix.split('\n'),location={line:lines.length,column:new TextEncoder().encode(lines.at(-1)).length+1};
+      return {...test,cell,start,end:start+expectation.end-expectation.start,location,scope:raw?'source':'cell'};
+    });
+  return {...result, evaluation:{...result.evaluation, values, tests, events:events.map((e,sequence) => ({...e,sequence}))}};
 }
 
 // Browser-owned edit history, persistence and worker lifecycle. Parsing, output
 // selection, lowering and encoding are exclusively the shared Roc document core.
 export class Notebook {
-  constructor(bytes, store, { session = new DocumentSession(bytes), debounce = 550, timeout = 15000, onChange = () => {} } = {}) {
+  constructor(bytes, store, { session = new DocumentSession(bytes), debounce = 550, timeout = 15000, onChange = () => {}, loadPackage } = {}) {
     this.store = store; this.session = session; this.debounce = debounce; this.timeout = timeout; this.onChange = onChange;
+    this.loadPackage = loadPackage;
     this.state = null; this.result = null; this.history = []; this.future = []; this.views = new Map();
     this.diagnosticsDeferred = false; this.baseline = null;
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
@@ -101,9 +120,25 @@ export class Notebook {
     this.diagnosticsDeferred = true;
     this.change(s => { s.cells[index].source = source; s.cells[index].outputs = []; if (positions) s.cells[index].editorSelection = positions; }, { group: this.state.cells[index].key, composing, reason: 'edit' });
   }
+  editPreamble(preamble, composing = false, positions = null) {
+    this.diagnosticsDeferred = true;
+    this.change(s => { s.preamble = preamble; if (positions) s.headerSelection = positions; }, { group: 'app-header', composing, reason: 'edit' });
+  }
   editSource(source, composing = false, positions = null) {
     this.diagnosticsDeferred = true;
     this.change(s => { s.source = source; if (positions) s.editorSelection = positions; }, { group: 'raw', source: true, composing, reason: 'edit' });
+  }
+  setProjectFiles(files) {
+    const checked = projectFiles(files);
+    this.change(s => { s.files = checked; }, { source:this.state.sourceCurrent, reason:'project' });
+  }
+  setProjectFile(path, source) {
+    projectPath(path);
+    const files = (this.state.files ?? []).filter(file => file.path !== path);
+    this.setProjectFiles([...files, {path,source}]);
+  }
+  removeProjectFile(path) {
+    this.setProjectFiles((this.state.files ?? []).filter(file => file.path !== path));
   }
   schedule() {
     clearTimeout(this.timer);
@@ -125,11 +160,12 @@ export class Notebook {
   }
   reactiveRequest(action, selectedCell, forceAll = false) {
     const request = requestFor(this.state, action);
+    request.compact = true;
     const previous = this.baseline?.id === this.state.id ? this.baseline.result : null;
     const roots = previous?.roots ?? [];
     // A forced cell is resolved against the *new* model in the adapter below.
     request.reactivity = {known:!!previous?.graph, previous:previous?.graph ?? {context:'',scope:'module',definitions:[]},
-      current:{context:'',scope:'module',definitions:[]}, roots:[], available:(previous?.evaluation?.values ?? []).map(v=>v.root), force:forceAll ? roots : []};
+      current:{context:'',scope:'module',definitions:[]}, roots:[], available:[...(previous?.evaluation?.values ?? []),...(previous?.evaluation?.tests ?? []).filter(t=>t.passed)].map(v=>v.root), force:forceAll ? roots : []};
     request.forceAll = forceAll;
     if (selectedCell != null) request.selectedCell = selectedCell;
     request.isolateErrors = true;
@@ -137,9 +173,21 @@ export class Notebook {
   }
   publish(result) {
     const previous = this.baseline?.id === this.state.id ? this.baseline.result : null;
-    this.result = mergeCheckedResults(previous, result);
+    this.result = mergeCheckedResults(previous, result, this.state);
     if (result.graph) this.baseline = {id:this.state.id,result:this.result};
     return this.result;
+  }
+  async request(request,{onPackageWaiting}={}) {
+    const runId=this.runId;
+    try {
+      return await this.session.request(request,{loadPackage:this.loadPackage,onPackageWaiting:waiting=>{
+        if(runId!==this.runId) return;
+        this.status=waiting?'Waiting for package bundle…':'Running…';this.emit();onPackageWaiting?.(waiting);
+      }});
+    } catch(error) {
+      if(runId===this.runId && error.name==='AbortError') {this.status='Package loading cancelled · run to retry';this.emit();}
+      throw error;
+    }
   }
   async check() {
     try {
@@ -156,12 +204,18 @@ export class Notebook {
     if (runId !== this.runId) return null;
     this.status = 'Running…'; this.emit();
     const started = performance.now();
-    const timeout = setTimeout(() => { if (runId === this.runId) this.stop('Stopped after 15 seconds · automatic execution paused'); }, this.timeout);
+    let timeout;
+    const armTimeout=()=>{timeout=setTimeout(() => { if (runId === this.runId) this.stop('Stopped after 15 seconds · automatic execution paused'); }, this.timeout);};
+    armTimeout();
     try {
-      const result = await this.session.request(request);
+      const result = await this.request(request,{onPackageWaiting:waiting=>{clearTimeout(timeout);if(!waiting)armTimeout();}});
       if (runId !== this.runId || revision !== this.state.revision || id !== this.state.id) return null;
       this.publish(result);
-      this.status = result.status === 'ok' ? `Current · ${this.result.evaluation?.values?.length ?? 0} results · ${Math.round(performance.now() - started)} ms` : result.status === 'partial' ? `Current · ${this.result.evaluation.values.length} results · ${result.evaluation.root_errors.length} failed` : result.status === 'diagnostic' ? 'Needs attention · no current results' : 'Run failed · no current results';
+      const count=this.result.evaluation?.values?.length ?? 0, results=`${count} ${count===1?'result':'results'}`;
+      this.status = result.status === 'ok' ? `Current · ${results} · ${Math.round(performance.now() - started)} ms` : result.status === 'partial' ? `Current · ${results} · ${result.evaluation.root_errors.length} failed` : result.status === 'diagnostic' ? 'Needs attention · no current results' : 'Run failed · no current results';
+      const tests=this.result.evaluation?.tests ?? [], failed=tests.filter(t=>!t.passed).length;
+      if (failed) this.status=`Needs attention · ${failed} failed ${failed===1?'test':'tests'} · ${results}`;
+      else if (tests.length && result.status==='ok') this.status+=` · ${tests.length} ${tests.length===1?'test':'tests'} passed`;
       this.emit('result'); return result;
     } catch (error) {
       if (runId === this.runId && error.name !== 'AbortError') { this.result = null; this.status = `Run failed: ${error.message}`; this.emit('result'); }
@@ -178,7 +232,7 @@ export class Notebook {
       const c=candidate.cells[edit.cell]; c.source=c.source.slice(0,edit.from)+edit.insert+c.source.slice(edit.to); c.outputs=[];
     }
     candidate.sourceCurrent=false;
-    const checked = await this.session.request(requestFor(candidate,'analyze'));
+    const checked = await this.request(requestFor(candidate,'analyze'));
     if (token!==this.runId || revision!==this.state.revision || id!==this.state.id) throw new DOMException('Document changed','AbortError');
     if (checked.status!=='ok') throw new Error('The renamed document does not type-check. No changes were applied.');
     const original=edits.find(e=>e.cell===cell && e.from<=position && position<=e.to);
@@ -199,7 +253,7 @@ export class Notebook {
     this.status = 'Preparing document…'; this.emit();
     // Structural edits need spans for the editable cells, not imported source
     // that may still contain markers or saved-output comments.
-    const result = await this.session.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target));
+    const result = await this.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target));
     if (token !== this.runId || revision !== this.state.revision || id !== this.state.id) throw new DOMException('Document changed', 'AbortError');
     if (!result.model) throw new Error(result.failure ?? 'The document engine could not read this draft.');
     this.status = result.status === 'ok' ? (this.result?.evaluation?.status === 'ok' && Array.isArray(this.result.evaluation.values) ? 'Current' : 'Ready') : 'Needs attention'; this.emit();

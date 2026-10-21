@@ -15,7 +15,7 @@ export function sourceRange(result, span) {
 }
 export function symbols(result) {
   if (!result?.graph) return [];
-  return (result.evaluation?.definitions ?? []).map(d => ({...d, locations:[d.name_region,...(d.references ?? [])].map(r=>sourceRange(result,r)).filter(Boolean)}));
+  return (result.evaluation?.definitions ?? []).filter(d=>!d.name_region || d.name_region.end>d.name_region.start).map(d => ({...d, locations:[d.name_region,...(d.references ?? [])].map(r=>sourceRange(result,r)).filter(Boolean)}));
 }
 export function symbolAt(result, cell, position) {
   return symbols(result).find(d=>d.locations.some(r=>r.cell===cell && r.from<=position && position<=r.to));

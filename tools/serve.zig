@@ -1,5 +1,7 @@
 //! Small local static server for the browser host and conformance page.
 const std = @import("std");
+const proxy = @import("package-proxy.zig");
+const Context = struct { root: []const u8, cache: proxy.Cache = .{}, proxy_only: bool = false };
 fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
     const end = std.mem.findScalar(u8, target, '?') orelse target.len;
     const encoded = target[0..end];
@@ -37,14 +39,25 @@ fn mime(file: []const u8) []const u8 {
     if (std.mem.eql(u8, ext, ".json")) return "application/json";
     return "text/plain; charset=utf-8";
 }
-fn handle(io: std.Io, root: []const u8, stream: std.Io.net.Stream) void {
+fn handle(io: std.Io, context: *Context, stream: std.Io.net.Stream) void {
     defer stream.close(io);
-    serveOne(io, root, stream) catch |err| switch (err) {
+    serveOne(io, context, stream) catch |err| switch (err) {
         error.HttpConnectionClosing => {},
         else => std.debug.print("HTTP connection: {s}\n", .{@errorName(err)}),
     };
 }
-fn serveOne(io: std.Io, root: []const u8, stream: std.Io.net.Stream) !void {
+fn packageResponse(request: *std.http.Server.Request, status: std.http.Status, bytes: []const u8, cache: []const u8) !void {
+    try request.respond(bytes, .{ .status = status, .keep_alive = false, .extra_headers = &.{
+        .{ .name = "Content-Type", .value = if (status == .ok) "application/octet-stream" else "text/plain; charset=utf-8" },
+        .{ .name = "Access-Control-Allow-Origin", .value = "*" },
+        .{ .name = "Access-Control-Allow-Methods", .value = "GET, HEAD, OPTIONS" },
+        .{ .name = "Access-Control-Expose-Headers", .value = "X-Roclet-Package-Cache" },
+        .{ .name = "X-Roclet-Package-Cache", .value = cache },
+        .{ .name = "Cache-Control", .value = if (status == .ok) "public, max-age=31536000, immutable" else "no-store" },
+        .{ .name = "X-Content-Type-Options", .value = "nosniff" },
+    } });
+}
+fn serveOne(io: std.Io, context: *Context, stream: std.Io.net.Stream) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
@@ -54,15 +67,30 @@ fn serveOne(io: std.Io, root: []const u8, stream: std.Io.net.Stream) !void {
     var writer = stream.writer(io, &write_buffer);
     var server = std.http.Server.init(&reader.interface, &writer.interface);
     var request = try server.receiveHead();
+    if (std.mem.startsWith(u8, request.head.target, proxy.prefix)) {
+        if (request.head.method == .OPTIONS) return packageResponse(&request, .no_content, "", "none");
+        if (request.head.method != .GET and request.head.method != .HEAD) return packageResponse(&request, .method_not_allowed, "Use GET or HEAD", "none");
+        const package = proxy.parse(gpa, request.head.target) catch return packageResponse(&request, .bad_request, "Expected a GitHub release package with a Roc content hash", "none");
+        if (context.cache.active.fetchAdd(1, .acq_rel) >= 4) {
+            _ = context.cache.active.fetchSub(1, .acq_rel);
+            return packageResponse(&request, .service_unavailable, "Package service is busy; try again", "none");
+        }
+        defer _ = context.cache.active.fetchSub(1, .acq_rel);
+        if (try context.cache.get(gpa, io, package.hash)) |bytes| return packageResponse(&request, .ok, bytes, "hit");
+        const bytes = proxy.download(gpa, io, package) catch |err| return packageResponse(&request, .bad_gateway, try std.fmt.allocPrint(gpa, "Package download failed: {s}", .{@errorName(err)}), "none");
+        try context.cache.put(io, package.hash, bytes);
+        return packageResponse(&request, .ok, bytes, "miss");
+    }
+    if (context.proxy_only) return request.respond("Not found", .{ .status = .not_found, .keep_alive = false });
     if (request.head.method != .GET and request.head.method != .HEAD) {
         return request.respond("Method not allowed", .{ .status = .method_not_allowed, .keep_alive = false, .extra_headers = &.{.{ .name = "Allow", .value = "GET, HEAD" }} });
     }
     const relative = assetPath(gpa, request.head.target) catch return request.respond("Not found", .{ .status = .not_found, .keep_alive = false });
-    const file = try std.fs.path.join(gpa, &.{ root, relative });
+    const file = try std.fs.path.join(gpa, &.{ context.root, relative });
     const actual = std.Io.Dir.cwd().realPathFileAlloc(io, file, gpa) catch return request.respond("Not found", .{ .status = .not_found, .keep_alive = false });
-    const prefix = try std.mem.concat(gpa, u8, &.{ root, std.fs.path.sep_str });
+    const prefix = try std.mem.concat(gpa, u8, &.{ context.root, std.fs.path.sep_str });
     if (!std.mem.startsWith(u8, actual, prefix)) return request.respond("Not found", .{ .status = .not_found, .keep_alive = false });
-    const bytes = std.Io.Dir.cwd().readFileAlloc(io, actual, gpa, .limited(64 * 1024 * 1024)) catch return request.respond("Not found", .{ .status = .not_found, .keep_alive = false });
+    const bytes = std.Io.Dir.cwd().readFileAlloc(io, actual, gpa, .limited(128 * 1024 * 1024)) catch return request.respond("Not found", .{ .status = .not_found, .keep_alive = false });
     try request.respond(bytes, .{ .keep_alive = false, .extra_headers = &.{
         .{ .name = "Content-Type", .value = mime(relative) },
         .{ .name = "Cache-Control", .value = "no-store" },
@@ -71,19 +99,34 @@ fn serveOne(io: std.Io, root: []const u8, stream: std.Io.net.Stream) !void {
 }
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len < 2 or args.len > 3) return error.ExpectedRootAndOptionalPort;
+    if (args.len < 2) return error.ExpectedRootAndOptionalPort;
     const root = try std.Io.Dir.cwd().realPathFileAlloc(init.io, args[1], init.arena.allocator());
-    const port = if (args.len == 3) try std.fmt.parseInt(u16, args[2], 10) else 4173;
+    var port: u16 = 4173;
+    var bind: []const u8 = "127.0.0.1";
+    var context: Context = .{ .root = root };
+    defer context.cache.deinit();
+    var index: usize = 2;
+    if (index < args.len and !std.mem.startsWith(u8, args[index], "--")) {
+        port = try std.fmt.parseInt(u16, args[index], 10);
+        index += 1;
+    }
+    while (index < args.len) : (index += 1) {
+        if (std.mem.eql(u8, args[index], "--proxy-only")) context.proxy_only = true else if (std.mem.eql(u8, args[index], "--bind")) {
+            index += 1;
+            if (index == args.len) return error.ExpectedBindAddress;
+            bind = args[index];
+        } else return error.UnknownOption;
+    }
     if (port == 0) return error.InvalidPort;
-    const address = try std.Io.net.IpAddress.parse("127.0.0.1", port);
+    const address = try std.Io.net.IpAddress.parse(bind, port);
     var server = try address.listen(init.io, .{ .reuse_address = true });
     defer server.deinit(init.io);
     var group: std.Io.Group = .init;
     defer group.cancel(init.io);
-    std.debug.print("Roclet: http://127.0.0.1:{d}/web/edit.html\n", .{port});
+    std.debug.print("Roclet: http://{s}:{d}/{s}\n", .{ bind, port, if (context.proxy_only) "api/packages/" else "web/edit.html" });
     while (true) {
         const stream = try server.accept(init.io);
-        group.concurrent(init.io, handle, .{ init.io, root, stream }) catch |err| {
+        group.concurrent(init.io, handle, .{ init.io, &context, stream }) catch |err| {
             stream.close(init.io);
             return err;
         };

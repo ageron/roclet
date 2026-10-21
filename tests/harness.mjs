@@ -8,6 +8,14 @@ function canonical(value) {
   return value;
 }
 export function assert(value, message = 'Assertion failed') { if (!value) fail(message); }
+// Cache counters depend on target width and prior requests. An empty resolver
+// notification carries no semantic difference; preserve real missing packages.
+export function compilerSemantics(result) {
+  const {workspaceCache,transportMetrics,workerMs,packagesRequired,...value}=result;
+  if(packagesRequired?.length)value.packagesRequired=packagesRequired;
+  if(value.evaluation)value.evaluation=compilerSemantics(value.evaluation);
+  return value;
+}
 assert.equal = (actual, expected) => assert(Object.is(actual, expected), `Expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`);
 assert.notEqual = (actual, expected) => assert(!Object.is(actual, expected), `Unexpected ${JSON.stringify(actual)}`);
 assert.deepEqual = (actual, expected) => assert(JSON.stringify(canonical(actual)) === JSON.stringify(canonical(expected)), `Expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`);

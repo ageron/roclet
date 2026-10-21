@@ -8,8 +8,10 @@ Open **[ageron.github.io/roclet](https://ageron.github.io/roclet/)** in Chrome. 
 installed: the compiler and editor run in your browser. The first visit downloads
 the compiler, so give it a moment to load.
 
-Choose **File → Rich outputs example** for a first notebook. Change `width`, or
-create your own with **File → New notebook**. Use the insertion buttons between
+Choose a demo from the home page, or select **New notebook** to start an empty
+notebook. Recent notebooks reopen your saved drafts. In the editor, use
+**File → Rich outputs example** to try a first calculation, or **File → New notebook**
+to start another. Change `width` and see its results update. Use the insertion buttons between
 cells to add code or Markdown. Press Cmd+Enter on macOS or Ctrl+Enter elsewhere
 to run a cell. Auto-run updates results after edits.
 
@@ -28,7 +30,7 @@ reopen to activate it.
 
 When a release provides `roclet.zip`, extract it and open a terminal in the
 extracted directory. The included server must match your operating system and
-architecture; the current native build is tested on macOS Apple Silicon only.
+architecture; native builds have been tested on Linux x86_64 and macOS Apple Silicon.
 
 ```sh
 ./roclet-serve . 4173
@@ -48,12 +50,15 @@ Roc compiler checkout:
 
 ```sh
 git clone https://github.com/roc-lang/roc.git ../roc-compiler
-zig build -Droc-source=../roc-compiler -Dcompiler-jobs=1
+sh tools/prepare-compiler.sh ../roc-compiler
+zig build
 zig build serve
 ```
 
-Run these commands from the Roclet directory. Its build reads the exact Roc
-commit from `compiler.lock.json` and prepares its own copy; it doesn't modify your
+Run these commands from the Roclet directory. The preparation command reads the exact Roc
+commit from `compiler.lock.json` and prepares its own copy with the versioned
+embedding API additions. The Zig build imports its exported compiler modules as
+a path dependency; it doesn't modify your
 compiler checkout. If the required commit is missing, run `git -C ../roc-compiler fetch origin`.
 The first build needs network access for compiler dependencies, several GiB of
 RAM, and time to compile. No separately installed Roc, Node.js, npm, or Python is required.
@@ -64,8 +69,10 @@ Open <http://127.0.0.1:4173/web/edit.html>. To choose another port:
 zig build serve -- 4174
 ```
 
-After the first build, `zig build` reuses verified compiler artifacts. Repeat the
-command with `-Droc-source` when compiler-adapter inputs change.
+After the first build, `zig build` reuses Zig's build cache. Repeat the preparation
+command when the compiler pin or embedding API patch changes. The default compiler
+build mode is ReleaseFast. Browser compiler artifacts are cached separately in
+IndexedDB and reused after worker restarts.
 
 To test and package a release:
 
@@ -86,9 +93,36 @@ Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
 - **File → Export & share** creates a portable bundle, a static HTML report, or an interactive site.
   Reports open directly and include math fonts. Interactive sites need a static server.
 - Bundles can include results, but imported results remain unverified until you run them.
+- **File → Project files** adds ordinary Roc modules and text file imports beside
+  the notebook. These sources are autosaved, undoable, and included in Roclet
+  bundles; downloading a single `.roc` or `.md` file keeps those files separate.
+- Expand **App header** above the notebook cells to edit package declarations
+  and imports as ordinary Roc source. Header edits auto-run, autosave, and undo
+  like cell edits. The card starts collapsed and remembers whether you left it expanded.
+- Put `expect` assertions directly in code cells. Run all executes them; Run cell
+  executes the selected cell's tests. The notebook shows passed/failed tests
+  beside their source, and dependency edits rerun affected tests. Failed tests
+  keep independent results visible. Tests in imported packages do not run.
+- Declare packages in the notebook's app header using normal Roc dependency
+  syntax. Roclet tries downloading directly. If the host blocks browser access
+  or the download fails, a **Load package bundle** dialog links to the original
+  archive. Download the `.tar.zst`, click **Load bundle…**, and select the file.
+  Roc verifies its content hash before using or caching it, then resumes the
+  notebook. An incorrect file can be retried; Cancel leaves the notebook editable.
+  Additional dependencies may request their own bundle. Verified packages are
+  cached locally for reuse without a network connection.
+
+For example, attach `Shapes/Wall.roc` and import it with `import Shapes/Wall`.
+A text attachment can be imported with
+`import "data/message.txt" as message : Str`. Editing or removing either kind of
+file invalidates the results that depend on the workspace.
 
 The [demos](../demos/README.md) have **Open demo** links for the hosted app.
-For local use, download the source file and open it in Roclet.
+For local use, download the source file and open it in Roclet. The
+[meeting-window demo](../demos/04-meeting-windows.roc) uses the released roc-time
+0.2.0 package. Download and load its bundle when prompted on first use. With the
+bundled server running, open
+<http://127.0.0.1:4173/web/edit.html?example=meeting-windows>.
 
 Roclet's native runner accepts notebooks too:
 
@@ -128,6 +162,47 @@ In **Settings → Pages**, the publishing source must be **GitHub Actions**.
 For manual hosting elsewhere, `zig build package` creates
 `zig-out/roclet-pages.zip`. Extract the archive and serve its contents over HTTPS,
 preserving relative paths. It contains the compiler, demos, and offline assets.
+
+### Package downloads on a static host
+
+No application backend is required. The default
+[`web/package-config.json`](../web/package-config.json) has `"endpoint": null`,
+so package downloads go directly to their original URLs. Hosts that permit CORS
+work automatically. GitHub release downloads do not permit browser CORS requests;
+Roclet then offers a link to download the archive through the browser and a
+**Load bundle…** file picker. The file is read locally and verified by Roc against
+the hash in its original package URL before use or caching. A file picker is an
+explicit user permission to read a local file and does not require host CORS.
+
+Load each missing dependency when prompted. Later runs and worker restarts reuse
+verified archives from browser storage. This flow works on GitHub Pages and
+other completely static hosts, including when no proxy has been deployed.
+
+### Optional automatic package proxy
+
+To download GitHub release packages automatically, configure a proxy endpoint.
+The bundled server already exposes `/api/packages/`; for local use, set
+`"endpoint": "../api/packages/"` in `web/package-config.json`. For an external
+service, run the same server behind HTTPS:
+
+```sh
+./roclet-serve . 4173 --proxy-only --bind 0.0.0.0
+```
+
+Put an HTTPS reverse proxy in front of that port and set `endpoint` to its public
+URL, for example `"https://packages.example.org/api/packages/"`. Keep the trailing
+slash. Configure the endpoint **before** running `zig build package`; repackage
+after configuration changes so the offline manifest matches the published bytes.
+GitHub Pages cannot run the proxy itself. Deploying this optional service is
+outside this repository; manual bundle loading remains available if it fails.
+
+The service accepts only GitHub `.tar.zst` release archives with Roc content
+hashes. It validates redirect destinations and archive hashes, limits archives
+to 32 MiB, allows four simultaneous requests, and applies a 30-second download
+deadline. Its memory cache holds at most eight archives and 64 MiB. Public CORS
+responses allow the browser app to use a separately hosted endpoint. Notebook
+sources and compilation stay in the browser; only archive downloads use the
+service. Browser cache identities retain the original package URLs.
 
 Existing offline users can prepare the updated version through
 **File → Offline & storage**, then close all Roclet tabs and reopen.

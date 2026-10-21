@@ -5,12 +5,13 @@ import { CellEditor, editorFor } from './cell-editor.mjs';
 import { symbolAt, completionOptions } from './compiler-tools.mjs';
 import { CompilerHighlighter } from './roc-highlighting.mjs';
 import { DraftStore } from './edit-store.mjs';
+import { loadPackageBundle } from './package-dialog.mjs';
 import { renderMarkdown } from './markdown-view.mjs';
 import { renderDisplay } from './display-view.mjs';
 import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './edit-cells.mjs';
 const $ = id => document.getElementById(id);
 let store, compilerManifest;
-let notebook, highlighter, sourceEditor, libraryToken = 0, composing = false;
+let notebook, highlighter, sourceEditor, headerEditor, headerDocumentId, libraryToken = 0, composing = false;
 const cards = new Map();
 const notice = message => { $('notice').textContent = message; $('notice').hidden = !message; };
 const perform = async work => {
@@ -55,12 +56,12 @@ function renderObservation(view, kind, content, stale = false) {
   const updating = stale && (/^(Saving before evaluation|Running)/.test(notebook.status) || (notebook.state.autoRun && notebook.status.startsWith('Changed')));
   block.dataset.stale = String(stale);
   block.dataset.updating = String(updating);
-  block.setAttribute('aria-label', stale ? `${kind === 'value' ? 'Result' : 'Debug'} from an earlier run, ${updating ? 'updating' : 'awaiting update'}` : content.heading);
+  block.setAttribute('aria-label', stale ? `${kind === 'value' ? 'Result' : kind === 'tests' ? 'Tests' : 'Debug'} from an earlier run, ${updating ? 'updating' : 'awaiting update'}` : content.heading);
   block.title = stale ? `From an earlier run. ${updating ? 'Updating…' : 'Awaiting an update.'}` : '';
   if (block.parentNode !== view.results) view.results.append(block);
 }
 function clearObservations(view) {
-  for (const kind of ['value', 'debug']) renderObservation(view, kind, null);
+  for (const kind of ['value', 'debug', 'tests']) renderObservation(view, kind, null);
 }
 const selection = new CellSelection();
 let documentId, selectionActive = false;
@@ -346,16 +347,21 @@ function renderCells() {
 }
 function showDependencies(index) {
   closeMenus();
-  const result=notebook.result, cell=result?.model?.cells[index], root=cell?.output;
-  const item=result?.plan?.explanations?.find(e=>e.root===root);
+  const result=notebook.result, cell=result?.model?.cells[index];
+  const roots=[cell?.output,...(cell?.expectations ?? [])].filter(Boolean);
+  const items=result?.plan?.explanations?.filter(e=>roots.includes(e.root)) ?? [];
   const content=$('dependencies-content'); content.replaceChildren();
-  if (!item) content.textContent='Run or check the notebook to inspect this output’s dependencies.';
+  if (!items.length) content.textContent='Run or check the notebook to inspect this cell’s dependencies.';
   else {
-    const reason=document.createElement('p'); reason.textContent=item.reason;
-    const deps=document.createElement('pre'); deps.textContent=item.dependencies.map(name=>`${name}: ${(result.graph.definitions.find(d=>d.name===name)?.dependencies ?? []).join(', ') || 'no notebook dependencies'}`).join('\n');
+    for(const item of items) {
+      const label=item.root===cell.output?'Output':`Test ${cell.expectations.indexOf(item.root)+1}`;
+      const reason=document.createElement('p'); reason.textContent=`${label}: ${item.reason}`;
+      const deps=document.createElement('pre'); deps.textContent=item.dependencies.map(name=>`${name}: ${(result.graph.definitions.find(d=>d.name===name)?.dependencies ?? []).join(', ') || 'no notebook dependencies'}`).join('\n');
+      content.append(reason,deps);
+    }
     const time=document.createElement('p');
-    time.textContent=`Last request: ${Math.round(result.workerMs ?? 0)} ms in the worker · ${result.evaluation.evaluated_roots?.length ?? 0} outputs evaluated · ${result.plan.reused.length} reused. The whole document is type-checked; evaluated roots each compile afresh.`;
-    content.append(reason,deps,time);
+    time.textContent=`Last request: ${Math.round(result.workerMs ?? 0)} ms in the worker · ${result.evaluation.evaluated_roots?.length ?? 0} evaluations · ${result.plan.reused.length} reused.`;
+    content.append(time);
     if (result.graph?.scope==='module') {const note=document.createElement('p');note.textContent='This document uses types or dispatch requiring conservative module-wide invalidation.';content.append(note);}
   }
   $('dependencies-dialog').showModal();
@@ -421,6 +427,25 @@ function renderResults() {
       if (!displayed && showDiagnostics) view.meta.textContent = result?.status === 'diagnostic' ? 'Blocked by document diagnostics' : '';
       const error = result?.evaluation?.root_errors?.find(e=>e.root===root);
       if (error && showDiagnostics) view.results.append(outputBlock('Output failed',error.failure ?? error.status,'diagnostic'));
+      const tests = result?.evaluation?.tests?.filter(t=>t.cell===index) ?? [];
+      const testFailures=tests.filter(t=>!t.passed);
+      const testLocation=test=>{
+        const at=test.scope==='source'?test.start-analyzed.body_start:test.start;
+        if(at==null) return null;
+        const prefix=new TextDecoder().decode(new TextEncoder().encode(cell.source).subarray(0,Math.max(0,at)));
+        const lines=prefix.split('\n');return {line:lines.length,column:new TextEncoder().encode(lines.at(-1)).length+1};
+      };
+      const testContent=tests.length ? {
+        heading:testFailures.length ? `Tests · ${testFailures.length} failed, ${tests.length-testFailures.length} passed` : `Tests · ${tests.length} passed`,
+        text:tests.map(t=>{const at=testLocation(t);return `${t.passed?'PASS':'FAIL'}${at?` · line ${at.line}:${at.column}`:''}: ${t.message}`;}).join('\n'),
+      } : evaluated ? null : view.observations.tests;
+      renderObservation(view, 'tests', testContent, !tests.length);
+      view.outputBlocks.tests?.classList.toggle('diagnostic', testFailures.length>0);
+      if (tests.length && view.outputBlocks.tests) {
+        const heading=view.outputBlocks.tests.querySelector('.result-heading');
+        const target=testFailures[0] ?? tests[0];
+        const at=testLocation(target);if(at) heading.append(button('Go to source',()=>{editCell(cell.key);view.editor.goTo(at.line,at.column,true);}));
+      }
       const events = transcript.filter(e => e.cell === index);
       const debug = events.length ? { heading:!error && ['ok','partial'].includes(result.status) ? 'Debug · current result' : 'Debug · failed run', text:events.map(e => `${e.kind === 'dbg' ? 'dbg' : e.kind}: ${e.message}`).join('\n') }
         : value || removedOutput ? null : view.observations.debug;
@@ -435,6 +460,7 @@ function renderResults() {
   }
   const unassigned = transcript.filter(e => e.cell == null);
   if (unassigned.length) $('document-diagnostics').append(outputBlock('Notebook debug', unassigned.map(e => e.message).join('\n'), 'debug'));
+  if (notebook.state.mode === 'source' && result?.evaluation?.tests?.length) $('document-diagnostics').append(outputBlock('Tests',result.evaluation.tests.map(t=>`${t.passed?'PASS':'FAIL'}${t.location?` · source ${t.location.line}:${t.location.column}`:''}: ${t.message}`).join('\n'),result.evaluation.tests.some(t=>!t.passed)?'diagnostic':''));
   if (notebook.state.mode === 'source' && result?.status === 'ok' && result?.evaluation?.values?.length) $('document-diagnostics').append(outputBlock('Current results', result.evaluation.values.map(v => `${v.root}: ${v.text}`).join('\n')));
 }
 async function refreshLibrary() {
@@ -461,6 +487,11 @@ function reflect(reason) {
   $('undo').disabled = !notebook.history.length; $('redo').disabled = !notebook.future.length;
   $('notebook-view').setAttribute('aria-pressed', s.mode === 'notebook'); $('source-view').setAttribute('aria-pressed', s.mode === 'source');
   $('notebook').hidden = s.mode !== 'notebook'; $('source-pane').hidden = s.mode !== 'source';
+  $('app-header').hidden = s.mode !== 'notebook';
+  const preamble=s.preamble ?? '';headerEditor.sync(preamble,'code',s.headerSelection);
+  if(s.mode==='notebook' && headerDocumentId!==s.id) {
+    headerDocumentId=s.id;$('app-header').open=s.headerExpanded ?? false;
+  }
   if (s.mode === 'source') sourceEditor.sync(s.source,s.format==='roc'?'code':'markdown',s.editorSelection);
   // Raw edits can change cell boundaries; do not attach retained observations to
   // newly parsed cells merely because they occupy the same source positions.
@@ -493,14 +524,42 @@ function bind() {
   $('format').onchange = () => perform(async () => { await notebook.format($('format').value); reflect('document'); });
   $('run').onclick = () => perform(() => notebook.run()); $('stop').onclick = () => notebook.stop();
   $('auto').onchange = () => notebook.setAuto($('auto').checked);
+  $('app-header').ontoggle=()=>{
+    if(!notebook?.state || notebook.state.mode!=='notebook')return;
+    notebook.state.headerExpanded=$('app-header').open;void notebook.persist();
+    if($('app-header').open)headerEditor.view.requestMeasure();
+  };
   const undo = redo => { notebook.undo(redo); if (notebook.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); };
   $('undo').onclick = () => undo(false); $('redo').onclick = () => undo(true);
   $('recovery-copy').onclick=()=>perform(()=>notebook.recoveryCopy());
   $('new').onclick = () => perform(async () => { await notebook.replace(newDraft()); editCell(selection.focus); });
   $('rich-example').onclick=()=>perform(async()=>{const response=await fetch('../fixtures/documents/rich-outputs.roc');if(!response.ok) throw new Error('Example unavailable; rebuild the offline distribution.');await notebook.open(await response.text(),'Rich outputs.roc');closeMenus();});
   $('recent').onchange = () => perform(async () => { if($('recent').value===notebook.state.id) return; const record = await store.get($('recent').value); if (validDraft(record)) await notebook.replace(record); });
-  $('open').onchange = () => perform(async () => { const file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>8*1024*1024) throw new Error('Roclet bundles are limited to 8 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await notebook.replace(record);notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await notebook.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); if (notebook.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); });
+  $('open').onchange = () => perform(async () => { const file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>20*1024*1024) throw new Error('Roclet bundles are limited to 20 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await notebook.replace(record);notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await notebook.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); if (notebook.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); });
   $('preview').onclick = () => perform(async () => { const result = await notebook.inspect('export', 'roc'); $('generated').textContent = result.source; closeMenus(); $('generated-dialog').showModal(); });
+  const showProjectFile = path => {
+    const files=notebook.state.files ?? [], select=$('project-select'); select.replaceChildren();
+    const create=document.createElement('option'); create.value=''; create.textContent='New file'; select.append(create);
+    for (const file of files) {const option=document.createElement('option');option.value=file.path;option.textContent=file.path;select.append(option);}
+    const file=files.find(file=>file.path===path);select.value=file?.path ?? '';
+    $('project-path').value=file?.path ?? ''; $('project-source').value=file?.source ?? '';
+    $('project-remove').disabled=!file; $('project-status').textContent=`${files.length} project files saved with this notebook.`;
+  };
+  $('project-files').onclick=()=>{closeMenus();showProjectFile(notebook.state.files?.[0]?.path);$('project-dialog').showModal();};
+  $('project-select').onchange=()=>showProjectFile($('project-select').value);
+  $('project-upload').onchange=()=>perform(async()=>{
+    const additions=[];
+    for(const file of $('project-upload').files) {if(file.size>16*1024*1024) throw new Error('Project sources exceed the 16 MiB limit.'); additions.push({path:file.webkitRelativePath || file.name,source:await file.text()});}
+    const paths=new Set(additions.map(file=>file.path));
+    notebook.setProjectFiles([...(notebook.state.files ?? []).filter(file=>!paths.has(file.path)),...additions]);
+    $('project-upload').value='';showProjectFile(additions[0]?.path);
+  });
+  $('project-save').onclick=()=>perform(()=>{
+    const old=$('project-select').value,path=$('project-path').value,source=$('project-source').value;
+    const files=(notebook.state.files ?? []).filter(file=>file.path!==old && file.path!==path);
+    notebook.setProjectFiles([...files,{path,source}]);showProjectFile(path);$('project-status').textContent='File saved. Imports update with the next run.';
+  });
+  $('project-remove').onclick=()=>{notebook.removeProjectFile($('project-select').value);showProjectFile();};
   $('download').onclick = () => perform(async () => {
     const result = await notebook.inspect('export');
     if (notebook.state.format === 'roc' && result.status !== 'ok') throw new Error('Fix the errors before downloading runnable Roc, or switch to Markdown to save unfinished source.');
@@ -555,6 +614,7 @@ function bind() {
       event.preventDefault(); event.stopPropagation(); const wasCells = selection.mode === 'cells'; notebook.undo(event.shiftKey, { editing: editor });
       if (wasCells && inNotebook) focusCell(selection.focus); return;
     }
+    if(editorFor(target)===headerEditor && mod && event.key==='Enter') {event.preventDefault();event.stopPropagation();void perform(()=>notebook.run());return;}
     if (!inNotebook || menu || target.closest?.('button,summary,select')) return;
     if(mod && event.shiftKey && (key==='-' || key==='_') && card) {event.preventDefault();event.stopPropagation();void perform(()=>splitCell(card.dataset.key));return;}
     if (event.key === 'Enter' && (mod || event.shiftKey || event.altKey) && card) {
@@ -607,9 +667,15 @@ try {
     onSelection:positions=>{if(notebook?.state) {notebook.state.editorSelection=positions;notebook.group=null;}},
     onComposition:value=>{composing=value;if(value) clearTimeout(notebook.timer);else notebook.schedule();},
   });
-  notebook = new Notebook(binary, store, {onChange:reflect});
+  headerEditor=new CellEditor($('app-header-source'),{highlighter,label:'Roc app header',
+    onChange:(value,isComposing,positions)=>notebook.editPreamble(value,isComposing || composing,positions),
+    onFocus:()=>{notebook.finishEditing();selectionActive=false;renderSelection();},
+    onSelection:positions=>{if(notebook?.state){notebook.state.headerSelection=positions;notebook.group=null;}},
+    onComposition:value=>{composing=value;if(value)clearTimeout(notebook.timer);else notebook.schedule();},
+  });
+  notebook = new Notebook(binary, store, {onChange:reflect,loadPackage:loadPackageBundle});
   const dispose=notebook.dispose.bind(notebook);
-  notebook.dispose=()=>{highlighter.dispose();sourceEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
+  notebook.dispose=()=>{highlighter.dispose();sourceEditor.destroy();headerEditor.destroy();for(const view of cards.values()) view.editor.destroy();dispose();};
   bind();
   const launch = new URL(location.href);
   const id = launch.searchParams.get('notebook'), fresh = launch.searchParams.get('new') === '1';
@@ -620,6 +686,7 @@ try {
     ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
     ['weather', ['../demos/02-a-little-data.roc', 'Three days of weather.roc']],
     ['circle', ['../demos/03-circle.roc', 'A bigger circle.roc']],
+    ['meeting-windows', ['../demos/04-meeting-windows.roc', 'Finding room for a design review.roc']],
     ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich outputs.roc']],
   ]);
   if (example) {

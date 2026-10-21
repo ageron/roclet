@@ -52,6 +52,14 @@ jobs:
           mkdir "$RUNNER_TEMP/zig"
           tar -xf "$RUNNER_TEMP/zig.tar.xz" -C "$RUNNER_TEMP/zig" --strip-components=1
           echo "$RUNNER_TEMP/zig" >> "$GITHUB_PATH"
+      - name: Prepare pinned compiler dependency
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$RUNNER_TEMP/roc-source"
+          git -C "$RUNNER_TEMP/roc-source" remote add origin "$(jq -r .compilerRepository compiler.lock.json)"
+          git -C "$RUNNER_TEMP/roc-source" fetch --depth=1 origin "$(jq -r .compilerCommit compiler.lock.json)"
+          sh tools/prepare-compiler.sh "$RUNNER_TEMP/roc-source"
       - name: Test release metadata updates
         run: python3 tests/test-package-pin.py
       - name: Build and test the extracted package with ordinary Roc

@@ -1,14 +1,15 @@
 //! Roclet M0 whole-module bridge. Built unchanged for native and wasm32.
 const std = @import("std");
 const builtin = @import("builtin");
-const runner = @import("runner.zig");
-const platform = @import("echo_platform");
+const runner = @import("engine.zig");
+const platform = @import("platform.zig");
 const can = @import("can");
 const collections = @import("collections");
 const reporting = @import("reporting");
-const WasmFilesystem = @import("WasmFilesystem.zig");
+const Workspace = @import("workspace.zig");
 const compiled_builtins = @import("compiled_builtins");
-pub const roc_compressed_builtins = if (builtin.cpu.arch == .wasm32) @import("compressed_builtins") else void;
+pub const roc_compressed_builtins = @import("compressed_builtins");
+
 const is_wasm = builtin.cpu.arch == .wasm32;
 const gpa = if (is_wasm) std.heap.wasm_allocator else std.heap.page_allocator;
 pub const std_options: std.Options = .{ .logFn = quietLog };
@@ -22,6 +23,10 @@ const Request = struct {
     rich_output: bool = false,
     args: []const []const u8 = &.{},
     modules: []const runner.ExtraFile = &.{},
+    app_header: []const u8 = "",
+    root: ?[]const u8 = null,
+    notebook: ?@import("notebook.zig").Metadata = null,
+    files: []const struct { path: []const u8, source: []const u8 } = &.{},
 };
 const Region = struct { start: u32, end: u32 };
 const Definition = struct {
@@ -40,7 +45,23 @@ const Diagnostic = struct {
     filename: ?[]const u8 = null,
     location: ?struct { start_line: u32, start_column: u32, end_line: u32, end_column: u32 } = null,
 };
-const Event = struct { kind: []const u8, message: []const u8 };
+const Event = struct {
+    kind: []const u8,
+    message: []const u8,
+    root: ?[]const u8 = null,
+    pub fn jsonStringify(self: @This(), w: anytype) !void {
+        try w.beginObject();
+        try w.objectField("kind");
+        try w.write(self.kind);
+        try w.objectField("message");
+        try w.write(self.message);
+        if (self.root) |root| {
+            try w.objectField("root");
+            try w.write(root);
+        }
+        try w.endObject();
+    }
+};
 const Response = struct {
     protocol: u32 = 1,
     display_module: bool = false,
@@ -61,6 +82,7 @@ var event_bytes: usize = 0;
 var events_truncated = false;
 var rich_output = false;
 var value_index: usize = 0;
+var notebook_expectations: []const @import("notebook.zig").Expectation = &.{};
 
 fn dupe(s: []const u8) []const u8 {
     return arena.dupe(u8, s) catch {
@@ -86,7 +108,7 @@ fn observe(kind: []const u8, message: []const u8) void {
         if (end == 0 and message.len > 0 and !designated) return;
     }
     event_bytes += end;
-    response.events.append(arena, .{ .kind = kind, .message = dupe(message[0..end]) }) catch {
+    response.events.append(arena, .{ .kind = kind, .message = dupe(message[0..end]), .root = if (platform.observation_root) |root| dupe(root) else null }) catch {
         callback_failed = true;
     };
 }
@@ -136,13 +158,13 @@ fn analyze(env: *can.ModuleEnv, prefix: u32) void {
 }
 fn analyzeFallible(env: *can.ModuleEnv, prefix: u32) !void {
     const defs = env.store.sliceDefs(env.all_defs);
-    var patterns = collections.DenseMap(can.CIR.Pattern.Idx, can.CIR.Def.Idx).init(arena);
+    var patterns: std.AutoHashMapUnmanaged(can.CIR.Pattern.Idx, can.CIR.Def.Idx) = .{};
     var binders: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
     var binder_stack: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
     for (defs) |idx| {
         binders.clearRetainingCapacity();
         try can.DependencyGraph.appendPatternBinders(env, env.store.getDef(idx).pattern, &binders, &binder_stack, arena);
-        for (binders.items) |binder| try patterns.put(binder, idx);
+        for (binders.items) |binder| try patterns.put(arena, binder, idx);
         const d = env.store.getDef(idx);
         const r = env.store.getExprRegion(d.expr);
         if (r.start.offset >= prefix and r.end.offset <= prefix + user_bytes and env.store.getPattern(d.pattern) != .assign) response.dependency_scope = "module";
@@ -207,7 +229,7 @@ fn analyzeFallible(env: *can.ModuleEnv, prefix: u32) !void {
                 if (e == .e_lookup_local and e.e_lookup_local.pattern_idx == def.pattern) rename_safe = false;
             }
         }
-        var tw = try env.initTypeWriter();
+        var tw = try runner.scratchTypeWriter(env, arena);
         defer tw.deinit();
         try tw.write(can.ModuleEnv.varFrom(idx), .one_line);
         try response.definitions.append(arena, .{
@@ -219,6 +241,33 @@ fn analyzeFallible(env: *can.ModuleEnv, prefix: u32) !void {
             .references = occurrences.items,
             .rename_safe = rename_safe,
         });
+    }
+    // Tests are real checked statement roots rather than generated bindings.
+    // Expose their resolved references to the same reactive graph as outputs.
+    for (notebook_expectations) |expectation| {
+        for (env.store.sliceStatements(env.all_statements)) |idx| {
+            const statement = env.store.getStatement(idx);
+            if (statement != .s_expect) continue;
+            const region = env.store.getStatementRegion(idx);
+            if (region.start.offset < prefix or region.start.offset - prefix < expectation.start or region.start.offset - prefix >= expectation.end) continue;
+            refs.clearRetainingCapacity();
+            try can.DependencyGraph.collectNameReferences(env, &patterns, statement.s_expect.body, &refs, &stack, &defaults, arena);
+            var deps: std.ArrayList([]const u8) = .empty;
+            for (defs) |other| if (refs.contains(other)) {
+                const pattern = env.store.getPattern(env.store.getDef(other).pattern);
+                if (pattern == .assign) try deps.append(arena, dupe(env.getIdent(pattern.assign.ident))) else response.dependency_scope = "module";
+            };
+            try response.definitions.append(arena, .{
+                .name = dupe(expectation.root),
+                .type = "Bool",
+                .region = .{ .start = expectation.start, .end = expectation.end },
+                .name_region = .{ .start = expectation.start, .end = expectation.start },
+                .dependencies = deps.items,
+                .references = &.{},
+                .rename_safe = false,
+            });
+            break;
+        }
     }
 }
 const diag_vtable: runner.Diagnostics.VTable = .{ .write = writeFailure, .emitReport = emitReport };
@@ -236,17 +285,26 @@ fn serialize() ![]u8 {
         .diagnostics = response.diagnostics.items,
         .events = response.events.items,
         .failure = response.failure,
+        .packagesRequired = Workspace.global.required.items,
+        .workspaceCache = runner.stats(),
     }, .{}, &writer.writer);
     return writer.toOwnedSlice();
 }
 pub fn process(bytes: []const u8) ![]u8 {
+    Workspace.global.clearRequired();
+    runner.request_cache_stats = .{};
+    runner.request_frontend_builds = 0;
+    runner.request_lowerings = 0;
+    runner.request_executions = 0;
+    runner.request_prepared_hits = 0;
     const probe = std.json.parseFromSlice(std.json.Value, gpa, bytes, .{}) catch return processSource(bytes);
     defer probe.deinit();
+    if (probe.value == .object) try mountFiles(probe.value, gpa);
     if (probe.value == .object and probe.value.object.contains("operation")) {
-        return @import("roclet_document.zig").process(gpa, bytes, processSource, processCore);
+        return processDocument(bytes, probe.value);
     }
     if (probe.value == .object and probe.value.object.contains("cells")) {
-        return @import("roclet_snapshot.zig").evaluate(gpa, bytes, processSource);
+        return withRequiredPackages(try @import("snapshot.zig").evaluate(gpa, bytes, processSource));
     }
     return processSource(bytes);
 }
@@ -278,6 +336,10 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         response.failure = "Unsupported protocol or invalid source length (limit 1 MiB)";
         return serialize();
     }
+    for (req.files) |file| {
+        const path = if (std.mem.startsWith(u8, file.path, "/")) file.path else try std.mem.concat(arena, u8, &.{ execution_paths.extras_prefix, file.path });
+        try Workspace.global.put(path, file.source, false);
+    }
     user_bytes = req.user_bytes;
     rich_output = req.rich_output;
     value_index = 0;
@@ -289,11 +351,19 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         supplied_display = true;
         trusted_display = std.mem.eql(u8, module.content, @embedFile("Display.roc"));
     };
-    if (!supplied_display) try extras.append(arena, .{ .name = "Display", .content = @embedFile("Display.roc") });
+    if (!supplied_display) {
+        const display_path = try std.mem.concat(arena, u8, &.{ execution_paths.extras_prefix, "Display.roc" });
+        const io = Workspace.global.io(arena);
+        const display_source = io.readFile(display_path, arena) catch null;
+        if (display_source) |content| {
+            trusted_display = std.mem.eql(u8, content, @embedFile("Display.roc"));
+            try extras.append(arena, .{ .name = "Display", .content = content });
+        } else try extras.append(arena, .{ .name = "Display", .content = @embedFile("Display.roc") });
+    }
     // Only the checked, unaliased import of our bundled nominal type opts in.
     // A local type called Display or a different supplied module stays ordinary.
     if (trusted_display and cache == null) {
-        const facts = try @import("roclet_syntax.zig").roc(arena, req.source[0..req.user_bytes]);
+        const facts = try @import("syntax.zig").roc(arena, req.source[0..req.user_bytes]);
         for (facts.statements) |statement| if (std.mem.eql(u8, statement.kind, "import")) {
             var count: usize = 0;
             var name: []const u8 = "";
@@ -305,18 +375,48 @@ fn processSourceImpl(bytes: []const u8, cache: ?*runner.CachedProgram) ![]u8 {
         };
     }
     if (is_wasm) try compiled_builtins.decompress();
+    if (req.notebook) |notebook| {
+        notebook_expectations = notebook.expectations;
+        defer notebook_expectations = &.{};
+        platform.observer = observe;
+        defer platform.observer = null;
+        const exit_code = @import("notebook.zig").run(.{
+            .source = req.source,
+            .app_header = req.app_header,
+            .extras = extras.items,
+            .paths = execution_paths,
+            .metadata = notebook,
+            .root = req.root,
+            .rich_support = response.display_module,
+            .target_usize = if (is_wasm) .u32 else .native,
+            .roc_target = if (is_wasm) .wasm32 else @import("roc_target").RocTarget.detectNative(),
+            .diagnostics = .{ .ctx = null, .vtable = &diag_vtable },
+            .analyze = analyze,
+        }) catch |err| {
+            response.status = if (err == error.CompilationFailed) "diagnostic" else "runtime_error";
+            if (response.failure == null) response.failure = dupe(@errorName(err));
+            if (callback_failed) return error.OutOfMemory;
+            return serialize();
+        };
+        if (exit_code != 0) response.status = "runtime_error";
+        if (callback_failed) return error.OutOfMemory;
+        return serialize();
+    }
     const cold_core = cache != null and cache.?.bytes == null;
     const runtime_buffer = try gpa.alignedAlloc(u8, .@"16", (if (cold_core) @as(usize, if (is_wasm) 1024 else 2048) else 256) * 1024 * 1024);
     defer gpa.free(runtime_buffer);
     var fba = std.heap.FixedBufferAllocator.init(runtime_buffer);
-    var fs: WasmFilesystem.WasmContext = .{};
+
     platform.observer = observe;
     defer platform.observer = null;
     const exit_code = runner.runEcho(.{
         .runtime_fba = &fba,
-        .fallback_io = WasmFilesystem.wasm(&fs, fba.allocator(), std.Io.failing),
-        .std_io = std.Io.failing,
+        .paths = execution_paths,
+        .fallback_io = Workspace.global.io(fba.allocator()),
+        .std_io = Workspace.global.std_io,
         .source = req.source,
+        .app_header = req.app_header,
+        .root_name = req.root,
         .extras = extras.items,
         .diagnostics = .{ .ctx = null, .vtable = &diag_vtable },
         .analyze = if (cache == null) analyze else null,
@@ -360,4 +460,108 @@ export fn roclet_free_response(ptr: u32) void {
     const bytes: [*]u8 = @ptrFromInt(ptr);
     const len = std.mem.readInt(u32, bytes[0..4], .little);
     gpa.free(bytes[0 .. @as(usize, len) + 4]);
+}
+
+fn storedResponse(bytes: []const u8) u32 {
+    const stored = gpa.alloc(u8, bytes.len + 4) catch return 0;
+    std.mem.writeInt(u32, stored[0..4], @intCast(bytes.len), .little);
+    @memcpy(stored[4..], bytes);
+    return @intCast(@intFromPtr(stored.ptr));
+}
+fn input(ptr: u32, len: u32) []const u8 {
+    const p: [*]const u8 = @ptrFromInt(ptr);
+    return p[0..len];
+}
+export fn roclet_file_put(path_ptr: u32, path_len: u32, ptr: u32, len: u32) u32 {
+    Workspace.global.put(input(path_ptr, path_len), input(ptr, len), false) catch return 0;
+    return 1;
+}
+export fn roclet_file_drop(ptr: u32, len: u32) u32 {
+    Workspace.global.drop(input(ptr, len));
+    return 1;
+}
+export fn roclet_cache_import(ptr: u32, len: u32) u32 {
+    Workspace.global.importCache(input(ptr, len)) catch return 0;
+    return 1;
+}
+export fn roclet_cache_take_updates() u32 {
+    const bytes = Workspace.global.takeUpdates() catch return 0;
+    defer gpa.free(bytes);
+    return storedResponse(bytes);
+}
+export fn roclet_cache_stats() u32 {
+    const bytes = @import("snapshot.zig").json(gpa, runner.stats()) catch return 0;
+    defer gpa.free(bytes);
+    return storedResponse(bytes);
+}
+export fn roclet_cache_identity() u32 {
+    return storedResponse(Workspace.identity);
+}
+export fn roclet_package_install(url_ptr: u32, url_len: u32, ptr: u32, len: u32) u32 {
+    Workspace.global.installPackage(input(url_ptr, url_len), input(ptr, len)) catch return 0;
+    return 1;
+}
+
+var previous_graph: ?[]u8 = null;
+fn processDocument(bytes: []const u8, value: std.json.Value) ![]u8 {
+    _ = value;
+    var storage = std.heap.ArenaAllocator.init(gpa);
+    defer storage.deinit();
+    const a = storage.allocator();
+    var request = try std.json.parseFromSliceLeaky(std.json.Value, a, bytes, .{});
+    try request.object.put(a, "workspaceFingerprint", .{ .string = try Workspace.global.contentIdentity(a) });
+    if (request.object.getPtr("reactivity")) |reactivity| if (reactivity.* == .object and reactivity.object.get("previous") == null) {
+        if (previous_graph) |graph| try reactivity.object.put(a, "previous", try std.json.parseFromSliceLeaky(std.json.Value, a, graph, .{}));
+    };
+    const input_bytes = try @import("snapshot.zig").json(a, request);
+    const result = try @import("document.zig").process(gpa, input_bytes, processSource, processCore);
+    defer gpa.free(result);
+    var parsed = try std.json.parseFromSliceLeaky(std.json.Value, a, result, .{});
+    if (parsed == .object) {
+        if (parsed.object.get("graph")) |graph| {
+            const owned = try @import("snapshot.zig").json(gpa, graph);
+            if (previous_graph) |old| gpa.free(old);
+            previous_graph = owned;
+        }
+        try parsed.object.put(a, "workspaceCache", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, runner.stats()), .{}));
+        try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try @import("snapshot.zig").json(a, Workspace.global.required.items), .{}));
+    }
+    return @import("snapshot.zig").json(gpa, parsed);
+}
+
+fn mountFiles(request: std.json.Value, a: std.mem.Allocator) !void {
+    if (request.object.get("files")) |files| if (files == .array) for (files.array.items) |file| {
+        const path = file.object.get("path").?.string;
+        const full = if (std.mem.startsWith(u8, path, "/")) path else try std.mem.concat(a, u8, &.{ execution_paths.extras_prefix, path });
+        defer if (full.ptr != path.ptr) a.free(full);
+        try Workspace.global.put(full, file.object.get("source").?.string, false);
+    };
+}
+
+fn withRequiredPackages(result: []u8) ![]u8 {
+    defer gpa.free(result);
+    var temporary = std.heap.ArenaAllocator.init(gpa);
+    defer temporary.deinit();
+    const a = temporary.allocator();
+    var parsed = try std.json.parseFromSliceLeaky(std.json.Value, a, result, .{});
+    const json = @import("snapshot.zig").json;
+    try parsed.object.put(a, "workspaceCache", try std.json.parseFromSliceLeaky(std.json.Value, a, try json(a, runner.stats()), .{}));
+    try parsed.object.put(a, "packagesRequired", try std.json.parseFromSliceLeaky(std.json.Value, a, try json(a, Workspace.global.required.items), .{}));
+    return json(gpa, parsed);
+}
+
+pub fn setNativeIo(io: std.Io) void {
+    Workspace.global.std_io = io;
+}
+
+var execution_paths: runner.Paths = .{};
+pub fn setNativeSourceDirectory(directory: []const u8) !void {
+    Workspace.global.native_files = @import("ctx").CoreCtx.default(gpa, gpa, Workspace.global.std_io);
+    execution_paths = .{
+        .app_abs = try std.fs.path.join(gpa, &.{ directory, "Main.roc" }),
+        .platform_main = try std.fs.path.join(gpa, &.{ directory, ".roc_echo_platform/main.roc" }),
+        .echo_module = try std.fs.path.join(gpa, &.{ directory, ".roc_echo_platform/Echo.roc" }),
+        .cwd = try gpa.dupe(u8, directory),
+        .extras_prefix = try std.mem.concat(gpa, u8, &.{ directory, "/" }),
+    };
 }
