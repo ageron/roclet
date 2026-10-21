@@ -130,7 +130,30 @@ try {
   await show('left');part('left','find-close').click();
   report('Find & Replace keeps independent queries and changes only the intended panel, with one-step undo');
 
-  const [leftRun, rightRun] = await Promise.all([L().run(), R().run()]);
+  // run() saves first. Independent IndexedDB transactions can finish far
+  // enough apart for a warm worker to reply before the other is dispatched.
+  // Release both real session requests together after both saves complete;
+  // keep the overlap assertion below so serialized worker dispatch still fails.
+  const sessions = [L().session, R().session], requests = sessions.map(session=>session.request);
+  let releaseDispatch, readyToDispatch = 0;
+  const dispatchGate = new Promise(resolve=>{releaseDispatch=resolve;});
+  sessions.forEach((session,index)=>{
+    session.request = async (...args) => {
+      readyToDispatch++;
+      await dispatchGate;
+      return requests[index].apply(session,args);
+    };
+  });
+  let leftRun, rightRun;
+  const runs = Promise.all([L().run(), R().run()]);
+  try {
+    await until(()=>readyToDispatch===2, 'both runs to finish saving before dispatch');
+    releaseDispatch();
+    [leftRun, rightRun] = await runs;
+  } finally {
+    releaseDispatch();
+    sessions.forEach((session,index)=>{session.request=requests[index];});
+  }
   assert(leftRun && rightRun, 'A concurrent run did not complete');
   assert(sent.left.at(-1).overlap || sent.right.at(-1).overlap, 'The two requests were never in flight at the same time');
   assert.deepEqual(texts(leftRun), await alone(L().state));
@@ -187,7 +210,8 @@ try {
   assert.equal((await L().run(undefined, {automatic:true})).graph.scope, scope);
   report('D4b a comment edit reuses every left root; a type declaration in the right notebook leaves the left graph scope unchanged');
 
-  $('engine-details').click();
+  // A previous run may have persisted this preference in the same browser.
+  if ($('engine-details').getAttribute('aria-pressed') !== 'true') $('engine-details').click();
   for (const slot of ['left','right']) {
     await show(slot);
     assert(visible(part(slot,'engine-status')), `${slot} engine details are hidden`);
