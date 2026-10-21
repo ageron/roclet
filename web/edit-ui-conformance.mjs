@@ -325,6 +325,20 @@ try {
   $('find-close').click();assert($('find-bar').hidden);key('z',{metaKey:true});assert.match(source(inputs()[0]),/beta = 2/);
   key('f',{metaKey:true,shiftKey:true});assert(!$('find-bar').hidden);key('Escape');assert($('find-bar').hidden);
   report('notebook Find & Replace navigates, replaces, undoes and closes with either search shortcut');
+  notebook.change(s=>{s.cells=Array.from({length:24},(_,i)=>makeCell('code',`value_${i} = ${i}`));});
+  inputs().at(-1).focus();key('f',{metaKey:true});
+  $('find-query').value='value_23';$('find-query').dispatchEvent(new Event('input'));
+  await until(()=>$('find-results').textContent==='1 of 1');await measure();
+  const searchScroller=$('find-bar').closest('.panel-scroll');
+  searchScroller.scrollTop=searchScroller.scrollHeight;await measure();
+  const searchBounds=$('find-bar').getBoundingClientRect(),titleBounds=$('title-bar').getBoundingClientRect();
+  assert(searchScroller.scrollTop>searchScroller.clientHeight,'Search regression needs more than one page');
+  assert(searchBounds.top>=titleBounds.bottom-1,'Sticky title overlaps search');
+  assert(searchBounds.bottom<=searchScroller.getBoundingClientRect().bottom,'Search extends below the panel');
+  for(const id of ['find-query','replace-query'])assert($(id).getBoundingClientRect().top>=titleBounds.bottom-1,'Search row is hidden');
+  $('find-close').click();
+  report('Find & Replace stays fully below the sticky title when searching beyond the first page');
+
   notebook.change(s=>{s.cells=[makeCell('code','a = 3\nb')];});
   inputs()[0].focus();key('Enter',{metaKey:true});await until(()=>notebook.result?.status==='diagnostic');
   assert.equal(document.querySelectorAll('.value').length,0);
