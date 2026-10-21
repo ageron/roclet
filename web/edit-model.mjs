@@ -15,6 +15,20 @@ export function newDraft(title = 'Untitled', demo = false) {
   return { schema: 1, id: key(), title, format: 'roc', preamble: 'app [main!] {}', metadata: '', cells,
     source: '', sourceCurrent: false, files: [], mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
 }
+// A new draft with the same content as another: new id, fresh cell keys, so it
+// can be open and saved beside the original without sharing anything.
+export function independentCopy(record) {
+  const copy = clone(record);
+  delete copy._storageVersion;
+  return { ...copy, id: key(), title: `${(record.title || 'Untitled').slice(0, 113)} (copy)`, cells: copy.cells.map(cell => ({ ...cell, key: key() })), revision: 1, updatedAt: Date.now() };
+}
+// The draft that opening a Roc or Markdown file creates; it starts in source
+// mode until the document engine has split it into cells.
+export function openedDraft(source, filename) {
+  const record = newDraft(filename.replace(/\.(roc|md)$/i, ''));
+  record.source = source; record.sourceCurrent = true; record.format = filename.toLowerCase().endsWith('.md') ? 'markdown' : 'roc'; record.mode = 'source';
+  return record;
+}
 export function validDraft(record) {
   try { projectFiles(record?.files); } catch { return false; }
   return record?.schema === 1 && typeof record.id === 'string' && typeof record.title === 'string'
@@ -33,52 +47,39 @@ export function cellsFrom(result, previous = []) {
     attributes: cell.attributes, outputs: cell.outputs, collapsed: previous[i]?.collapsed ?? false }));
 }
 
-// Presentation reuse only: these strings never enter compiler evaluation.
-function mergeCheckedResults(previous, result, state) {
-  if (!result.graph || !result.evaluation) return result;
-  const reused = new Set(result.plan?.reused ?? []);
-  const old = previous?.evaluation;
-  const positions = new Map(result.model.cells.flatMap((cell, i) => [cell.output,...(cell.expectations ?? [])].map(root=>[root,i])));
-  const values = [...(old?.values ?? []).filter(v => reused.has(v.root)), ...(result.evaluation.values ?? [])];
-  values.sort((a,b) => positions.get(a.root) - positions.get(b.root));
-  const events = [...(old?.events ?? []).filter(e => reused.has(e.root)), ...result.evaluation.events]
-    .map(e => ({...e, cell:positions.get(e.root) ?? null})).sort((a,b) => (a.cell ?? -1) - (b.cell ?? -1));
-  const tests = [...(old?.tests ?? []).filter(t=>reused.has(t.root)), ...(result.evaluation.tests ?? [])]
-    .map(test=>{
-      const cell=positions.get(test.root) ?? null;
-      if(!reused.has(test.root)) return {...test,cell};
-      // Reused statuses still use this revision's compiler-provided source map.
-      const expectation=result.expectations?.find(e=>e.root===test.root);
-      const mapping=result.mappings?.find(m=>m.cell===cell && m.generated_start<=expectation?.start && expectation.start<m.generated_end);
-      if(!mapping) return {...test,cell};
-      const absolute=mapping.source_start+expectation.start-mapping.generated_start;
-      const raw=state.sourceCurrent, start=raw?absolute:absolute-result.model.cells[cell].body_start;
-      const source=raw?state.source:result.model.cells[cell].source;
-      const prefix=new TextDecoder().decode(new TextEncoder().encode(source).subarray(0,start));
-      const lines=prefix.split('\n'),location={line:lines.length,column:new TextEncoder().encode(lines.at(-1)).length+1};
-      return {...test,cell,start,end:start+expectation.end-expectation.start,location,scope:raw?'source':'cell'};
-    });
-  return {...result, evaluation:{...result.evaluation, values, tests, events:events.map((e,sequence) => ({...e,sequence}))}};
+export function unsavedError(message, discardLabel, discard) {
+  return Object.assign(new Error(message), { name: 'UnsavedError', discardLabel, discard });
 }
-
 // Browser-owned edit history, persistence and worker lifecycle. Parsing, output
 // selection, lowering and encoding are exclusively the shared Roc document core.
 export class Notebook {
-  constructor(bytes, store, { session = new DocumentSession(bytes), debounce = 550, timeout = 15000, onChange = () => {}, loadPackage } = {}) {
+  constructor(bytes, store, { session = new DocumentSession(bytes), debounce = 550, timeout = 15000, onChange = () => {}, loadPackage, deferScheduling = false } = {}) {
     this.store = store; this.session = session; this.debounce = debounce; this.timeout = timeout; this.onChange = onChange;
     this.loadPackage = loadPackage;
+    this.schedulingDeferred = deferScheduling;
     this.state = null; this.result = null; this.history = []; this.future = []; this.views = new Map();
-    this.diagnosticsDeferred = false; this.baseline = null;
+    this.diagnosticsDeferred = false; this.lastChecked = null; this.baselineId = null; this.resetBaseline = false;
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
+    this.activeOperation = null;
+  }
+  get busy() { return this.activeOperation === this.runId; }
+  finishOperation(token) {
+    if (this.activeOperation !== token) return;
+    this.activeOperation = null;
+    this.emit();
   }
   emit(reason = 'status') { this.onChange(reason); }
-  async initialize({id = null, fresh = false} = {}) {
-    let record;
-    try { record = id ? await this.store.get(id) : fresh ? null : (await this.store.list()).find(validDraft); }
-    catch (error) { this.saveStatus = `Browser storage unavailable: ${error.message}`; }
+  // A given record (a new draft, never one already saved) opens as is; without
+  // an id, fresh or record the most recent draft is recovered.
+  async initialize({id = null, fresh = false, record: given = null} = {}) {
+    let record = given;
+    if (!given) {
+      try { record = id ? await this.store.get(id) : fresh ? null : (await this.store.list()).find(validDraft); }
+      catch (error) { this.saveStatus = `Browser storage unavailable: ${error.message}`; }
+    }
     if (id && !validDraft(record)) throw new Error('This notebook is unavailable in this browser. Return home to choose another.');
     this.state = record ? clone(record) : fresh ? newDraft() : newDraft('Wall area', true);
-    this.status = record ? 'Recovered draft · results must be recomputed' : 'Ready';
+    this.status = record && !given ? 'Recovered draft · results must be recomputed' : 'Ready';
     this.emit('document');
     await this.persist();
     this.schedule();
@@ -95,12 +96,17 @@ export class Notebook {
       if (this.state.id === id && this.state.revision === revision && saveVersion === this.saveVersion) { this.saveStatus = 'Saved in this browser'; this.emit('saved'); }
       return true;
     } catch (error) {
-      if (this.state.id === id && saveVersion === this.saveVersion) { this.saveStatus = `Not saved: ${error.message}. Download a copy.`; this.emit(); }
+      if (this.state.id === id && saveVersion === this.saveVersion) { this.saveStatus = `Not saved: ${error.message.replace(/[.!?]+\s*$/, '')}. Download a copy.`; this.emit(); }
       return false;
     }
   }
+  // A draft that cannot be saved (for example after another tab changed it)
+  // is still kept when this exact revision was downloaded.
+  markDownloaded() { if (this.state) this.downloaded = { id: this.state.id, revision: this.state.revision }; }
+  get downloadedCurrent() { return !!this.state && this.downloaded?.id === this.state.id && this.downloaded.revision === this.state.revision; }
+  async keep() { return await this.persist() || this.downloadedCurrent; }
   cancelPending() {
-    clearTimeout(this.timer); this.timer = null; this.runId++; this.session.invalidate();
+    clearTimeout(this.timer); this.timer = null; this.runId++; this.activeOperation = null; this.session.invalidate();
   }
   invalidate() {
     this.cancelPending();
@@ -142,12 +148,15 @@ export class Notebook {
   }
   schedule() {
     clearTimeout(this.timer);
+    if (this.schedulingDeferred) { this.timer = null; return; }
     this.timer = setTimeout(async () => {
       this.timer = null;
       if (this.state.autoRun) void this.run(undefined, { automatic: true });
       else void this.check();
     }, this.debounce);
   }
+  // A notebook without a document (a panel refused one) has nothing to check.
+  resumeScheduling() { this.schedulingDeferred = false; if (this.state) this.schedule(); }
   finishEditing({ flush = true } = {}) {
     if (!this.diagnosticsDeferred) return;
     this.diagnosticsDeferred = false; this.emit('diagnostics');
@@ -161,24 +170,23 @@ export class Notebook {
   reactiveRequest(action, selectedCell, forceAll = false) {
     const request = requestFor(this.state, action);
     request.compact = true;
-    const previous = this.baseline?.id === this.state.id ? this.baseline.result : null;
-    const roots = previous?.roots ?? [];
-    // A forced cell is resolved against the *new* model in the adapter below.
-    request.reactivity = {known:!!previous?.graph, previous:previous?.graph ?? {context:'',scope:'module',definitions:[]},
-      current:{context:'',scope:'module',definitions:[]}, roots:[], available:[...(previous?.evaluation?.values ?? []),...(previous?.evaluation?.tests ?? []).filter(t=>t.passed)].map(v=>v.root), force:forceAll ? roots : []};
+    // The engine owns the reactive baseline and answers for every root. A
+    // different document starts a fresh baseline; forced cells and forceAll
+    // are resolved against the new model by the engine.
+    request.reactivity = this.resetBaseline || this.baselineId !== this.state.id ? {reset:true} : {};
     request.forceAll = forceAll;
     if (selectedCell != null) request.selectedCell = selectedCell;
     request.isolateErrors = true;
     return request;
   }
   publish(result) {
-    const previous = this.baseline?.id === this.state.id ? this.baseline.result : null;
-    this.result = mergeCheckedResults(previous, result, this.state);
-    if (result.graph) this.baseline = {id:this.state.id,result:this.result};
-    return this.result;
+    this.result = result;
+    if (result.graph) this.lastChecked = result;
+    return result;
   }
   async request(request,{onPackageWaiting}={}) {
     const runId=this.runId;
+    if (request.reactivity) { this.baselineId = this.state.id; this.resetBaseline = false; }
     try {
       return await this.session.request(request,{loadPackage:this.loadPackage,onPackageWaiting:waiting=>{
         if(runId!==this.runId) return;
@@ -198,16 +206,17 @@ export class Notebook {
   async run(selectedCell, { automatic = false } = {}) {
     if (!automatic) this.diagnosticsDeferred = false;
     this.cancelPending(); const runId = this.runId, revision = this.state.revision, id = this.state.id;
-    const request = this.reactiveRequest('evaluate', selectedCell, !automatic && selectedCell == null);
-    this.status = 'Saving before evaluation…'; this.emit();
-    await this.persist();
-    if (runId !== this.runId) return null;
-    this.status = 'Running…'; this.emit();
-    const started = performance.now();
+    this.activeOperation = runId;
     let timeout;
     const armTimeout=()=>{timeout=setTimeout(() => { if (runId === this.runId) this.stop('Stopped after 15 seconds · automatic execution paused'); }, this.timeout);};
-    armTimeout();
     try {
+      const request = this.reactiveRequest('evaluate', selectedCell, !automatic && selectedCell == null);
+      this.status = 'Saving before evaluation…'; this.emit();
+      await this.persist();
+      if (runId !== this.runId) return null;
+      this.status = 'Running…'; this.emit();
+      const started = performance.now();
+      armTimeout();
       const result = await this.request(request,{onPackageWaiting:waiting=>{clearTimeout(timeout);if(!waiting)armTimeout();}});
       if (runId !== this.runId || revision !== this.state.revision || id !== this.state.id) return null;
       this.publish(result);
@@ -220,7 +229,7 @@ export class Notebook {
     } catch (error) {
       if (runId === this.runId && error.name !== 'AbortError') { this.result = null; this.status = `Run failed: ${error.message}`; this.emit('result'); }
       return null;
-    } finally { clearTimeout(timeout); }
+    } finally { clearTimeout(timeout); this.finishOperation(runId); }
   }
   async rename(cell, position, name) {
     const result = await this.inspect('analyze', this.state.format, {draft:true});
@@ -249,15 +258,21 @@ export class Notebook {
   async inspect(action = 'parse', target = this.state.format, { draft = false } = {}) {
     clearTimeout(this.timer); this.timer = null;
     const revision = this.state.revision, id = this.state.id, token = ++this.runId;
+    this.activeOperation = token;
     this.session.invalidate();
     this.status = 'Preparing document…'; this.emit();
     // Structural edits need spans for the editable cells, not imported source
     // that may still contain markers or saved-output comments.
-    const result = await this.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target));
-    if (token !== this.runId || revision !== this.state.revision || id !== this.state.id) throw new DOMException('Document changed', 'AbortError');
-    if (!result.model) throw new Error(result.failure ?? 'The document engine could not read this draft.');
-    this.status = result.status === 'ok' ? (this.result?.evaluation?.status === 'ok' && Array.isArray(this.result.evaluation.values) ? 'Current' : 'Ready') : 'Needs attention'; this.emit();
-    return result;
+    try {
+      const result = await this.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target));
+      if (token !== this.runId || revision !== this.state.revision || id !== this.state.id) throw new DOMException('Document changed', 'AbortError');
+      if (!result.model) throw new Error(result.failure ?? 'The document engine could not read this draft.');
+      this.status = result.status === 'ok' ? (this.result?.evaluation?.status === 'ok' && Array.isArray(this.result.evaluation.values) ? 'Current' : 'Ready') : 'Needs attention'; this.emit();
+      return result;
+    } catch (error) {
+      if (token === this.runId && error.name !== 'AbortError') { this.status = `Preparation failed: ${error.message}`; this.emit(); }
+      throw error;
+    } finally { this.finishOperation(token); }
   }
   async mode(mode) {
     if (mode === this.state.mode) return;
@@ -304,19 +319,23 @@ export class Notebook {
   }
   async recoveryCopy() {
     this.diagnosticsDeferred = false;
-    this.invalidate();this.state={...clone(this.state),id:key(),title:`${this.state.title.slice(0,100)} (recovery)`,revision:1};delete this.state._storageVersion;this.history=[];this.future=[];this.views.clear();this.emit("document");await this.persist();
+    this.invalidate();this.resetBaseline=true;this.state={...clone(this.state),id:key(),title:`${this.state.title.slice(0,100)} (recovery)`,revision:1};delete this.state._storageVersion;this.history=[];this.future=[];this.views.clear();this.emit("document");await this.persist();
   }
-  async replace(record) {
-    if (!await this.persist()) throw new Error('The current draft could not be saved. Download a copy before switching documents.');
+  // Switching away from a draft that cannot be kept is refused with an
+  // UnsavedError whose `discard` switches anyway, losing this tab's changes.
+  async replace(record, { discard = false } = {}) {
+    if (!discard && !await this.keep()) throw unsavedError(`The current draft could not be saved, so the other document was not opened. ${this.saveStatus}`, 'Switch without saving (discards unsaved changes in this tab)', () => this.replace(record, { discard: true }));
     this.diagnosticsDeferred = false;
-    this.invalidate(); this.state = clone(record); this.history = []; this.future = []; this.views.clear(); this.group = null;
+    this.invalidate(); this.resetBaseline = true; this.state = clone(record); this.history = []; this.future = []; this.views.clear(); this.group = null;
     this.emit('document'); await this.persist(); this.schedule();
   }
   async open(source, filename) {
-    const record = newDraft(filename.replace(/\.(roc|md)$/i, ''));
-    record.source = source; record.sourceCurrent = true; record.format = filename.toLowerCase().endsWith('.md') ? 'markdown' : 'roc'; record.mode = 'source';
-    await this.replace(record);
+    try { await this.replace(openedDraft(source, filename)); }
+    catch (error) {
+      if (error.name === 'UnsavedError') { const discard = error.discard; error.discard = async () => { await discard(); await this.mode('notebook'); }; }
+      throw error;
+    }
     await this.mode('notebook');
   }
-  dispose() { clearTimeout(this.timer); this.runId++; this.session.stop(); }
+  dispose() { clearTimeout(this.timer); this.runId++; this.activeOperation = null; this.session.stop(); }
 }

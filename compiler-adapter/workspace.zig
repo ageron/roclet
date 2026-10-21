@@ -6,7 +6,6 @@ const unbundle = @import("unbundle");
 const A = std.mem.Allocator;
 const gpa = if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator;
 pub const identity = "roclet-cache-v1/" ++ @import("build_options").compiler_compatibility_id;
-pub var global: Workspace = .{};
 pub const RequiredPackage = struct { url: []const u8, destination: []const u8 };
 const File = struct { bytes: []u8, dirty: bool = false, used: u64 = 0 };
 pub const Workspace = struct {
@@ -45,7 +44,7 @@ pub const Workspace = struct {
         return a.dupe(u8, &self.fingerprint.?);
     }
     pub fn put(self: *Workspace, path: []const u8, bytes: []const u8, dirty: bool) !void {
-        if (path.len == 0 or path[0] != '/' or path.len > 4096 or std.mem.indexOfScalar(u8, path, 0) != null) return error.InvalidPath;
+        if (path.len == 0 or path[0] != '/' or path.len > 4096 or std.mem.findScalar(u8, path, 0) != null) return error.InvalidPath;
         const normalized = try std.fs.path.resolve(gpa, &.{path});
         defer gpa.free(normalized);
         if (self.files.get(normalized)) |existing| if (std.mem.eql(u8, existing.bytes, bytes)) return;
@@ -148,7 +147,7 @@ pub const Workspace = struct {
         // Validate the complete envelope before mutating the live store.
         while (at < bytes.len) {
             const e = try decodeEntry(bytes, &at);
-            if (!isArtifact(e.path) or std.mem.indexOf(u8, e.path, "..") != null or std.mem.indexOfScalar(u8, e.path, 0) != null or !std.unicode.utf8ValidateSlice(e.path)) return error.InvalidCache;
+            if (!isArtifact(e.path) or std.mem.find(u8, e.path, "..") != null or std.mem.findScalar(u8, e.path, 0) != null or !std.unicode.utf8ValidateSlice(e.path)) return error.InvalidCache;
         }
         at = 4;
         while (at < bytes.len) {
@@ -275,7 +274,7 @@ fn listTop(p: ?*anyopaque, _: std.Io, path: []const u8, a: A) CoreCtx.ListError!
     var it = ctx(p).files.keyIterator();
     while (it.next()) |key| if (child(path, key.*)) {
         const start = path.len + @intFromBool(!std.mem.endsWith(u8, path, "/"));
-        const slash = std.mem.indexOfScalarPos(u8, key.*, start, '/');
+        const slash = std.mem.findScalarPos(u8, key.*, start, '/');
         const name = key.*[0 .. slash orelse key.len];
         if (seen.contains(name)) continue;
         const owned = try a.dupe(u8, name);

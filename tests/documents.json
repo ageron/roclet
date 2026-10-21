@@ -3168,5 +3168,750 @@
         "42.0"
       ]
     }
+  },
+  {
+    "name": "cells: forward references and multiple outputs",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = area",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "width = 5\nheight = 3",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "area = width * height\nout_dimensions = area",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15.0",
+        "15.0"
+      ],
+      "events": [],
+      "permute": true
+    }
+  },
+  {
+    "name": "cells: definition dependencies that would form a false cell cycle",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "a = b + 1\nc = 1",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "b = c + 1\nout_1 = a",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "3.0"
+      ],
+      "events": [],
+      "permute": true
+    }
+  },
+  {
+    "name": "cells: anonymous expression after notebook lowering",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = 1 + 1",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "2.0"
+      ],
+      "events": [],
+      "permute": true
+    }
+  },
+  {
+    "name": "cells: typed recursive function",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = factorial(5)",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "factorial : U64 -> U64\nfactorial = |n| if n == 0 { 1 } else { n * factorial(n - 1) }",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "120"
+      ],
+      "events": [],
+      "permute": true
+    }
+  },
+  {
+    "name": "cells: top-level type and annotation across cells",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = dimensions.width * dimensions.height",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "dimensions : Dimensions\ndimensions = { width: 5, height: 3 }",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "Dimensions : { width : U64, height : U64 }",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15"
+      ],
+      "events": [],
+      "permute": true
+    }
+  },
+  {
+    "name": "cells: in-memory module import",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = Geometry.area(5, 3)",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "import Geometry",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      },
+      "modules": [
+        {
+          "name": "Geometry",
+          "content": "Geometry := [].{\n    area : U64, U64 -> U64\n    area = |width, height| width * height\n}\n"
+        }
+      ]
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15"
+      ],
+      "events": [],
+      "permute": true
+    }
+  },
+  {
+    "name": "cells: user debug observations",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = traced(5)",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "traced = |value| {\n    dbg value\n    value * 3\n}",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "15.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_1",
+          "message": "5.0"
+        }
+      ],
+      "permute": true
+    }
+  },
+  {
+    "name": "cells: a valid notebook before errors",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "x = 42\nout_1 = x",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "42.0"
+      ],
+      "events": []
+    }
+  },
+  {
+    "name": "cells: an undefined name yields no values",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = x",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "cells: a type error yields no values",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = \"bad\" + 1",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "cells: a parse error yields no values",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = (",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "diagnostic",
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "cells: a duplicate definition yields no values",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "x = 1\nx = 2\nout_1 = x",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "diagnostic",
+      "no_evaluation": true
+    }
+  },
+  {
+    "name": "cells: a supplied module import evaluates",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "import Fresh\nout_1 = Fresh.value",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      },
+      "modules": [
+        {
+          "name": "Fresh",
+          "content": "Fresh := [].{ value = 7 }"
+        }
+      ]
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "7.0"
+      ],
+      "events": []
+    }
+  },
+  {
+    "name": "cells: a removed module import yields no values",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "import Fresh\nout_1 = Fresh.value",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      },
+      "modules": []
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "cells: a valid notebook after errors",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "x = 42\nout_1 = x",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "42.0"
+      ],
+      "events": []
+    }
+  },
+  {
+    "name": "cells: a multi-definition module file evaluates",
+    "modules_from": [
+      {
+        "name": "Revision",
+        "path": "fixtures/modules/Revision.roc"
+      }
+    ],
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "import Revision\nstate = Revision.edit(Revision.initial)\ncurrent = { document: 1, input: 0, generation: 0 }\nold = { document: 0, input: 0, generation: 0 }\nout_1 = [Revision.accepts(state, current), Revision.accepts(state, old), Revision.finish(state, current).ready, Revision.finish(state, old).ready, Revision.accepts(Revision.restart(state), current), Revision.accepts(Revision.change_input(state), current)]",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "[True, False, True, False, False, False]"
+      ],
+      "events": []
+    }
+  },
+  {
+    "name": "cells: definition regions index UTF-8 source past multibyte characters",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "# 🪨 café\nout_1 = 1 + 1",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "2.0"
+      ],
+      "events": [],
+      "definition_source_text": "out_1 = 1 + 1"
+    }
+  },
+  {
+    "name": "cells: definition regions index the right cell after a multibyte cell",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "# 🪨 café",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "# é\nout_1 = 1 + 1",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "2.0"
+      ],
+      "events": [],
+      "definition_source_text": "out_1 = 1 + 1"
+    }
+  },
+  {
+    "name": "cells: unreachable dbg is dropped and repeated dbg is kept",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "unused = { dbg \"unused\"\n0 }\nout_1 = { dbg \"same\"\ndbg \"same\"\n42 }",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "42.0"
+      ],
+      "events": [
+        {
+          "kind": "dbg",
+          "root": "out_1",
+          "message": "\"same\""
+        },
+        {
+          "kind": "dbg",
+          "root": "out_1",
+          "message": "\"same\""
+        }
+      ]
+    }
+  },
+  {
+    "name": "cells: without error isolation a crashing root yields no values",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_good = 42",
+            "attributes": "",
+            "outputs": []
+          },
+          {
+            "kind": "code",
+            "source": "out_bad = { crash \"boom\"\n0 }",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "diagnostic",
+      "evaluated_values": []
+    }
+  },
+  {
+    "name": "cells: heap-backed strings inspect intact",
+    "request": {
+      "operation": "document",
+      "action": "evaluate",
+      "format": "roc",
+      "target": "roc",
+      "source": "",
+      "draft": {
+        "preamble": "app [main!] {}",
+        "metadata": "",
+        "cells": [
+          {
+            "kind": "code",
+            "source": "out_1 = [\"abcdefghijklmnopqrstuvwxyz0123456789\", \"abcdefghijklmnopqrstuvwxyz0123456789\"]",
+            "attributes": "",
+            "outputs": []
+          }
+        ]
+      }
+    },
+    "expect": {
+      "status": "ok",
+      "evaluated_values": [
+        "[\"abcdefghijklmnopqrstuvwxyz0123456789\", \"abcdefghijklmnopqrstuvwxyz0123456789\"]"
+      ],
+      "events": []
+    }
+  },
+  {
+    "name": "program: runtime dbg in main! observes CLI args",
+    "request": {
+      "operation": "program",
+      "protocol": 1,
+      "source": "main! = |args| {\n    dbg args\n    Ok({})\n}",
+      "user_bytes": 0,
+      "args": [
+        "notebook",
+        "--flag"
+      ]
+    },
+    "expect": {
+      "status": "ok",
+      "program_events": [
+        {
+          "kind": "dbg",
+          "message": "[\"notebook\", \"--flag\"]"
+        }
+      ]
+    }
+  },
+  {
+    "name": "syntax: Roc facts and Markdown blocks",
+    "request": {
+      "operation": "syntax",
+      "source": "# Title\n\n```roc\nwidth = 5\n```\n"
+    },
+    "expect": {
+      "response_keys": [
+        "facts",
+        "blocks"
+      ]
+    }
+  },
+  {
+    "name": "markdown: rendering events",
+    "request": {
+      "operation": "markdown",
+      "source": "# Heading\n\n**Bold** and [safe](https://example.com).\n\n| a | b |\n| - | - |\n| 1 | 2 |\n"
+    },
+    "expect": {
+      "response_keys": [
+        "status",
+        "events"
+      ]
+    }
   }
 ]

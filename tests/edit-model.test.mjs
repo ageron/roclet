@@ -1,0 +1,237 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {Notebook,newDraft,requestFor,validDraft} from '../web/edit-model.mjs';
+import {projectFiles} from '../web/project-files.mjs';
+import {bundleFiles,importBundle} from '../web/sharing.mjs';
+import {zip,utf8,text} from '../web/archive.mjs';
+import {sha256} from '../web/offline-cache.mjs';
+import {DocumentDraft,DocumentSession} from '../web/document-session.mjs';
+
+test('project modules preserve raw source editing and undo as one notebook change',()=>{
+  const session={invalidate(){},stop(){}};
+  const notebook=new Notebook(null,{save:async()=>{}},{session,debounce:60000});
+  notebook.state=newDraft();notebook.state.autoRun=false;notebook.state.sourceCurrent=true;notebook.state.source='out_1 = Geometry.area';
+  notebook.result={status:'ok'};
+  notebook.setProjectFile('Geometry.roc','module [area]\narea = 15');
+  assert.equal(notebook.result,null);
+  assert.equal(notebook.state.sourceCurrent,true);
+  assert.equal(requestFor(notebook.state,'evaluate').source,'out_1 = Geometry.area');
+  assert.deepEqual(requestFor(notebook.state,'evaluate').files,[{path:'/workspace/Geometry.roc',source:'module [area]\narea = 15'}]);
+  notebook.setProjectFile('Geometry.roc','module [area]\narea = 24');
+  notebook.undo();assert.equal(notebook.state.files[0].source,'module [area]\narea = 15');
+  notebook.removeProjectFile('Geometry.roc');assert.deepEqual(notebook.state.files,[]);
+  assert.equal(validDraft({...notebook.state,files:[{path:'../outside.roc',source:''}]}),false);
+  notebook.dispose();
+});
+
+test('reactive requests carry only a participation flag and reset for another document',async()=>{
+  const sent=[];
+  const session={invalidate(){},stop(){},request:async request=>{sent.push(request);return {status:'ok',graph:{},model:{cells:[],diagnostics:[]},evaluation:{status:'ok',values:[{root:'out_1',text:'1',reused:true}],events:[]}};}};
+  const notebook=new Notebook(null,{save:async()=>{}},{session,debounce:60000});
+  notebook.state=newDraft();notebook.state.autoRun=false;
+  const result=await notebook.run();await notebook.check();await notebook.run(0);
+  assert.equal(notebook.result.evaluation.values[0].reused,true,'results are published as the engine returned them');
+  assert.equal(result.evaluation.values.length,1);
+  assert.deepEqual(sent.map(r=>r.reactivity),[{reset:true},{},{}]);
+  for(const request of sent) for(const key of ['known','previous','current','available','roots']) assert(!(key in request.reactivity));
+  assert.equal(sent[2].selectedCell,0);assert.equal(sent[0].forceAll,true);
+  await notebook.replace(newDraft('Other'));await notebook.run();
+  assert.deepEqual(sent.at(-1).reactivity,{reset:true});
+  await notebook.recoveryCopy();await notebook.run();
+  assert.deepEqual(sent.at(-1).reactivity,{reset:true});
+  await notebook.run();assert.deepEqual(sent.at(-1).reactivity,{});
+  notebook.dispose();
+});
+
+test('project paths cannot replace the notebook or escape a portable project',()=>{
+  for(const path of ['Main.roc','main.roc','../secret.roc','/absolute.roc','nested/../secret.roc','nested//File.roc','C:File.roc','bad\\File.roc']) {
+    assert.throws(()=>projectFiles([{path,source:'module []'}]));
+  }
+  assert.throws(()=>projectFiles([{path:'File.roc',source:''},{path:'File.roc',source:''}]));
+  assert.deepEqual(projectFiles([{path:'Shapes/Wall.roc',source:'module [area]\narea = 15'}]),[{path:'Shapes/Wall.roc',source:'module [area]\narea = 15'}]);
+});
+
+test('portable bundles retain project sources once and reject modified members',async()=>{
+  const display=utf8('module []'),displayHash=await sha256(display),originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(display);
+  try {
+    const compiler={compilerCommit:'test-compiler',artifacts:{'roclet.wasm':{sha256:'test-wasm'}},inputs:{'package/Display.roc':displayHash}};
+    const capture={document:{schema:1,title:'Project',format:'roc',preamble:'app [main!] {}',metadata:'',source:'',sourceCurrent:false,mode:'notebook',cells:[{kind:'code',source:'Geometry.area',attributes:'',outputs:[]}],files:[{path:'Geometry.roc',source:'module [area]\narea = 15'}]},source:'Geometry.area',snapshots:[],events:[],compiler:{commit:'test-compiler',wasmSha256:'test-wasm',displaySha256:displayHash},createdAt:'test'};
+    const files=await bundleFiles(capture);
+    assert.equal(text(files.get('project/Geometry.roc')),'module [area]\narea = 15');
+    assert.deepEqual(JSON.parse(text(files.get('document.json'))).files,[{path:'Geometry.roc'}]);
+    const imported=await importBundle(await zip(files).arrayBuffer(),compiler);
+    assert.deepEqual(imported.record.files,capture.document.files);
+    assert.equal(imported.record.autoRun,false);
+    files.set('project/Geometry.roc',utf8('module [area]\narea = 24'));
+    await assert.rejects(importBundle(await zip(files).arrayBuffer(),compiler),/integrity/i);
+  } finally {globalThis.fetch=originalFetch;}
+});
+
+test('format switching restores exact draft bytes and invalidates the alternate view after edits',()=>{
+  const original='app [main!] {}\r\n\r\n#%%\r\n  1 + 1\r\n';
+  const draft=new DocumentDraft(original);
+  draft.converted('markdown',{status:'ok',source:'```roc\n1 + 1\n```\n',model:{preamble:'app [main!] {}\r\n',metadata:''}});
+  assert.equal(draft.restore('roc'),true);
+  assert.equal(draft.source,original);
+  draft.restore('markdown');
+  draft.edit('```roc\n2 + 2\n```\n');
+  assert.equal(draft.restore('roc'),false);
+  assert.equal(draft.request('run').context.preamble,'app [main!] {}\r\n');
+  draft.open('# New doc','markdown');
+  assert.equal(draft.request('run').context,undefined);
+  assert.equal(draft.restore('roc'),false);
+});
+
+test('an invalid conversion never replaces an editable draft',()=>{
+  const draft=new DocumentDraft('# %%\nx = {');
+  assert.equal(draft.converted('markdown',{status:'diagnostic',source:'different'}),false);
+  assert.equal(draft.source,'# %%\nx = {');
+  assert.equal(draft.format,'roc');
+});
+
+test('document worker survives completed requests but cancellation rejects late results',async()=>{
+  const workers=[];
+  class FakeWorker {
+    sent=[];
+    terminated=false;
+    constructor(){workers.push(this);}
+    postMessage(value){this.sent.push(value);}
+    terminate(){this.terminated=true;}
+  }
+  const session=new DocumentSession(new ArrayBuffer(1),FakeWorker);
+  const first=session.request({source:'old'});
+  workers[0].onmessage({data:{result:{value:1}}});
+  assert.equal((await first).value,1);
+  session.invalidate();
+  const second=session.request({source:'new'});
+  assert.equal(workers.length,1);
+  assert.equal(workers[0].sent[1].bytes,undefined);
+  const late=workers[0].onmessage;
+  const rejected=assert.rejects(second,{name:'AbortError'});
+  session.stop();
+  await rejected;
+  const third=session.request({source:'latest'});
+  assert.equal(workers.length,2);
+  late({data:{result:{value:2}}});
+  workers[1].onmessage({data:{result:{value:3}}});
+  assert.equal((await third).value,3);
+  session.stop();
+});
+
+// A fresh browser worker receives its message only after the compiler module
+// is compiled and hashed, so the session must own the request before that await.
+test('a fresh worker posts the request as submitted even if the caller mutates it',async()=>{
+  const posted=[];
+  class FakeWorker {
+    postMessage(value){posted.push(structuredClone(value));}
+    terminate(){}
+  }
+  const originalWorker=globalThis.Worker;
+  globalThis.Worker=FakeWorker;
+  try {
+    // The smallest valid WebAssembly module: magic number and version.
+    const session=new DocumentSession(new Uint8Array([0,97,115,109,1,0,0,0]).buffer,FakeWorker);
+    const request={operation:'document',action:'evaluate',format:'roc',source:'out_1 = 1',draft:{cells:[{kind:'code',source:'out_1 = 1'}]},files:[{path:'/workspace/Geometry.roc',source:'module [area]\narea = 15'}]};
+    const result=session.request(request);
+    request.source='out_1 = 999';
+    request.draft.cells[0].source='out_1 = 999';
+    request.files[0].source='module [area]\narea = 999';
+    request.extra=true;
+    while(!posted.length) await new Promise(resolve=>setTimeout(resolve,1));
+    assert.equal(posted.length,1);
+    assert.equal(posted[0].bytes,undefined);
+    assert.ok(posted[0].module instanceof WebAssembly.Module);
+    assert.deepEqual(posted[0].request,{operation:'document',action:'evaluate',format:'roc',source:'out_1 = 1',draft:{cells:[{kind:'code',source:'out_1 = 1'}]}});
+    assert.deepEqual(posted[0].workspace.put,[{path:'/workspace/Geometry.roc',source:'module [area]\narea = 15'}]);
+    session.stop();
+    await assert.rejects(result,{name:'AbortError'});
+  } finally {globalThis.Worker=originalWorker;}
+});
+
+// Toolbar activity belongs to the active request, rather than a status string.
+function deferred() {
+  let resolve,reject;
+  const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});
+  return {promise,resolve,reject};
+}
+const documentResult=()=>({status:'ok',model:{preamble:'app [] {}',metadata:'',cells:[],diagnostics:[]},evaluation:{status:'ok',values:[],events:[]}});
+async function waitFor(predicate) {
+  for(let i=0;i<100;i++) {if(predicate())return;await new Promise(resolve=>setTimeout(resolve,1));}
+  throw new Error('Deferred notebook request did not start');
+}
+function pendingNotebook(t,options={}) {
+  const requests=[];
+  const session={
+    invalidate(){},
+    stop(){for(const request of requests)request.reject(new DOMException('Stopped','AbortError'));},
+    request(value,callbacks){const request={...deferred(),value,callbacks};requests.push(request);return request.promise;},
+  };
+  const notebook=new Notebook(null,{save:async()=>{}},{session,debounce:60000,...options});
+  notebook.state=newDraft();notebook.state.autoRun=false;
+  t.after(()=>notebook.dispose());
+  return {notebook,requests};
+}
+
+test('Run remains busy through saving, package loading and evaluation, then becomes ready',async t=>{
+  const saved=deferred();
+  const {notebook,requests}=pendingNotebook(t);
+  notebook.store.save=()=>saved.promise;
+  const run=notebook.run();
+  assert.equal(notebook.busy,true,'Stop is available while saving before evaluation');
+  assert.equal(requests.length,0);
+  saved.resolve();await waitFor(()=>requests.length===1);
+  requests[0].callbacks.onPackageWaiting(true);
+  assert.match(notebook.status,/Waiting for package/);assert.equal(notebook.busy,true);
+  requests[0].callbacks.onPackageWaiting(false);
+  assert.equal(notebook.busy,true);
+  requests[0].resolve(documentResult());await run;
+  assert.equal(notebook.busy,false);
+});
+
+test('an older completion cannot clear the activity of a newer Run',async t=>{
+  const {notebook,requests}=pendingNotebook(t);
+  const older=notebook.run();await waitFor(()=>requests.length===1);
+  const newer=notebook.run();await waitFor(()=>requests.length===2);
+  requests[0].resolve(documentResult());
+  assert.equal(await older,null);assert.equal(notebook.busy,true);
+  requests[1].resolve(documentResult());await newer;
+  assert.equal(notebook.busy,false);
+});
+
+test('inspection activity clears after engine errors and edits without exposing stale results',async t=>{
+  const {notebook,requests}=pendingNotebook(t);
+  const broken=notebook.inspect('view');assert.equal(notebook.busy,true);
+  requests[0].reject(new Error('Compiler unavailable'));
+  await assert.rejects(broken,/Compiler unavailable/);assert.equal(notebook.busy,false);
+  const stale=notebook.inspect('view');assert.equal(notebook.busy,true);
+  notebook.editCell(0,'2 + 2');assert.equal(notebook.busy,false);
+  const latest=notebook.inspect('view');assert.equal(notebook.busy,true);
+  requests[1].resolve(documentResult());await assert.rejects(stale,{name:'AbortError'});
+  assert.equal(notebook.busy,true);
+  requests[2].resolve(documentResult());await latest;assert.equal(notebook.busy,false);
+});
+
+test('package cancellation and request errors restore Run without a stuck busy state',async t=>{
+  const {notebook,requests}=pendingNotebook(t);
+  const cancelled=notebook.run();await waitFor(()=>requests.length===1);
+  requests[0].callbacks.onPackageWaiting(true);
+  requests[0].reject(new DOMException('Package picker cancelled','AbortError'));await cancelled;
+  assert.equal(notebook.busy,false);assert.match(notebook.status,/Package loading cancelled/);
+  const failed=notebook.run();await waitFor(()=>requests.length===2);
+  requests[1].reject(new Error('Invalid package hash'));await failed;
+  assert.equal(notebook.busy,false);assert.match(notebook.status,/Invalid package hash/);
+});
+
+test('Stop and timeout release activity immediately and ignore late package notifications',async t=>{
+  const {notebook,requests}=pendingNotebook(t,{timeout:30});
+  const cancelled=notebook.run();await waitFor(()=>requests.length===1);
+  requests[0].callbacks.onPackageWaiting(true);notebook.stop();
+  assert.equal(notebook.busy,false);await cancelled;
+  requests[0].callbacks.onPackageWaiting(false);
+  assert.equal(notebook.busy,false);assert.match(notebook.status,/Stopped/);
+  const timedOut=notebook.run();await waitFor(()=>requests.length===2);await timedOut;
+  assert.equal(notebook.busy,false);assert.equal(notebook.state.autoRun,false);assert.match(notebook.status,/Stopped after/);
+  const disposed=notebook.run();await waitFor(()=>requests.length===3);
+  notebook.dispose();assert.equal(notebook.busy,false);await disposed;
+});

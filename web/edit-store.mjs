@@ -54,5 +54,8 @@ export class DraftStore {
     for(const record of records) if(!this.versions.has(record.id)) this.versions.set(record.id,record._storageVersion??null);
     return records.sort((a, b) => b.updatedAt - a.updatedAt);
   }
+  // Another instance on the same database, with its own optimistic-concurrency
+  // tokens: each notebook panel saves through its own instance.
+  async fork() { await this.open(); const store = new DraftStore(this.name); store.defaultName = false; return store; }
   close() { this.db?.close(); this.db = null; }
 }

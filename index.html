@@ -8,7 +8,7 @@
 <script>
 (()=>{const system=matchMedia('(prefers-color-scheme: dark)');let preference='system';try{preference=localStorage.getItem('roclet.theme')||'system';}catch{}const apply=()=>document.documentElement.dataset.theme=preference==='dark'||(preference==='system'&&system.matches)?'dark':'light';apply();system.addEventListener('change',apply);addEventListener('storage',e=>{if(e.key==='roclet.theme'||e.key===null){preference=e.newValue||'system';apply();}});})();
 </script>
-<link rel="icon" href="web/assets/roclet-logo.png">
+<link rel="icon" type="image/svg+xml" href="web/assets/favicon.svg">
 <link rel="stylesheet" href="web/home.css">
 <script type="module" src="web/home.mjs"></script>
 </head>

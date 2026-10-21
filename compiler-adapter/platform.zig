@@ -6,21 +6,130 @@ const builtins = @import("builtins");
 pub const host_abi = builtins.host_abi;
 pub const RocStr = builtins.str.RocStr;
 pub const RocList = builtins.list.RocList;
-pub var observation_root: ?[]const u8 = null;
-pub var observer: ?*const fn ([]const u8, []const u8) void = null;
 pub const platform_main_source = @embedFile("platform/main.roc");
 pub const echo_module_source = @embedFile("platform/Echo.roc");
+/// Observation kinds; serialised by name in protocol-1 `events`.
+pub const EventKind = enum { value, dbg, expect_failed, crashed, truncated, test_passed, test_failed };
+/// Receives `value`, `dbg`, `expect_failed`, `crashed` and `test_*` events for
+/// one execution, attributed to the root that owns that execution.
+pub const Observer = struct {
+    ctx: *anyopaque,
+    emit: *const fn (ctx: *anyopaque, kind: EventKind, message: []const u8, root: ?[]const u8) void,
+    /// The notebook root this execution is attributed to.
+    root: ?[]const u8 = null,
+
+    pub fn observe(self: Observer, kind: EventKind, message: []const u8) void {
+        self.emit(self.ctx, kind, message, self.root);
+    }
+    pub fn forRoot(self: Observer, root: ?[]const u8) Observer {
+        var result = self;
+        result.root = root;
+        return result;
+    }
+};
+
+pub const Event = struct {
+    kind: EventKind,
+    message: []const u8,
+    root: ?[]const u8 = null,
+    /// Protocol-1 raw responses omit `root` for unattributed events.
+    pub fn jsonStringify(self: Event, w: anytype) !void {
+        try w.beginObject();
+        try w.objectField("kind");
+        try w.write(self.kind);
+        try w.objectField("message");
+        try w.write(self.message);
+        if (self.root) |root| {
+            try w.objectField("root");
+            try w.write(root);
+        }
+        try w.endObject();
+    }
+};
+
+/// One root's bounded observations: at most 1,000 events and 256 KiB of
+/// observation text, at most 64 KiB per message or designated text result
+/// (512 KiB for the second designated value of a rich root, its Display
+/// wire), cut on a UTF-8 boundary, with a single `truncated` marker.
+/// Designated `value` results are never dropped, only cut.
+pub const EventBuffer = struct {
+    arena: std.mem.Allocator,
+    /// The root produces a Display wire as its second designated value.
+    rich: bool = false,
+    events: std.ArrayList(Event) = .empty,
+    bytes: usize = 0,
+    values: usize = 0,
+    truncated: bool = false,
+    /// An allocation failed inside a callback that cannot return an error.
+    failed: bool = false,
+
+    pub const truncated_message = "Output truncated: at most 1,000 observations, 256 KiB of observations, and 64 KiB per text result/message (512 KiB for rich data) are retained per root.";
+
+    pub fn observer(self: *EventBuffer) Observer {
+        return .{ .ctx = self, .emit = emitInto };
+    }
+    fn emitInto(ctx: *anyopaque, kind: EventKind, message: []const u8, root: ?[]const u8) void {
+        const self: *EventBuffer = @ptrCast(@alignCast(ctx));
+        self.observe(kind, message, root);
+    }
+    pub fn observe(self: *EventBuffer, kind: EventKind, message: []const u8, root: ?[]const u8) void {
+        const designated = kind == .value;
+        const value_limit: usize = if (self.rich and self.values == 1) 512 * 1024 else 64 * 1024;
+        if (designated) self.values += 1;
+        var end = @min(message.len, if (designated) value_limit else @min(@as(usize, 64 * 1024), 256 * 1024 -| self.bytes));
+        if (!designated and self.events.items.len >= 1000) end = 0;
+        while (end > 0 and end < message.len and message[end] & 0xc0 == 0x80) end -= 1;
+        if (end < message.len and !self.truncated) {
+            self.truncated = true;
+            self.append(.{ .kind = .truncated, .message = truncated_message });
+        }
+        if (end == 0 and message.len > 0 and !designated) return;
+        self.bytes += end;
+        self.append(.{ .kind = kind, .message = self.dupe(message[0..end]), .root = if (root) |name| self.dupe(name) else null });
+    }
+    fn append(self: *EventBuffer, event: Event) void {
+        self.events.append(self.arena, event) catch {
+            self.failed = true;
+        };
+    }
+    fn dupe(self: *EventBuffer, bytes: []const u8) []const u8 {
+        return self.arena.dupe(u8, bytes) catch {
+            self.failed = true;
+            return "";
+        };
+    }
+};
+
 pub const EchoEnv = struct {
     std_io: std.Io,
     /// Set to true the first time roc_expect_failed is invoked. Allows the
     /// host to exit with a non-zero status after running the program.
     inline_expect_failed: bool = false,
+    /// Per-execution observer; null writes to stdout/stderr instead.
+    observer: ?Observer = null,
 };
 
-/// The RocOps the echo platform's hosted functions use for refcounting and
-/// reaching the EchoEnv. Hosted functions have natural C ABIs with no ops
-/// parameter, so the runner stores its RocOps here before running any Roc code.
-pub var g_roc_ops: ?*host_abi.RocOps = null;
+/// The only process-wide mutable slot in the adapter besides the immutable
+/// builtins. Hosted functions receive no RocOps or environment pointer (see
+/// `host_abi.HostedFn`: natural C ABI on native, `(args, ret)` on wasm32), yet
+/// `echoHostedFn` must decref its argument. The interpreter run that owns the
+/// current RocOps publishes it here. It carries no attribution state: the
+/// observer travels in `ops.env`. Single-threaded; never nested.
+var active_roc_ops: ?*host_abi.RocOps = null;
+
+pub fn enterRocOps(ops: *host_abi.RocOps) void {
+    std.debug.assert(active_roc_ops == null);
+    active_roc_ops = ops;
+}
+pub fn leaveRocOps(ops: *host_abi.RocOps) void {
+    std.debug.assert(active_roc_ops == ops);
+    active_roc_ops = null;
+}
+/// True while an interpreter run has published its RocOps (tests assert
+/// that no run leaves it behind).
+pub fn rocOpsActive() bool {
+    return active_roc_ops != null;
+}
 
 /// Echo host function: reads a RocStr arg and writes it unchanged to stdout.
 /// Ownership of `roc_str` transfers to this host function—the RC insertion
@@ -29,13 +138,14 @@ pub var g_roc_ops: ?*host_abi.RocOps = null;
 /// platform host in `test/fx/platform/host.zig` which decrefs every RocStr
 /// arg). Without this decref every `echo!` call leaks one heap RocStr.
 pub fn echoHostedFn(str: RocStr) callconv(.c) void {
-    const ops = g_roc_ops.?;
+    const ops = active_roc_ops.?;
     var owned = str;
     defer owned.decref(ops);
 
     const message = owned.asSlice();
-    if (observer) |emit| {
-        emit("value", message);
+    const env: *EchoEnv = @ptrCast(@alignCast(ops.env));
+    if (env.observer) |observer| {
+        observer.observe(.value, message);
         return;
     }
 
@@ -45,7 +155,6 @@ pub fn echoHostedFn(str: RocStr) callconv(.c) void {
         };
         js.js_echo(message.ptr, message.len);
     } else {
-        const env: *EchoEnv = @ptrCast(@alignCast(ops.env));
         const stdout_file: std.Io.File = .stdout();
         stdout_file.writeStreamingAll(env.std_io, message) catch {};
     }
@@ -72,37 +181,6 @@ pub fn echoLineHostedFn() host_abi.HostedFn {
         host_abi.hostedFn(&echoHostedFnWasm)
     else
         host_abi.hostedFn(&echoHostedFn);
-}
-
-/// Handle stdout write errors: exit cleanly on broken pipe (standard
-/// Unix behavior), crash on other errors.
-fn handleStdoutError(err: std.Io.File.Writer.Error) noreturn {
-    if (comptime is_wasm) {
-        @trap();
-    } else {
-        switch (err) {
-            error.BrokenPipe => std.process.exit(0),
-            error.AccessDenied,
-            error.Canceled,
-            error.DeviceBusy,
-            error.DiskQuota,
-            error.FileBusy,
-            error.FileTooBig,
-            error.InputOutput,
-            error.LockViolation,
-            error.NoDevice,
-            error.NoSpaceLeft,
-            error.NotOpenForWriting,
-            error.PermissionDenied,
-            error.SystemResources,
-            error.Unexpected,
-            error.WouldBlock,
-            => {
-                std.debug.print("echo!: stdout write failed: {}\n", .{err});
-                std.process.exit(1);
-            },
-        }
-    }
 }
 
 /// Create a minimal RocOps struct for default_app execution.
@@ -173,14 +251,14 @@ pub fn makeDefaultRocOps(env: *EchoEnv, hosted_fns: []host_abi.HostedFn) host_ab
         }
 
         fn rocDbg(ops: *host_abi.RocOps, bytes: [*]const u8, len: usize) callconv(.c) void {
-            if (observer) |emit| {
-                emit("dbg", bytes[0..len]);
+            const echo_env: *EchoEnv = @ptrCast(@alignCast(ops.env));
+            if (echo_env.observer) |observer| {
+                observer.observe(.dbg, bytes[0..len]);
                 return;
             }
             if (comptime is_wasm) {
                 // No-op on wasm—no stderr available
             } else {
-                const echo_env: *EchoEnv = @ptrCast(@alignCast(ops.env));
                 const msg = bytes[0..len];
                 const stderr_file: std.Io.File = .stderr();
                 stderr_file.writeStreamingAll(echo_env.std_io, "[dbg] ") catch {};
@@ -191,8 +269,8 @@ pub fn makeDefaultRocOps(env: *EchoEnv, hosted_fns: []host_abi.HostedFn) host_ab
         fn rocExpectFailed(ops: *host_abi.RocOps, bytes: [*]const u8, len: usize) callconv(.c) void {
             const echo_env_for_flag: *EchoEnv = @ptrCast(@alignCast(ops.env));
             echo_env_for_flag.inline_expect_failed = true;
-            if (observer) |emit| {
-                emit("expect_failed", bytes[0..len]);
+            if (echo_env_for_flag.observer) |observer| {
+                observer.observe(.expect_failed, bytes[0..len]);
                 return;
             }
             if (comptime is_wasm) {

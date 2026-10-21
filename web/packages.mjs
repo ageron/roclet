@@ -14,9 +14,13 @@ export class BrowserPackages {
     for(const [key,value] of entries) {if(total<=LIMIT) break;entries.delete(key);total-=value.length;}
     try {await this.cache.save(encodeCacheStream([{path,bytes}]));} catch { /* Verified package remains mounted if storage is unavailable. */ }
   }
+  load() {return this.loaded=this.cache.load().then(decodeCacheStream).then(entries=>new Map(entries.map(({path,bytes})=>[path,bytes])));}
   async install(transport,url) {
-    this.loaded??=this.cache.load().then(decodeCacheStream).then(entries=>new Map(entries.map(({path,bytes})=>[path,bytes])));
-    const entries=await this.loaded,path=await packageKey(url),cached=entries.get(path);
+    const path=await packageKey(url);
+    let entries=await (this.loaded??this.load()),cached=entries.get(path);
+    // Another worker (another notebook panel or tab) may have verified and
+    // stored this archive since this worker read the persistent cache.
+    if(!cached) {entries=await this.load();cached=entries.get(path);}
     if(cached && transport.installPackage(url,cached)) return 'cached';
     entries.delete(path);
     if(cached) await this.cache.remove(path);

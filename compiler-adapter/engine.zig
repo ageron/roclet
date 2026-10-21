@@ -15,6 +15,7 @@ const eval = @import("eval");
 const lir = @import("lir");
 const roc_target = @import("roc_target");
 const reporting = @import("reporting");
+const image = @import("image.zig");
 
 const Allocator = std.mem.Allocator;
 const BuildEnv = compile.BuildEnv;
@@ -29,6 +30,8 @@ pub const RunEchoError = error{ WriteFailed, InvalidPath } || Allocator.Error ||
     compile.build.CompileDiscoveredError ||
     lir.CheckedPipeline.LowerResourceError ||
     lir.LirImage.ImageError ||
+    lir.LirImage.CopyError ||
+    lir.LirImage.ViewError ||
     eval.LirInterpreter.Error ||
     error{
         CompilationFailed,
@@ -69,11 +72,137 @@ pub const Diagnostics = struct {
     }
 };
 
+/// A rendered compiler report, serialised as a protocol-1 diagnostic.
+pub const Diagnostic = struct {
+    title: []const u8,
+    severity: []const u8,
+    message: []const u8,
+    filename: ?[]const u8 = null,
+    location: ?struct { start_line: u32, start_column: u32, end_line: u32, end_column: u32 } = null,
+};
+
+/// Collects one request's diagnostics: every report rendered as Markdown, and
+/// the last free-form message as the request `failure`.
+pub const DiagnosticList = struct {
+    arena: Allocator,
+    items: std.ArrayList(Diagnostic) = .empty,
+    failure: ?[]const u8 = null,
+    /// An allocation failed inside a callback that cannot return an error.
+    failed: bool = false,
+
+    pub fn diagnostics(self: *DiagnosticList) Diagnostics {
+        return .{ .ctx = self, .vtable = &list_vtable };
+    }
+    const list_vtable: Diagnostics.VTable = .{ .write = writeFailure, .emitReport = renderReport };
+    fn from(ctx: ?*anyopaque) *DiagnosticList {
+        return @ptrCast(@alignCast(ctx orelse unreachable));
+    }
+    fn dupe(self: *DiagnosticList, bytes: []const u8) []const u8 {
+        return self.arena.dupe(u8, bytes) catch {
+            self.failed = true;
+            return "";
+        };
+    }
+    fn writeFailure(ctx: ?*anyopaque, message: []const u8) void {
+        const self = from(ctx);
+        self.failure = self.dupe(message);
+    }
+    fn renderReport(ctx: ?*anyopaque, _: Allocator, report: *reporting.Report) void {
+        const self = from(ctx);
+        var writer: std.Io.Writer.Allocating = .init(self.arena);
+        defer writer.deinit();
+        reporting.renderReport(report, &writer.writer, .markdown) catch {
+            self.failed = true;
+            return;
+        };
+        const loc = report.getRegionInfo();
+        var filename: ?[]const u8 = null;
+        for (report.document.elements.items) |element| {
+            const file = switch (element) {
+                .source_code_region => |r| r.filename,
+                .source_code_with_underlines => |r| r.display_region.filename,
+                .source_code_multi_region => |r| r.filename,
+                else => null,
+            };
+            if (file) |name| {
+                filename = self.dupe(name);
+                break;
+            }
+        }
+        self.items.append(self.arena, .{
+            .title = self.dupe(report.title),
+            .severity = if (report.severity.isError()) "error" else "warning",
+            .message = self.dupe(writer.written()),
+            .filename = filename,
+            .location = if (loc) |r| .{
+                .start_line = r.start_line_idx,
+                .start_column = r.start_col_idx,
+                .end_line = r.end_line_idx,
+                .end_column = r.end_col_idx,
+            } else null,
+        }) catch {
+            self.failed = true;
+        };
+    }
+};
+
 /// A user-supplied module file (e.g. `Greeting.roc`).
 pub const ExtraFile = struct {
     name: []const u8,
     content: []const u8,
 };
+
+/// The modules a program compiles against, and whether it may use rich output.
+pub const ProgramModules = struct { extras: []const ExtraFile, rich_support: bool };
+
+/// Add the bundled `Display` module unless the request or the workspace
+/// supplies one, and decide rich output support once per request: only the
+/// checked, unaliased `import Display` of the byte-identical bundled module
+/// opts in. A local type called Display or a different module stays ordinary.
+pub fn programModules(arena: Allocator, workspace_io: Io, extras_prefix: []const u8, supplied: []const ExtraFile, user_source: []const u8) !ProgramModules {
+    const bundled = @embedFile("Display.roc");
+    var extras: std.ArrayList(ExtraFile) = .empty;
+    try extras.appendSlice(arena, supplied);
+    var trusted_display = true;
+    var supplied_display = false;
+    for (supplied) |module| if (std.mem.eql(u8, module.name, "Display")) {
+        supplied_display = true;
+        trusted_display = std.mem.eql(u8, module.content, bundled);
+    };
+    if (!supplied_display) {
+        const display_path = try std.mem.concat(arena, u8, &.{ extras_prefix, "Display.roc" });
+        const display_source = workspace_io.readFile(display_path, arena) catch null;
+        if (display_source) |content| {
+            trusted_display = std.mem.eql(u8, content, bundled);
+            try extras.append(arena, .{ .name = "Display", .content = content });
+        } else try extras.append(arena, .{ .name = "Display", .content = bundled });
+    }
+    var rich_support = false;
+    if (trusted_display) {
+        const facts = try @import("syntax.zig").roc(arena, user_source);
+        for (facts.statements) |statement| if (std.mem.eql(u8, statement.kind, "import")) {
+            var count: usize = 0;
+            var name: []const u8 = "";
+            for (facts.tokens) |token| if (token.start >= statement.start and token.end <= statement.end) {
+                if (count == 1) name = user_source[@intCast(token.start)..@intCast(token.end)];
+                count += 1;
+            };
+            if (count == 2 and std.mem.eql(u8, name, "Display")) rich_support = true;
+        };
+    }
+    return .{ .extras = extras.items, .rich_support = rich_support };
+}
+
+/// The engine's own execution target: wasm32 in the browser, the host natively.
+pub const host_target_usize: base.target.TargetUsize = if (@import("builtin").cpu.arch == .wasm32) .u32 else .native;
+pub fn hostRocTarget() RocTarget {
+    return if (comptime @import("builtin").cpu.arch == .wasm32) .wasm32 else RocTarget.detectNative();
+}
+
+/// Decode the embedded builtins before the first compilation (WASM only).
+pub fn prepareBuiltins() !void {
+    if (comptime @import("builtin").cpu.arch == .wasm32) try @import("compiled_builtins").decompress();
+}
 
 fn countNewlines(bytes: []const u8) u32 {
     var count: u32 = 0;
@@ -96,24 +225,38 @@ pub const Paths = struct {
     extras_prefix: []const u8 = "/workspace/",
 };
 
-/// Inputs to `runEcho`. See field doc comments for the contract on each.
-pub const CachedProgram = struct { allocator: Allocator, bytes: ?[]u8 = null };
+/// The pinned first-party Display package, served offline as a module.
+pub const display_package_url = std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n");
 pub fn isEmbeddedDisplayPackage(shorthand: []const u8, spec: []const u8) bool {
-    return std.mem.eql(u8, shorthand, "roclet") and std.mem.eql(u8, spec, std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n"));
+    return std.mem.eql(u8, shorthand, "roclet") and std.mem.eql(u8, spec, display_package_url);
 }
+/// Receives the checked application module of a script run, so the caller can
+/// report its definitions and dependencies.
+pub const Analyzer = struct {
+    ctx: *anyopaque,
+    call: *const fn (ctx: *anyopaque, env: *can.ModuleEnv, prefix: u32) void,
+
+    pub fn run(self: Analyzer, env: *can.ModuleEnv, prefix: u32) void {
+        self.call(self.ctx, env, prefix);
+    }
+};
+
+/// Inputs to `runEcho`. See field doc comments for the contract on each.
 pub const RunOptions = struct {
     app_header: []const u8 = "",
     root_name: ?[]const u8 = null,
-    analyze: ?*const fn (*@import("can").ModuleEnv, u32) void = null,
+    analyze: Analyzer,
+    /// Receives every observation of this run; null writes to stdout/stderr.
+    observer: ?echo_platform.Observer = null,
     check_only: bool = false,
     args: []const []const u8 = &.{},
-    cached_program: ?*CachedProgram = null,
-    /// Single contiguous arena used for the entire pipeline (BuildEnv,
-    /// lowering, LIR image, interpreter). Must own a flat virtual
-    /// region—`std.heap.ArenaAllocator` will not work because the
-    /// LIR image step computes offsets via `ptr - base_ptr` arithmetic
-    /// (see `src/compile/README.md` "Runtime arena").
-    runtime_fba: *std.heap.FixedBufferAllocator,
+    /// Work counters of the engine serving this request.
+    stats: *RequestStats,
+    /// Scratch for the whole pipeline (BuildEnv, lowering, interpreter);
+    /// an ordinary arena, freed by the caller after the run.
+    arena: Allocator,
+    /// Owns the flat LIR image buffer for the duration of the run.
+    image_allocator: Allocator,
     /// Fallback Io that handles everything not served by EchoCtx (i.e. paths
     /// not in `Paths` and not in `extras`).
     fallback_io: Io,
@@ -143,7 +286,7 @@ pub const RunOptions = struct {
 /// Wraps the user `source` in a synthetic `app [main!]` header that imports
 /// the embedded echo platform, then walks the canonical embedding sequence
 /// (see `src/compile/README.md`): BuildEnv discovery → check → LIR lowering
-/// → `LirImage.referenceProgramWithStaticDataInBuffer` → `viewMappedImage` →
+/// → `image.build` (an adaptively sized flat LIR image) → `Image.view` →
 /// `LirInterpreter.runEntrypoint`.
 ///
 /// Returns the Roc program's exit code (or 1 if an inline `expect` failed
@@ -151,22 +294,12 @@ pub const RunOptions = struct {
 /// emits a labelled diagnostic through `opts.diagnostics` and propagates
 /// the error so the caller can decide on an exit code.
 pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
-    const allocator = opts.runtime_fba.allocator();
+    const allocator = opts.arena;
     const diag = opts.diagnostics;
 
-    var header_writer: std.Io.Writer.Allocating = .init(allocator);
-    try header_writer.writer.writeAll("app [main!] { pf: platform \"./.roc_echo_platform/main.roc\"");
-    if (opts.app_header.len > 0) {
-        try @import("workspace.zig").global.put("/internal/header.roc", opts.app_header, false);
-        const header = compile.app_header.parseAppHeader(opts.fallback_io, allocator, allocator, "/internal/header.roc") catch null;
-        if (header) |parsed_header| for (parsed_header.non_platform_packages) |package| {
-            if (isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
-            try header_writer.writer.print(", {s}: ", .{package.shorthand});
-            try std.json.Stringify.value(package.spec, .{}, &header_writer.writer);
-        };
-    }
-    try header_writer.writer.writeAll(" }\n\nimport pf.Echo\n\n");
-    const header_str = header_writer.written();
+    // A script whose header does not parse still runs on the echo platform alone.
+    const packages = if (opts.app_header.len > 0) parseHeaderPackages(allocator, opts.fallback_io, opts.app_header) catch &.{} else &.{};
+    const header_str = try synthesizeAppHeader(allocator, &.{}, packages);
     const footer_str =
         "\n\necho! = |msg| Echo.line!(msg)\n";
 
@@ -204,8 +337,8 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     cache.* = compile.CacheManager.init(allocator, .{ .enabled = true, .cache_dir = "/cache", .roc_ctx = echo_ctx.io() }, echo_ctx.io());
     build_env.setCacheManager(cache);
     defer {
-        last_cache_stats = cache.getStats();
-        inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |field| @field(request_cache_stats, field) += @field(last_cache_stats, field);
+        const cache_stats = cache.getStats();
+        inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |field| @field(opts.stats.cache, field) += @field(cache_stats, field);
     }
     const runtime_target: lir.CheckedPipeline.TargetConfig = .{ .target_usize = opts.target_usize };
     if (!opts.check_only) build_env.setRuntimeLowering(.{ .target = runtime_target });
@@ -217,7 +350,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         }
         return err;
     };
-    request_frontend_builds += 1;
+    opts.stats.frontend_builds += 1;
     build_env.compileDiscovered() catch |err| {
         if (!try emitDiagnostics(&build_env, diag, allocator)) {
             diag.step("compileDiscovered", err);
@@ -246,11 +379,9 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         return error.CompilationFailed;
     };
 
-    if (opts.analyze) |analyze| {
-        if (build_env.getAppSemanticData()) |app| analyze(app.env, @intCast(header_str.len));
-    }
+    if (build_env.getAppSemanticData()) |app| opts.analyze.run(app.env, @intCast(header_str.len));
     if (opts.check_only) return 0;
-    try event_context.replay(&build_env, opts.root_name orelse "main!");
+    try event_context.replay(&build_env, opts.root_name orelse "main!", opts.observer);
 
     const import_views = build_env.collectImportedArtifactViews(allocator, root_artifact) catch |err| {
         diag.step("collectImportedArtifactViews", err);
@@ -269,7 +400,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     };
     defer allocator.free(lir_roots);
 
-    request_lowerings += 1;
+    opts.stats.lowerings += 1;
     var lowered = build_env.runtimeProgramSession().?.takeRuntime(
         allocator,
         .{ .requests = lir_roots },
@@ -281,7 +412,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     defer lowered.deinit();
 
     // Canonical embedding sequence: build entrypoints + LIR image, then
-    // view it and execute via runEntrypoint. The viewMappedImage step
+    // view it and execute via runEntrypoint. The view
     // re-constructs the layout Store with the correct target_usize, which
     // matters for cross-compile cases.
     const entrypoints = lowered.platformEntrypoints(allocator) catch |err| {
@@ -289,38 +420,32 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
         return err;
     };
 
-    const image_header = allocator.create(lir.LirImage.Header) catch |err| {
-        diag.step("create LirImage.Header", err);
-        return err;
-    };
     const image_data = try eval.buildStaticDataForWidth(allocator, .{
         .root = check.CheckedArtifact.loweringViewWithRelations(root_artifact, relation_views),
         .imports = import_views,
     }, &lowered, lowered.target_usize, .{});
     defer eval.deinitStaticData(allocator, image_data);
-    const copied = try lir.LirImage.referenceProgramWithStaticDataInBuffer(
-        allocator,
-        opts.runtime_fba.buffer.ptr,
-        opts.runtime_fba.buffer.len,
-        &lowered.lir_result,
-        entrypoints,
-        image_data,
-    );
-    try copied.fillHeader(image_header, opts.runtime_fba.end_index);
+    // The same adaptively sized flat image a notebook revision builds.
+    var flat = image.build(opts.image_allocator, &lowered.lir_result, entrypoints, image_data, image.default_limits) catch |err| {
+        const reported: RunEchoError = switch (err) {
+            error.ImageTooLarge => error.OutOfMemory,
+            else => |other| other,
+        };
+        diag.step("image.build", reported);
+        return reported;
+    };
+    defer flat.deinit(opts.image_allocator);
+    opts.stats.image_bytes = flat.size;
+    opts.stats.image_retries += flat.attempts - 1;
 
-    var view = lir.LirImage.viewMappedImage(
-        image_header,
-        opts.runtime_fba.buffer.ptr,
-        opts.runtime_fba.end_index,
-        lowered.target_usize,
-    ) catch |err| {
-        diag.step("LirImage.viewMappedImage", err);
+    var view = flat.view(lowered.target_usize, allocator) catch |err| {
+        diag.step("Image.view", err);
         return err;
     };
     defer view.deinit();
 
-    request_executions += 1;
-    return runEchoView(allocator, &view, diag, opts.std_io, opts.args) catch |err| {
+    opts.stats.executions += 1;
+    return runEchoView(allocator, &view, diag, opts.std_io, opts.observer, opts.args) catch |err| {
         diag.step("runEchoView", err);
         return err;
     };
@@ -331,6 +456,7 @@ fn runEchoView(
     view: *const lir.LirImage.ProgramView,
     diag: Diagnostics,
     std_io: std.Io,
+    observer: ?echo_platform.Observer,
     args: []const []const u8,
 ) RunEchoError!u8 {
     // HostedFn array order matters: the interpreter calls
@@ -340,9 +466,10 @@ fn runEchoView(
     // correct—but additions must follow that section's order or the wrong
     // function will be called silently. See README "Host functions".
     var hosted_fn_array = [_]HostedFn{echo_platform.echoLineHostedFn()};
-    var echo_env: echo_platform.EchoEnv = .{ .std_io = std_io };
+    var echo_env: echo_platform.EchoEnv = .{ .std_io = std_io, .observer = observer };
     var roc_ops = echo_platform.makeDefaultRocOps(&echo_env, &hosted_fn_array);
-    echo_platform.g_roc_ops = &roc_ops;
+    echo_platform.enterRocOps(&roc_ops);
+    defer echo_platform.leaveRocOps(&roc_ops);
     var cli_args_list = try echo_platform.buildCliArgs(args, &roc_ops);
     var result_buf: [16]u8 align(16) = undefined;
 
@@ -373,7 +500,7 @@ fn runEchoView(
             return error.EvaluationFailed;
         },
         error.Crash => {
-            if (echo_platform.observer) |emit| emit("crashed", interpreter.getCrashMessage());
+            if (observer) |sink| sink.observe(.crashed, interpreter.getCrashMessage());
             return error.EvaluationFailed;
         },
         error.ComptimeExhaustiveness => {
@@ -591,15 +718,36 @@ pub fn persistentBuiltins() !*eval.BuiltinModules {
     return &builtin_modules.?;
 }
 
-fn observeCompileTime(_: *anyopaque, event: eval.CompileTimeFinalization.EventView) void {
-    switch (event) {
-        .dbg => |message| if (echo_platform.observer) |emit| emit("dbg", message),
+/// The synthetic app header shared by scripts and notebook revisions:
+/// `app [main!<, exposes...>] { pf: <the echo platform><, shorthand: "spec"...> }`
+/// then `import pf.Echo`. The embedded Display package is served as a module,
+/// never as a package dependency.
+pub fn synthesizeAppHeader(a: Allocator, exposes: []const []const u8, packages: []const compile.app_header.PackageEntry) Allocator.Error![]const u8 {
+    var header: std.Io.Writer.Allocating = .init(a);
+    errdefer header.deinit();
+    synthesizeInto(&header.writer, exposes, packages) catch return error.OutOfMemory;
+    return header.toOwnedSlice();
+}
+fn synthesizeInto(w: *std.Io.Writer, exposes: []const []const u8, packages: []const compile.app_header.PackageEntry) std.Io.Writer.Error!void {
+    try w.writeAll("app [main!");
+    for (exposes) |name| try w.print(", {s}", .{name});
+    try w.writeAll("] { pf: platform \"./.roc_echo_platform/main.roc\"");
+    for (packages) |package| {
+        if (isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
+        try w.print(", {s}: ", .{package.shorthand});
+        try std.json.Stringify.value(package.spec, .{}, w);
     }
+    try w.writeAll(" }\n\nimport pf.Echo\n\n");
 }
 
-pub var last_cache_stats: compile.CacheStats = .{};
-
-pub var request_cache_stats: compile.CacheStats = .{};
+/// Parse an app header held in memory. The path is virtual: nothing is written
+/// to any workspace, so header parsing never mutates engine state.
+pub fn parseHeaderPackages(arena: Allocator, fallback: Io, header_text: []const u8) compile.app_header.Error![]const compile.app_header.PackageEntry {
+    const path = "/internal/header.roc";
+    var ctx = EchoCtx{ .paths = .{ .app_abs = path }, .synthetic_app_source = header_text, .extras = &.{}, .fallback = fallback };
+    const info = try compile.app_header.parseAppHeader(ctx.io(), arena, arena, path);
+    return info.non_platform_packages;
+}
 
 // Finalization evaluates constants for the whole checked graph. Keep their
 // observations, then replay only the constants reachable from this output.
@@ -620,13 +768,13 @@ pub const DebugCapture = struct {
         };
     }
     const Item = struct { env: *can.ModuleEnv, def: ?can.CIR.Def.Idx = null, expr: can.CIR.Expr.Idx };
-    pub fn replay(self: *@This(), build_env: *BuildEnv, root_name: []const u8) !void {
-        try self.replayFrom(build_env, .{ .name = root_name });
+    pub fn replay(self: *@This(), build_env: *BuildEnv, root_name: []const u8, observer: ?echo_platform.Observer) !void {
+        try self.replayFrom(build_env, .{ .name = root_name }, observer);
     }
-    pub fn replayExpression(self: *@This(), build_env: *BuildEnv, expression: can.CIR.Expr.Idx) !void {
-        try self.replayFrom(build_env, .{ .expression = expression });
+    pub fn replayExpression(self: *@This(), build_env: *BuildEnv, expression: can.CIR.Expr.Idx, observer: ?echo_platform.Observer) !void {
+        try self.replayFrom(build_env, .{ .expression = expression }, observer);
     }
-    fn replayFrom(self: *@This(), build_env: *BuildEnv, root: union(enum) { name: []const u8, expression: can.CIR.Expr.Idx }) !void {
+    fn replayFrom(self: *@This(), build_env: *BuildEnv, root: union(enum) { name: []const u8, expression: can.CIR.Expr.Idx }, observer: ?echo_platform.Observer) !void {
         if (self.failed) return error.OutOfMemory;
         if (self.events.items.len == 0) return;
         var temporary = std.heap.ArenaAllocator.init(if (@import("builtin").cpu.arch == .wasm32) std.heap.wasm_allocator else std.heap.page_allocator);
@@ -714,39 +862,42 @@ pub const DebugCapture = struct {
                         }
                     }
                 }
-                if (include) if (echo_platform.observer) |emit| emit("dbg", event.message);
+                if (include) if (observer) |sink| sink.observe(.dbg, event.message);
                 break;
             }
         }
     }
 };
 
-pub var request_frontend_builds: u64 = 0;
-pub var request_lowerings: u64 = 0;
-pub var request_executions: u64 = 0;
-pub var request_prepared_hits: u64 = 0;
+/// Work done for one top-level request, reported as `workspaceCache`.
 pub const RequestStats = struct {
-    cache: compile.CacheStats,
-    frontend_builds: u64,
-    lowerings: u64,
-    executions: u64,
-    prepared_hits: u64,
+    cache: compile.CacheStats = .{},
+    frontend_builds: u64 = 0,
+    lowerings: u64 = 0,
+    executions: u64 = 0,
+    prepared_hits: u64 = 0,
+    /// Bytes of the LIR image built by this request; 0 when it reused one.
+    image_bytes: u64 = 0,
+    /// Image buffer doublings this request (see image.zig).
+    image_retries: u64 = 0,
+    /// Dependency analyses computed (at most one per revision or script run).
+    analyses: u64 = 0,
+    /// Name references the analyses kept outside the compiler's strict-demand
+    /// closure (`analysis.zig`); expected for callbacks passed to builtins.
+    demand_union_fallbacks: u64 = 0,
     pub fn jsonStringify(self: @This(), w: anytype) !void {
         try w.beginObject();
         inline for (@typeInfo(compile.CacheStats).@"struct".field_names) |name| {
             try w.objectField(name);
             try w.write(@field(self.cache, name));
         }
-        inline for (.{ "frontend_builds", "lowerings", "executions", "prepared_hits" }) |name| {
+        inline for (.{ "frontend_builds", "lowerings", "executions", "prepared_hits", "image_bytes", "image_retries", "analyses", "demand_union_fallbacks" }) |name| {
             try w.objectField(name);
             try w.write(@field(self, name));
         }
         try w.endObject();
     }
 };
-pub fn stats() RequestStats {
-    return .{ .cache = request_cache_stats, .frontend_builds = request_frontend_builds, .lowerings = request_lowerings, .executions = request_executions, .prepared_hits = request_prepared_hits };
-}
 
 pub const ScratchTypeWriter = @typeInfo(@typeInfo(@TypeOf(can.ModuleEnv.initTypeWriter)).@"fn".return_type.?).error_union.payload;
 pub fn scratchTypeWriter(env: *can.ModuleEnv, allocator: Allocator) !ScratchTypeWriter {

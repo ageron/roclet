@@ -24,7 +24,7 @@ fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
     var segments = std.mem.splitScalar(u8, relative, '/');
     while (segments.next()) |segment| if (segment.len == 0 or segment[0] == '.') return error.InvalidPath;
     if (std.mem.eql(u8, relative, "index.html") or std.mem.eql(u8, relative, "LICENSE") or std.mem.eql(u8, relative, "THIRD_PARTY_NOTICES.md")) return gpa.dupe(u8, relative);
-    for ([_][]const u8{ "demos/", "web/", "compiler-adapter/", "core/", "package/", "fixtures/", "tests/", "artifacts/" }) |prefix| {
+    for ([_][]const u8{ "demos/", "web/", "compiler-adapter/", "package/", "fixtures/", "tests/", "artifacts/" }) |prefix| {
         if (std.mem.startsWith(u8, relative, prefix)) return gpa.dupe(u8, relative);
     }
     return error.InvalidPath;
@@ -32,6 +32,7 @@ fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
 fn mime(file: []const u8) []const u8 {
     const ext = std.fs.path.extension(file);
     if (std.mem.eql(u8, ext, ".png")) return "image/png";
+    if (std.mem.eql(u8, ext, ".svg")) return "image/svg+xml";
     if (std.mem.eql(u8, ext, ".html")) return "text/html; charset=utf-8";
     if (std.mem.eql(u8, ext, ".mjs") or std.mem.eql(u8, ext, ".js")) return "text/javascript; charset=utf-8";
     if (std.mem.eql(u8, ext, ".css")) return "text/css; charset=utf-8";
@@ -137,9 +138,9 @@ test "static asset paths reject traversal, hidden files, and malformed escapes" 
     for ([_][]const u8{ "/../compiler.lock.json", "/web/%2e%2e/.toolchain/x", "/web/%00x", "/web/%xy", "/web/%5csecret", "/.git/config", "/tools/build-tool.zig", "/web//x" }) |target| {
         try std.testing.expectError(error.InvalidPath, assetPath(gpa, target));
     }
-    const result = try assetPath(gpa, "/web/app.mjs?version=1");
+    const result = try assetPath(gpa, "/web/edit.mjs?version=1");
     defer gpa.free(result);
-    try std.testing.expectEqualStrings("web/app.mjs", result);
+    try std.testing.expectEqualStrings("web/edit.mjs", result);
     try std.testing.expectEqualStrings("application/wasm", mime("artifacts/roclet.wasm"));
     const display = try assetPath(gpa, "/package/Display.roc");
     defer gpa.free(display);

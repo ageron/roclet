@@ -29,13 +29,35 @@ pub const Diagnostic = struct { code: S, message: S, severity: S = "error", star
 pub const Model = struct { format: S = "roc", original: S = "", preamble: S = "", metadata: S = "", cells: []Cell = &.{}, diagnostics: []const Diagnostic = &.{} };
 pub const DraftCell = struct { kind: S, source: S, attributes: S = "", outputs: []const Output = &.{} };
 pub const Draft = struct { supplied: bool = false, preamble: S = "", metadata: S = "", cells: []const DraftCell = &.{} };
-pub const Definition = struct { name: S, fingerprint: S, dependencies: []const S = &.{} };
-pub const Graph = struct { context: S = "", scope: S = "module", definitions: []const Definition = &.{} };
-pub const Reactive = struct { known: bool = false, previous: Graph = .{}, current: Graph = .{}, available: []const S = &.{}, roots: []const S = &.{}, force: []const S = &.{} };
+/// One node of the dependency graph: a value definition or expectation
+/// root, a local type declaration, or an imported module (`module:<name>`).
+/// `binders` lists every name a definition binds; dependencies may name any
+/// binder of a node.
+pub const Node = struct { name: S, binders: []const S = &.{}, fingerprint: S, dependencies: []const S = &.{} };
+/// The graph format `plan` understands; a baseline of another version is
+/// never compared node by node.
+pub const graph_version: u32 = 2;
+/// The checked dependency graph of a document revision (graph version 2).
+pub const Graph = struct {
+    version: u32 = graph_version,
+    context: S = "",
+    scope: S = "module",
+    definitions: []const Node = &.{},
+    types: []const Node = &.{},
+    modules: []const Node = &.{},
+
+    /// Every node: definitions, then types, then modules.
+    fn nodes(self: Graph, a: A) ![]const Node {
+        return std.mem.concat(a, Node, &.{ self.definitions, self.types, self.modules });
+    }
+};
+/// The planner's input. The engine fills `known`, `previous` and `available`
+/// from its baseline (`baseline.zig`); requests only name forced roots.
+pub const PlanInput = struct { known: bool = false, previous: Graph = .{}, current: Graph = .{}, available: []const S = &.{}, roots: []const S = &.{}, force: []const S = &.{} };
 pub const Explanation = struct { root: S, reason: S, dependencies: []const S };
 pub const Plan = struct { changed: []const S = &.{}, evaluate: []const S = &.{}, reused: []const S = &.{}, explanations: []const Explanation = &.{} };
 pub const MetadataField = struct { key: S, value: S };
-pub const Input = struct { compact: bool = false, reactivity: Reactive = .{}, metadata_fields: []const MetadataField = &.{}, phase: S, format: S, target: S, source: S, facts: syntax.Facts = .{}, blocks: []const syntax.Block = &.{}, model: Model = .{}, draft: Draft = .{} };
+pub const Input = struct { compact: bool = false, reactivity: PlanInput = .{}, metadata_fields: []const MetadataField = &.{}, phase: S, format: S, target: S, source: S, facts: syntax.Facts = .{}, blocks: []const syntax.Block = &.{}, model: Model = .{}, draft: Draft = .{} };
 pub const Mapping = struct { generated_start: u64, generated_end: u64, source_start: u64, source_end: u64, cell: u64 };
 pub const Result = struct { plan: Plan = .{}, status: S = "ok", model: Model, draft: Draft, source: S = "", program: S = "", execution: S = "", roots: []const S = &.{}, expectations: []const Expectation = &.{}, mappings: []const Mapping = &.{} };
 fn eq(x: S, y: S) bool {
@@ -722,28 +744,40 @@ fn finish(a: A, input: Input) !Result {
     };
     return .{ .status = status, .model = model, .draft = .{ .supplied = true, .preamble = model.preamble, .metadata = model.metadata, .cells = try draft_cells.toOwnedSlice(a) }, .source = if (input.compact) "" else if (!input.draft.supplied and !oneOf(input.phase, &.{ "normalize", "export", "view", "compose" }) and eq(input.target, model.format)) model.original else rendered, .program = try a.dupe(u8, execution.written()), .execution = if (input.compact) "" else try cat(a, &.{ execution.written(), main, "\n" }), .roots = try roots.toOwnedSlice(a), .expectations = try expectations.toOwnedSlice(a), .mappings = try maps.toOwnedSlice(a) };
 }
-fn definitionEqual(old: []const Definition, new: []const Definition, name: S) bool {
+fn nodeEqual(x: Node, y: Node) bool {
+    if (!eq(x.fingerprint, y.fingerprint) or x.dependencies.len != y.dependencies.len or x.binders.len != y.binders.len) return false;
+    for (x.dependencies, y.dependencies) |xd, yd| if (!eq(xd, yd)) return false;
+    for (x.binders, y.binders) |xb, yb| if (!eq(xb, yb)) return false;
+    return true;
+}
+fn definitionEqual(old: []const Node, new: []const Node, name: S) bool {
     var oi: usize = 0;
     var ni: usize = 0;
     while (true) {
         while (oi < old.len and !eq(old[oi].name, name)) oi += 1;
         while (ni < new.len and !eq(new[ni].name, name)) ni += 1;
         if (oi == old.len or ni == new.len) return oi == old.len and ni == new.len;
-        const x = old[oi];
-        const y = new[ni];
-        if (!eq(x.fingerprint, y.fingerprint) or x.dependencies.len != y.dependencies.len) return false;
-        for (x.dependencies, y.dependencies) |xd, yd| if (!eq(xd, yd)) return false;
+        if (!nodeEqual(old[oi], new[ni])) return false;
         oi += 1;
         ni += 1;
     }
 }
-pub fn plan(a: A, input: Reactive) !Plan {
+/// Whether `deps` names `node` itself or one of its binders.
+fn reaches(deps: []const S, node: Node) bool {
+    if (has(deps, node.name)) return true;
+    for (node.binders) |binder| if (has(deps, binder)) return true;
+    return false;
+}
+pub fn plan(a: A, input: PlanInput) !Plan {
+    const previous = try input.previous.nodes(a);
+    const current = try input.current.nodes(a);
     var names: Strings = .empty;
-    for (input.current.definitions) |d| if (!has(names.items, d.name)) try names.append(a, d.name);
-    for (input.previous.definitions) |d| if (!has(names.items, d.name)) try names.append(a, d.name);
+    for (current) |d| if (!has(names.items, d.name)) try names.append(a, d.name);
+    for (previous) |d| if (!has(names.items, d.name)) try names.append(a, d.name);
     var changed: Strings = .empty;
-    for (names.items) |name| if (!definitionEqual(input.previous.definitions, input.current.definitions, name)) try changed.append(a, name);
-    const global = !input.known or !eq(input.previous.context, input.current.context) or !eq(input.previous.scope, input.current.scope) or (eq(input.current.scope, "module") and changed.items.len > 0);
+    for (names.items) |name| if (!definitionEqual(previous, current, name)) try changed.append(a, name);
+    const format_changed = input.known and input.previous.version != input.current.version;
+    const global = !input.known or format_changed or !eq(input.previous.context, input.current.context) or !eq(input.previous.scope, input.current.scope) or (eq(input.current.scope, "module") and changed.items.len > 0);
     var explanations: std.ArrayList(Explanation) = .empty;
     var reused: Strings = .empty;
     var evaluate: Strings = .empty;
@@ -753,14 +787,15 @@ pub fn plan(a: A, input: Reactive) !Plan {
         var growing = true;
         while (growing) {
             const old = deps.items.len;
-            for (input.current.definitions) |d| if (has(deps.items, d.name)) {
+            for (current) |d| if (reaches(deps.items, d)) {
+                if (!has(deps.items, d.name)) try deps.append(a, d.name);
                 for (d.dependencies) |dep| if (!has(deps.items, dep)) try deps.append(a, dep);
             };
             growing = deps.items.len > old;
         }
         var causes: Strings = .empty;
         for (changed.items) |name| if (has(deps.items, name)) try causes.append(a, name);
-        const reason = if (global) "Document context changed or no checked baseline" else if (causes.items.len > 0) try cat(a, &.{ "Changed: ", try join(a, causes.items, ", ") }) else if (has(input.force, root)) "Explicit run" else if (!has(input.available, root)) "No successful result" else "Unchanged dependencies";
+        const reason = if (format_changed) "Graph format changed" else if (global) "Document context changed or no checked baseline" else if (causes.items.len > 0) try cat(a, &.{ "Changed: ", try join(a, causes.items, ", ") }) else if (has(input.force, root)) "Explicit run" else if (!has(input.available, root)) "No successful result" else "Unchanged dependencies";
         try explanations.append(a, .{ .root = root, .reason = reason, .dependencies = try deps.toOwnedSlice(a) });
         if (eq(reason, "Unchanged dependencies")) try reused.append(a, root) else try evaluate.append(a, root);
     }
@@ -813,7 +848,7 @@ test "reactive plan follows transitive dependencies and handles removed definiti
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
-    const old = [_]Definition{
+    const old = [_]Node{
         .{ .name = "width", .fingerprint = "old" },
         .{ .name = "area", .fingerprint = "same", .dependencies = &.{"width"} },
         .{ .name = "out_area", .fingerprint = "same", .dependencies = &.{"area"} },
@@ -837,4 +872,43 @@ test "module context change invalidates otherwise identical roots" {
     const p = try plan(arena.allocator(), .{ .known = true, .previous = .{ .context = "package-v1" }, .current = .{ .context = "package-v2" }, .roots = &.{"out_1"}, .available = &.{"out_1"} });
     try std.testing.expectEqualStrings("out_1", p.evaluate[0]);
     try std.testing.expectEqual(@as(usize, 0), p.reused.len);
+}
+
+test "reactive plan follows type and module nodes and resolves binders" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    const definitions = [_]Node{
+        .{ .name = "pair", .binders = &.{ "pair", "other" }, .fingerprint = "same" },
+        .{ .name = "out_pair", .fingerprint = "same", .dependencies = &.{"other"} },
+        .{ .name = "out_point", .fingerprint = "same", .dependencies = &.{"Point"} },
+        .{ .name = "out_import", .fingerprint = "same", .dependencies = &.{"module:Geometry"} },
+        .{ .name = "out_other", .fingerprint = "same" },
+    };
+    const types = [_]Node{.{ .name = "Point", .fingerprint = "old" }};
+    const modules = [_]Node{.{ .name = "module:Geometry", .fingerprint = "old" }};
+    const previous: Graph = .{ .scope = "definitions", .definitions = &definitions, .types = &types, .modules = &modules };
+    const roots: []const S = &.{ "out_pair", "out_point", "out_import", "out_other" };
+    var changed_types = types;
+    changed_types[0].fingerprint = "new";
+    const by_type = try plan(a, .{ .known = true, .previous = previous, .current = .{ .scope = "definitions", .definitions = &definitions, .types = &changed_types, .modules = &modules }, .roots = roots, .available = roots });
+    try std.testing.expectEqualStrings("[\"out_point\"]", try json(a, by_type.evaluate));
+    try std.testing.expectEqualStrings("Changed: Point", by_type.explanations[1].reason);
+    var changed_modules = modules;
+    changed_modules[0].fingerprint = "new";
+    const by_module = try plan(a, .{ .known = true, .previous = previous, .current = .{ .scope = "definitions", .definitions = &definitions, .types = &types, .modules = &changed_modules }, .roots = roots, .available = roots });
+    try std.testing.expectEqualStrings("[\"out_import\"]", try json(a, by_module.evaluate));
+    var changed_definitions = definitions;
+    changed_definitions[0].fingerprint = "new";
+    const by_binder = try plan(a, .{ .known = true, .previous = previous, .current = .{ .scope = "definitions", .definitions = &changed_definitions, .types = &types, .modules = &modules }, .roots = roots, .available = roots });
+    try std.testing.expectEqualStrings("[\"out_pair\"]", try json(a, by_binder.evaluate));
+    try std.testing.expectEqualStrings("Changed: pair", by_binder.explanations[0].reason);
+}
+
+test "a baseline of another graph version invalidates every root" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const p = try plan(arena.allocator(), .{ .known = true, .previous = .{ .version = 1, .scope = "definitions" }, .current = .{ .scope = "definitions" }, .roots = &.{"out_1"}, .available = &.{"out_1"} });
+    try std.testing.expectEqualStrings("out_1", p.evaluate[0]);
+    try std.testing.expectEqualStrings("Graph format changed", p.explanations[0].reason);
 }

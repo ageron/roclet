@@ -359,6 +359,20 @@ index 8534120c72..bdcb429542 100644
  /// Whether a root failed at code checking rejected and already reported.
  pub fn failedAtCheckedError(lir_result: *const lir.Program.Result, failed_stmt: ?lir.LIR.CFStmtId) bool {
      const stmt = failed_stmt orelse return false;
+diff --git a/src/eval/host_trampoline.S b/src/eval/host_trampoline.S
+--- a/src/eval/host_trampoline.S
++++ b/src/eval/host_trampoline.S
+@@ -159,3 +159,10 @@
+ #endif
+ 
+ #endif
++
++/* This object has no code on WASM. Zig's self-hosted linker still requires
++ * target feature metadata, with an empty feature list for the empty object. */
++#if defined(__wasm__)
++.section .custom_section.target_features,"",@
++.int8 0
++#endif
 diff --git a/src/parse/Parser.zig b/src/parse/Parser.zig
 index ae53d90dcb..40fdf5e423 100644
 --- a/src/parse/Parser.zig

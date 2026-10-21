@@ -39,10 +39,83 @@ pub const Suite = struct {
         try self.cases.append(self.a, try parse(self.a, try json(self.a, .{ .name = name, .request = request, .result = response })));
         return response;
     }
-    fn run(self: *Suite, fixture: V) !void {
+    /// Serve `requests` in order with one engine (`--bridge a.json b.json ...`),
+    /// so later requests see the engine's reactive baseline. Each pair is
+    /// recorded as its own case, in order, for the browser replay.
+    pub fn callSequence(self: *Suite, names: []const []const u8, requests: []const V) ![]V {
+        std.debug.assert(names.len == requests.len);
+        var argv: std.ArrayList([]const u8) = .empty;
+        try argv.appendSlice(self.a, &.{ self.executable, "--bridge" });
+        for (requests, 0..) |request, i| {
+            const path = try std.fmt.allocPrint(self.a, "{s}.{d}", .{ self.temp, i });
+            try std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = path, .data = try json(self.a, request) });
+            try argv.append(self.a, path);
+        }
+        defer for (argv.items[2..]) |path| std.Io.Dir.cwd().deleteFile(self.io, path) catch {};
+        const result = try std.process.run(self.a, self.io, .{ .argv = argv.items, .stdout_limit = .limited(64 * 1024 * 1024), .stderr_limit = .limited(1024 * 1024), .timeout = .{ .duration = .{ .raw = .fromSeconds(120), .clock = .awake } } });
+        if (result.term != .exited or result.term.exited != 0) {
+            std.debug.print("FAIL {s}: {s}\n", .{ names[0], result.stderr });
+            return error.AdapterFailed;
+        }
+        const responses = try self.a.alloc(V, requests.len);
+        var lines = std.mem.splitScalar(u8, std.mem.trimEnd(u8, result.stdout, "\n"), '\n');
+        for (responses, names, requests) |*response, name, request| {
+            response.* = try parse(self.a, lines.next() orelse return error.MissingSequenceResponse);
+            try self.cases.append(self.a, try parse(self.a, try json(self.a, .{ .name = name, .request = request, .result = response.* })));
+        }
+        if (lines.next() != null) return error.UnexpectedSequenceResponse;
+        return responses;
+    }
+    fn run(self: *Suite, root: []const u8, fixture: V) !void {
         const name = str(fixture, "name");
-        const request = field(fixture, "request");
+        // A private copy: module files are read in and cells reordered without touching the fixture.
+        var request = try parse(self.a, try json(self.a, field(fixture, "request")));
+        if (fixture.object.get("modules_from")) |sources| {
+            var modules = if (request.object.get("modules")) |existing| existing.array else std.array_list.Managed(V).init(self.a);
+            for (sources.array.items) |source| {
+                const content = try std.Io.Dir.cwd().readFileAlloc(self.io, try std.fs.path.join(self.a, &.{ root, str(source, "path") }), self.a, .limited(1024 * 1024));
+                try modules.append(try parse(self.a, try json(self.a, .{ .name = str(source, "name"), .content = content })));
+            }
+            try request.object.put(self.a, "modules", .{ .array = modules });
+        }
         const wanted = field(fixture, "expect");
+        if (wanted.object.get("response_keys")) |keys| {
+            // `operation: "syntax"` and `"markdown"` answer with facts or
+            // rendering events rather than a document; only their members are checked.
+            const result = try self.call(name, request);
+            errdefer std.debug.print("FAIL {s}\n{s}\n", .{ name, json(self.a, result) catch "" });
+            for (keys.array.items) |key| try expect(result.object.get(key.string) != null);
+            std.debug.print("PASS {s}: {s}\n", .{ str(request, "operation"), name });
+            return;
+        }
+        if (wanted.object.get("program_events")) |events| {
+            // `operation: "program"` answers with the script response: no document
+            // model, and the host's observations are its top-level `events`.
+            const result = try self.call(name, request);
+            errdefer std.debug.print("FAIL {s}\n{s}\n", .{ name, json(self.a, result) catch "" });
+            try expect(eq(str(result, "status"), str(wanted, "status")));
+            try expect(eq(try json(self.a, field(result, "events")), try json(self.a, events)));
+            std.debug.print("PASS program: {s}\n", .{name});
+            return;
+        }
+        if (wanted.object.get("permute") == null) return self.check(name, request, wanted);
+        // Cell order must never matter: every permutation shares one expectation.
+        var count: usize = 0;
+        try self.permute(name, request, wanted, field(field(request, "draft"), "cells").array.items, 0, &count);
+    }
+    fn permute(self: *Suite, name: []const u8, request: V, wanted: V, cells: []V, index: usize, count: *usize) !void {
+        if (index == cells.len) {
+            try self.check(try std.fmt.allocPrint(self.a, "{s}/{d}", .{ name, count.* }), try parse(self.a, try json(self.a, request)), wanted);
+            count.* += 1;
+            return;
+        }
+        for (index..cells.len) |i| {
+            std.mem.swap(V, &cells[index], &cells[i]);
+            try self.permute(name, request, wanted, cells, index + 1, count);
+            std.mem.swap(V, &cells[index], &cells[i]);
+        }
+    }
+    fn check(self: *Suite, name: []const u8, request: V, wanted: V) !void {
         const result = try self.call(name, request);
         errdefer std.debug.print("FAIL {s}\n{s}\n", .{ name, json(self.a, result) catch "" });
         try expect(eq(str(result, "status"), str(wanted, "status")));
@@ -128,6 +201,27 @@ pub const Suite = struct {
                 };
                 try expect(found);
             }
+        }
+        if (wanted.object.get("definition_source_text")) |expected| {
+            // Map the first definition's region from the generated program back into the
+            // request's own UTF-8 bytes: the whole source, or the draft cell it came from.
+            const region = field(field(field(result, "evaluation"), "definitions").array.items[0], "region");
+            const start: usize = @intCast(field(region, "start").integer);
+            const end: usize = @intCast(field(region, "end").integer);
+            const draft = request.object.get("draft");
+            var found = false;
+            for (field(result, "mappings").array.items) |m| {
+                const generated_start: usize = @intCast(field(m, "generated_start").integer);
+                if (start < generated_start or start >= @as(usize, @intCast(field(m, "generated_end").integer))) continue;
+                const index: usize = @intCast(field(m, "cell").integer);
+                const input = if (draft) |d| str(field(d, "cells").array.items[index], "source") else str(request, "source");
+                const base: usize = if (draft != null) @intCast(field(cells[index], "body_start").integer) else 0;
+                const offset = @as(usize, @intCast(field(m, "source_start").integer)) + start - generated_start - base;
+                try expect(start <= end and offset + end - start <= input.len);
+                try expect(eq(input[offset..][0 .. end - start], expected.string));
+                found = true;
+            }
+            try expect(found);
         }
         if (wanted.object.get("root_errors")) |expected| {
             const errors = field(field(result, "evaluation"), "root_errors").array.items;
@@ -215,15 +309,104 @@ pub const Suite = struct {
         std.debug.print("PASS document: {s}\n", .{name});
     }
 };
+/// JSON types as the wire sees them, in the order a pin line lists them.
+const json_types = [_][]const u8{ "array", "boolean", "null", "number", "object", "string" };
+fn typeIndex(v: V) u3 {
+    return switch (v) {
+        .array => 0,
+        .bool => 1,
+        .null => 2,
+        .integer, .float, .number_string => 3,
+        .object => 4,
+        .string => 5,
+    };
+}
+/// Record the type of `v` at `path` and of everything below it; `[]` marks array elements.
+fn observe(a: A, shape: *std.StringArrayHashMapUnmanaged(u8), path: []const u8, v: V) !void {
+    const entry = try shape.getOrPut(a, path);
+    if (!entry.found_existing) entry.value_ptr.* = 0;
+    entry.value_ptr.* |= @as(u8, 1) << typeIndex(v);
+    switch (v) {
+        .object => |object| {
+            var fields = object.iterator();
+            while (fields.next()) |f| try observe(a, shape, try std.mem.concat(a, u8, &.{ path, ".", f.key_ptr.* }), f.value_ptr.*);
+        },
+        .array => |array| {
+            const element = try std.mem.concat(a, u8, &.{ path, "[]" });
+            for (array.items) |item| try observe(a, shape, element, item);
+        },
+        else => {},
+    }
+}
+fn lessThan(_: void, l: []const u8, r: []const u8) bool {
+    return std.mem.order(u8, l, r) == .lt;
+}
+fn contains(lines: []const []const u8, line: []const u8) bool {
+    for (lines) |other| if (eq(other, line)) return true;
+    return false;
+}
+/// The wire shape pin: every `"<operation>.<request|result>.<key.path> <type|type>"`
+/// line observed across the recorded requests and results of the document and
+/// M4 suites, compared with `tests/protocol-shape.json`, or written to it with
+/// `--update`.
+fn protocolShape(a: A, io: std.Io, root: []const u8, update: bool) !void {
+    var shape: std.StringArrayHashMapUnmanaged(u8) = .empty;
+    for ([_][]const u8{ "artifacts/document-conformance.json", "artifacts/m4-conformance.json" }) |file| {
+        const recorded = try parse(a, try std.Io.Dir.cwd().readFileAlloc(io, try std.fs.path.join(a, &.{ root, file }), a, .limited(256 * 1024 * 1024)));
+        for (field(recorded, "cases").array.items) |case| {
+            // Each operation answers with its own response type, so paths are
+            // rooted at the operation: `markdown.result.events[].kind` and
+            // `program.result.events[].kind` are different fields.
+            const request = field(case, "request");
+            const operation = if (request.object.get("operation")) |o| if (o == .string) o.string else "invalid" else "invalid";
+            try observe(a, &shape, try std.mem.concat(a, u8, &.{ operation, ".request" }), request);
+            try observe(a, &shape, try std.mem.concat(a, u8, &.{ operation, ".result" }), field(case, "result"));
+        }
+    }
+    var observed: std.ArrayList([]const u8) = .empty;
+    var paths = shape.iterator();
+    while (paths.next()) |entry| {
+        var types: std.ArrayList([]const u8) = .empty;
+        for (json_types, 0..) |name, i| if (entry.value_ptr.* & (@as(u8, 1) << @intCast(i)) != 0) try types.append(a, name);
+        try observed.append(a, try std.mem.concat(a, u8, &.{ entry.key_ptr.*, " ", try std.mem.join(a, "|", types.items) }));
+    }
+    std.mem.sort([]const u8, observed.items, {}, lessThan);
+    const pin = try std.fs.path.join(a, &.{ root, "tests/protocol-shape.json" });
+    if (update) {
+        var w: std.Io.Writer.Allocating = .init(a);
+        try std.json.Stringify.value(observed.items, .{ .whitespace = .indent_2 }, &w.writer);
+        try w.writer.writeByte('\n');
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = pin, .data = w.written() });
+        std.debug.print("WROTE tests/protocol-shape.json: {d} key paths\n", .{observed.items.len});
+        return;
+    }
+    const pinned = try std.json.parseFromSliceLeaky([]const []const u8, a, try std.Io.Dir.cwd().readFileAlloc(io, pin, a, .limited(1024 * 1024)), .{});
+    var mismatches: usize = 0;
+    for (observed.items) |line| if (!contains(pinned, line)) {
+        std.debug.print("+ {s}\n", .{line});
+        mismatches += 1;
+    };
+    for (pinned) |line| if (!contains(observed.items, line)) {
+        std.debug.print("- {s}\n", .{line});
+        mismatches += 1;
+    };
+    if (mismatches > 0) {
+        std.debug.print("FAIL protocol shape: {d} lines differ from tests/protocol-shape.json (+ observed, - pinned).\nIf the change is intended, run `zig build test-documents -Dupdate-protocol-shape` and commit the diff.\n", .{mismatches});
+        return error.ProtocolShapeChanged;
+    }
+    std.debug.print("PASS protocol shape: {d} key paths match tests/protocol-shape.json\n", .{observed.items.len});
+}
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
     const args = try init.minimal.args.toSlice(a);
     const root = args[1];
+    // `<root> --protocol-shape [--update]` runs after both suites have recorded their cases.
+    if (args.len > 2 and eq(args[2], "--protocol-shape")) return protocolShape(a, init.io, root, args.len > 3 and eq(args[3], "--update"));
     const temp = try std.fs.path.join(a, &.{ root, "artifacts/document-request.tmp.json" });
     defer std.Io.Dir.cwd().deleteFile(init.io, temp) catch {};
     var suite: Suite = .{ .a = a, .io = init.io, .executable = args[2], .temp = temp };
     const fixtures = try parse(a, try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, "tests/documents.json" }), a, .limited(1024 * 1024)));
-    for (fixtures.array.items) |fixture| try suite.run(fixture);
+    for (fixtures.array.items) |fixture| try suite.run(root, fixture);
     // Published notebooks must already be in runnable form, not editing drafts.
     for ([_][]const u8{ "demos/01-reactivity.roc", "demos/02-a-little-data.roc", "demos/03-circle.roc", "fixtures/documents/rich-outputs.roc" }) |file| {
         const source = try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, file }), a, .limited(256 * 1024));

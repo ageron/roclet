@@ -3,15 +3,16 @@ const std = @import("std");
 const bridge = @import("bridge.zig");
 pub const std_options = bridge.std_options;
 const usage =
-    \\Usage: roclet [run] FILE.roc|FILE.md|snapshot.json
+    \\Usage: roclet [run] FILE.roc|FILE.md|request.json
     \\       roclet parse FILE.roc|FILE.md
     \\       roclet check FILE.roc|FILE.md
     \\       roclet convert FILE --to roc|markdown [--output FILE] [--normalize] [--force] [--allow-relocation]
-    \\       roclet --bridge request.json
+    \\       roclet --bridge request.json [request.json ...]
     \\
     \\Conversion never executes the notebook. Roc output is a checked runnable script.
     \\Markdown same-format conversion is byte-exact unless --normalize is supplied.
     \\Use --normalize to preserve an invalid draft with diagnostics.
+    \\--bridge serves its requests in order with one engine, one response per line.
     \\
 ;
 fn stringify(a: std.mem.Allocator, data: anytype) ![]u8 {
@@ -21,7 +22,8 @@ fn stringify(a: std.mem.Allocator, data: anytype) ![]u8 {
 }
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
-    bridge.setNativeIo(init.io);
+    var engine = bridge.Engine.init(std.heap.page_allocator, init.io);
+    defer engine.deinit();
     const args = try init.minimal.args.toSlice(a);
     if (args.len == 1 or (args.len == 2 and std.mem.eql(u8, args[1], "--help"))) {
         try std.Io.File.stdout().writeStreamingAll(init.io, usage);
@@ -34,6 +36,17 @@ pub fn main(init: std.process.Init) !void {
     const explicit = raw or convert or std.mem.eql(u8, args[1], "run") or std.mem.eql(u8, args[1], "check") or std.mem.eql(u8, args[1], "parse");
     const file_index: usize = if (explicit) 2 else 1;
     if (args.len <= file_index) return error.MissingFile;
+    if (raw) {
+        // A sequence shares one engine, so later requests see its baseline.
+        for (args[file_index..]) |path| {
+            const request = try std.Io.Dir.cwd().readFileAlloc(init.io, path, a, .limited(4 * 1024 * 1024));
+            const result = try bridge.process(&engine, request);
+            defer std.heap.page_allocator.free(result);
+            try std.Io.File.stdout().writeStreamingAll(init.io, result);
+            try std.Io.File.stdout().writeStreamingAll(init.io, "\n");
+        }
+        return;
+    }
     const file = args[file_index];
     const format = if (std.mem.endsWith(u8, file, ".roc")) "roc" else if (std.mem.endsWith(u8, file, ".md") or std.mem.endsWith(u8, file, ".markdown")) "markdown" else "json";
     var target: []const u8 = format;
@@ -64,11 +77,11 @@ pub fn main(init: std.process.Init) !void {
     const is_document = !raw and !std.mem.eql(u8, format, "json");
     if (is_document) {
         const actual = try std.Io.Dir.cwd().realPathFileAlloc(init.io, file, a);
-        try bridge.setNativeSourceDirectory(std.fs.path.dirname(actual) orelse ".");
+        try engine.setNativeSourceDirectory(std.fs.path.dirname(actual) orelse ".");
     }
     if (convert and !is_document) return error.ExpectedDocumentExtension;
     const request = if (is_document) try stringify(a, .{ .operation = "document", .action = if (normalize) "normalize" else if (convert and std.mem.eql(u8, target, "roc")) "export" else if (std.mem.eql(u8, action, "run")) "evaluate" else action, .format = format, .target = target, .source = bytes }) else bytes;
-    const result = try bridge.process(request);
+    const result = try bridge.process(&engine, request);
     defer std.heap.page_allocator.free(result);
     const parsed = try std.json.parseFromSlice(std.json.Value, a, result, .{});
     const object = parsed.value.object;

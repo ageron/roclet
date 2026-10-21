@@ -1,0 +1,688 @@
+import { Notebook, makeCell, cellsFrom } from './edit-model.mjs';
+import { CellEditor, editorFor } from './cell-editor.mjs';
+import { symbolAt, completionOptions } from './compiler-tools.mjs';
+import { renderMarkdown } from './markdown-view.mjs';
+import { settleMathStyles } from './math-view.mjs';
+import { renderDisplay } from './display-view.mjs';
+import { engineDetails, engineStats } from './workbench.mjs';
+import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './edit-cells.mjs';
+
+// Global header menus and dialogs keep page-level ids; panel code never looks
+// up its own elements through them.
+const $ = id => document.getElementById(id);
+const textTarget = target => target instanceof Element && !!target.closest('textarea,input,select,[contenteditable=true]');
+export function closeMenus(except = null) {
+  document.querySelectorAll('details.popover[open]').forEach(menu => {
+    if (menu === except) return;
+    menu.open = false;
+    if (menu.contains(document.activeElement)) menu.querySelector('summary').focus({preventScroll:true});
+  });
+}
+export function showHelp() { closeMenus(); $('shortcuts-dialog').showModal(); }
+function outputBlock(label, text, kind = '', display = null) {
+  const block = document.createElement('section'); block.className = `result-block ${kind}`;
+  const heading = document.createElement('div'); heading.className = 'result-heading'; heading.textContent = label;
+  const output = document.createElement('pre'); output.textContent = text;
+  block.append(heading, output);
+  const rich=renderDisplay(display,text);if(rich) {output.hidden=true;block.append(rich);}
+  return block;
+}
+function clearObservations(view, render) {
+  for (const kind of ['value', 'debug', 'tests']) render(view, kind, null);
+}
+
+// One notebook on the page: its Notebook model (and so its worker and engine),
+// cell views, selection, editors, keyboard and clipboard handling. Header
+// commands reach a panel through the methods assigned at the end.
+export class NotebookPanel {
+  constructor({ root, prefix = '', bytes, highlighter, store, loadPackage, preferences = {}, onActivate = () => {}, onChange = () => {} }) {
+    this.root = root; this.preferences = preferences; this.lastResponse = null; this.prefix = prefix; this.store = store; this.highlighter = highlighter;
+    const parts = new Map();
+    const part = this.part = name => {
+      let node = parts.get(name);
+      if (!node) parts.set(name, node = root.querySelector(`[data-part="${name}"]`));
+      return node;
+    };
+    const panel = this;
+    const cards = this.cards = new Map();
+    const selection = this.selection = new CellSelection();
+    let documentId, selectionActive = false, composing = false, headerDocumentId;
+    // A notice may offer actions, for example when a draft is already open in
+    // the other panel.
+    const notice = this.notice = (message, actions = []) => {
+      const node = part('notice'); node.textContent = message; node.hidden = !message;
+      for (const [label, action] of actions) { const choice = button(label, action); choice.className = 'notice-action'; node.append(' ', choice); }
+    };
+    // A document switch refused because this draft could not be saved offers
+    // a download (supplied by the page as panel.download) or switching anyway.
+    const report = this.report = error => {
+      if (error.name === 'AbortError') return;
+      if (error.name === 'UnsavedError') notice(error.message, [['Download a copy', () => panel.download?.()], [error.discardLabel, error.discard]]);
+      else notice(error.message);
+    };
+    const perform = this.perform = async work => {
+      notice('');
+      try { await work(); } catch (error) { report(error); }
+    };
+    const button = (label, action, name = label) => {
+      const node = document.createElement('button'); node.textContent = label; node.setAttribute('aria-label', name); node.onclick = () => perform(action); return node;
+    };
+    // Automatic checks and runs wait until the panel's first document is shown.
+    const notebook = this.notebook = new Notebook(bytes, store, {onChange:reason=>{reflect(reason);onChange(panel,reason);},loadPackage,deferScheduling:true});
+    // Presentation only: keep the same output nodes while an edited revision is
+    // pending. The model still invalidates results immediately for execution/export.
+    function renderObservation(view, kind, content, stale = false) {
+      view.observations[kind] = content;
+      if (!content) { view.outputBlocks[kind]?.remove(); delete view.outputBlocks[kind]; return; }
+      let block = view.outputBlocks[kind];
+      if (!block) {
+        block = view.outputBlocks[kind] = outputBlock('', '', kind);
+        if (kind === 'value') {
+          const spinner = document.createElement('span'); spinner.className = 'output-spinner'; spinner.setAttribute('aria-hidden','true'); block.append(spinner);
+        }
+      }
+      const output = block.querySelector(':scope > pre');
+      if (block.firstChild.textContent !== content.heading) block.firstChild.textContent = content.heading;
+      if (output.textContent !== content.text) output.textContent = content.text;
+      if(block.displayValue!==content.display || block.displayText!==content.text) {
+        const richKey=JSON.stringify([content.display??null,content.text]);
+        if(block.richKey!==richKey) {
+          block.querySelector(':scope > .rich-output')?.remove();
+          const rich=renderDisplay(content.display,content.text);output.hidden=!!rich;
+          if(rich) block.insertBefore(rich,output);block.richKey=richKey;
+        }
+        block.displayValue=content.display;block.displayText=content.text;
+      }
+      const updating = stale && (/^(Saving before evaluation|Running)/.test(notebook.status) || (notebook.state.autoRun && notebook.status.startsWith('Changed')));
+      block.dataset.stale = String(stale);
+      block.dataset.updating = String(updating);
+      block.setAttribute('aria-label', stale ? `${kind === 'value' ? 'Result' : kind === 'tests' ? 'Tests' : 'Debug'} from an earlier run, ${updating ? 'updating' : 'awaiting update'}` : content.heading);
+      block.title = stale ? `From an earlier run. ${updating ? 'Updating…' : 'Awaiting an update.'}` : '';
+      if (block.parentNode !== view.results) view.results.append(block);
+    }
+    const editable = () => notebook.state.cells.filter(c => c.kind !== 'generated');
+    const cellIndex = key => notebook.state.cells.findIndex(c => c.key === key);
+    function focusCell(key, extend = false) {
+      notebook.finishEditing();
+      closeMenus(); window.getSelection()?.removeAllRanges(); selection.select(key, extend); selectionActive = true; renderSelection();
+      const card = cards.get(selection.focus)?.card;
+      (card ?? part('notebook')).focus({preventScroll:true}); card?.scrollIntoView({block:'nearest'});
+    }
+    function focusCells(keys) {
+      // Keep the active end of a range, including selections made upwards.
+      const backwards = selection.focus === keys[0];
+      selection.select(backwards ? keys.at(-1) : keys[0]);
+      focusCell(backwards ? keys[0] : keys.at(-1), true);
+    }
+    function actionKeys(key) {
+      const selected = selection.selected;
+      return selectionActive && selected.includes(key) ? selected : [key];
+    }
+    function editCell(key) {
+      const cell = notebook.state.cells[cellIndex(key)]; if (!cell) return;
+      if (selection.focus !== key) notebook.finishEditing();
+      closeMenus(); selection.select(key); selection.mode = 'text'; selectionActive = true;
+      renderSelection(); cards.get(key)?.editor.focus();
+    }
+    function renderSelection() {
+      const selected = selection.selected;
+      for (const [key, view] of cards) {
+        const cell = notebook.state.cells[cellIndex(key)]; if (!cell) continue;
+        const active = selectionActive && selected.includes(key), editing = active && selection.mode === 'text';
+        view.card.classList.toggle('selected', active); view.card.classList.toggle('current', active && key === selection.focus); view.card.classList.toggle('command-selected', active && selection.mode === 'cells');
+        view.card.classList.toggle('editing', editing); view.card.classList.toggle('markdown-cell', cell.kind === 'markdown');
+        view.card.dataset.selected = String(active); view.card.tabIndex = key === selection.focus ? 0 : -1;
+        view.card.setAttribute('aria-label', `Cell ${selection.keys.indexOf(key) + 1}, ${cell.kind === 'markdown' ? 'Markdown' : 'Code'}${active && selection.mode === 'cells' ? ', selected' : ''}`);
+        view.gutter.setAttribute('aria-pressed', active && selection.mode === 'cells');
+        const sourceCollapsed = cell.kind === 'code' && cell.collapsed && !editing;
+        view.editor.setHidden(sourceCollapsed || (cell.kind === 'markdown' && !editing));
+        view.preview.hidden = cell.kind !== 'markdown' || editing;
+        view.expand.hidden = !sourceCollapsed;
+        const keys = actionKeys(key), count = keys.length;
+        const codeCells = keys.map(k => notebook.state.cells[cellIndex(k)]).filter(c => c.kind === 'code');
+        const collapsed = codeCells.length > 0 && codeCells.every(c => c.collapsed);
+        view.collapse.hidden = codeCells.length === 0;
+        view.collapse.disabled = codeCells.length === 0;
+        view.up.textContent = count > 1 ? `Move ${count} cells up` : 'Move up';
+        view.up.setAttribute('aria-label', count > 1 ? view.up.textContent : 'Move cell up');
+        view.down.textContent = count > 1 ? `Move ${count} cells down` : 'Move down';
+        view.down.setAttribute('aria-label', count > 1 ? view.down.textContent : 'Move cell down');
+        view.up.disabled = keys[0] === selection.keys[0];
+        view.down.disabled = keys.at(-1) === selection.keys.at(-1);
+        view.merge.textContent = count > 1 ? `Merge ${count} cells` : 'Merge with next';
+        view.merge.setAttribute('aria-label', view.merge.textContent);
+        view.merge.disabled = count === 1 && view.down.disabled;
+        view.collapse.textContent = `${collapsed ? 'Expand' : 'Collapse'} ${codeCells.length > 1 ? `${codeCells.length} sources` : 'source'}`;
+        view.collapse.setAttribute('aria-label', codeCells.length > 1 ? view.collapse.textContent : `${collapsed ? 'Expand' : 'Collapse'} cell`);
+      }
+      part('selection-status').textContent = !selectionActive || notebook.state.mode !== 'notebook' ? '' : selection.mode === 'text' ? 'Editing · Esc to select cell' : selected.length > 1 ? `${selected.length} cells selected · ⌘ / Ctrl C, X, V` : selected.length ? 'Cell selected · Enter to edit' : 'No cells · A or B to insert';
+    }
+    function insertCells(position, additions, edit = false) {
+      checkInsertion(notebook.state.cells, additions);
+      notebook.change(s => s.cells.splice(insertionIndex(s.cells, position), 0, ...additions));
+      selection.select(additions[0].key); selection.select(additions.at(-1).key, true);
+      selectionActive = true; renderSelection();
+      if (edit) editCell(additions[0].key); else cards.get(selection.focus)?.card.focus();
+    }
+    function insertAtSelection(below, kind = 'code') {
+      const selected = selection.selected;
+      const at = below ? selection.keys.indexOf(selected.at(-1)) + 1 : Math.max(0, selection.keys.indexOf(selected[0]));
+      insertCells(at, [makeCell(kind)], true);
+    }
+    function removeCells(keys) {
+      if (!keys.length) return;
+      const position = Math.min(...keys.map(key => selection.keys.indexOf(key)));
+      notebook.change(s => { s.cells = s.cells.filter(c => !keys.includes(c.key)); });
+      selection.mode = 'cells'; focusCell(selection.keys[Math.min(position, selection.keys.length - 1)]);
+    }
+    function moveCells(keys, delta) {
+      const cells = editable(), from = cells.findIndex(c => c.key === keys[0]);
+      if (from + delta < 0 || from + keys.length + delta > cells.length) return;
+      const moved = cells.splice(from, keys.length);
+      cells.splice(from + delta, 0, ...moved);
+      notebook.change(s => {
+        // Reorder visible cells as a block, leaving generated sections in place.
+        let next = 0;
+        s.cells = s.cells.map(c => c.kind === 'generated' ? c : cells[next++]);
+      });
+      focusCells(keys);
+    }
+    function collapseCells(keys) {
+      const cells = keys.map(key => notebook.state.cells[cellIndex(key)]).filter(c => c.kind === 'code');
+      if (!cells.length) return;
+      const collapsed = !cells.every(c => c.collapsed);
+      for (const cell of cells) cell.collapsed = collapsed;
+      focusCells(keys); void notebook.persist();
+    }
+    function splitCell(key) {
+      const index=cellIndex(key), cell=notebook.state.cells[index], editor=cards.get(key)?.editor;
+      if (!editor || cell.kind==='generated') return;
+      const at=editor.view.state.selection.main.head, next=makeCell(cell.kind,cell.source.slice(at));
+      checkInsertion(notebook.state.cells,[next]);
+      notebook.change(s=>{s.cells[index].source=cell.source.slice(0,at);s.cells[index].outputs=[];s.cells.splice(index+1,0,next);});
+      editCell(next.key);cards.get(next.key).editor.goTo(1);
+    }
+    async function mergeCells(keys) {
+      let indices=keys.map(cellIndex).sort((a,b)=>a-b);
+      if(indices.length===1) { const next=selection.keys[selection.keys.indexOf(keys[0])+1];if(next) indices.push(cellIndex(next)); }
+      if(indices.length<2) return;
+      const cells=indices.map(i=>notebook.state.cells[i]);
+      if(cells.some(c=>c.kind!==cells[0].kind)) throw new Error('Choose cells of the same type to merge.');
+      if(cells.filter(c=>c.attributes?.trim()).length>1) throw new Error('These cells have separate attributes. Keep them separate or remove the extra attributes before merging.');
+      const key=cells[0].key;
+      let sources=cells.map(c=>c.source);
+      if(cells[0].kind==='code') {
+        // inspect guards against edits, undo, document changes and Stop while the
+        // parser is running. These facts never require evaluating notebook code.
+        const parsed=await notebook.inspect('parse', notebook.state.format, {draft:true});
+        sources=sources.map((source,i)=>i===sources.length-1 ? source : commentFinalExpression(source,parsed.model.cells[indices[i]].facts));
+      }
+      notebook.change(s=>{ const first=s.cells[indices[0]];first.source=sources.join('\n');first.attributes=cells.find(c=>c.attributes?.trim())?.attributes??'';first.outputs=[];s.cells=s.cells.filter((c,i)=>!indices.slice(1).includes(i)); });
+      focusCell(key);
+    }
+    // Each panel owns its search controls, matches and cancellable worker.
+    let searchWorker, searchTimer, searchGeneration=0, searchMatches=[], searchIndex=-1, searchSnapshot='', searchRefresh;
+    const searchSources=()=>notebook.state.mode==='source'?[{key:null,source:notebook.state.source}]:editable().map(({key,source})=>({key,source}));
+    const searchIdentity=()=>JSON.stringify([notebook.state.id,notebook.state.mode,searchSources()]);
+    function findNotebook() {
+      closeMenus();part('find-bar').hidden=false;part('find-query').focus();part('find-query').select();updateFind();
+    }
+    function closeFind() {
+      part('find-bar').hidden=true;searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++;
+      if(notebook.state.mode==='source')sourceEditor.focus();else editCell(selection.focus);
+    }
+    function searchStatus(message) {
+      part('find-results').textContent=message??(searchMatches.length?`${searchIndex+1} of ${searchMatches.length}`:'No matches');
+      for(const id of ['find-prev','find-next','replace-next','replace-all'])part(id).disabled=!searchMatches.length;
+    }
+    function revealMatch() {
+      const match=searchMatches[searchIndex];if(!match)return;
+      const focused=document.activeElement;
+      let editor=sourceEditor;
+      if(match.key){selection.select(match.key);selection.mode='text';selectionActive=true;renderSelection();editor=cards.get(match.key)?.editor;}
+      editor?.selectMatch(match.from,match.to);editor?.dom.scrollIntoView({block:'nearest'});
+      if(part('find-bar').contains(focused))focused.focus({preventScroll:true});
+      searchStatus();
+    }
+    function updateFind(preferred=null) {
+      if(part('find-bar').hidden)return;
+      searchWorker?.terminate();clearTimeout(searchTimer);const generation=++searchGeneration;
+      searchMatches=[];searchIndex=-1;searchSnapshot=searchIdentity();searchStatus(part('find-query').value?'Searching…':'Enter text to find');
+      if(!part('find-query').value)return;
+      const worker=searchWorker=new Worker(new URL('./notebook-search-worker.mjs',import.meta.url),{type:'module'});
+      const fail=message=>{if(generation!==searchGeneration)return;worker.terminate();clearTimeout(searchTimer);searchStatus(message);};
+      searchTimer=setTimeout(()=>fail('Search took too long. Try a simpler expression.'),1500);
+      worker.onerror=()=>fail('Search could not start. Please reload and try again.');
+      worker.onmessage=({data})=>{
+        if(generation!==searchGeneration)return;clearTimeout(searchTimer);worker.terminate();
+        if(searchSnapshot!==searchIdentity()){updateFind();return;}
+        if(data.error){searchStatus(data.error);return;}
+        searchMatches=data.matches;searchIndex=searchMatches.length?0:-1;
+        if(preferred){const keys=searchSources().map(c=>c.key), cell=keys.indexOf(preferred.key);const at=searchMatches.findIndex(m=>keys.indexOf(m.key)>cell||(m.key===preferred.key&&m.from>=preferred.from));if(at>=0)searchIndex=at;}
+        searchStatus();if(part('find-bar').contains(document.activeElement))revealMatch();
+      };
+      worker.postMessage({sources:searchSources(),query:part('find-query').value,caseSensitive:part('find-case').checked,regex:part('find-regex').checked,replacement:part('replace-query').value});
+    }
+    function stepFind(delta) {
+      if(searchSnapshot!==searchIdentity()){updateFind();return;}
+      if(!searchMatches.length)return;searchIndex=(searchIndex+delta+searchMatches.length)%searchMatches.length;revealMatch();
+    }
+    function replaceFind(all) {
+      if(searchSnapshot!==searchIdentity()){updateFind();return;}
+      if(!searchMatches.length)return;
+      const chosen=all?searchMatches:[searchMatches[searchIndex]], current=chosen[0];
+      const sources=new Map(searchSources().map(c=>[c.key,c.source]));
+      for(const match of [...chosen].reverse()){const source=sources.get(match.key);sources.set(match.key,source.slice(0,match.from)+match.insert+source.slice(match.to));}
+      notebook.change(s=>{
+        if(s.mode==='source')s.source=sources.get(null);
+        else for(const cell of s.cells)if(sources.has(cell.key)&&cell.source!==sources.get(cell.key)){cell.source=sources.get(cell.key);cell.outputs=[];delete cell.editorSelection;}
+      },{source:notebook.state.mode==='source'});
+      clearTimeout(searchRefresh);
+      updateFind(all?null:{key:current.key,from:current.from+current.insert.length+(current.from===current.to?1:0)});
+    }
+    function insertion(position) {
+      const rail = document.createElement('div'); rail.className = 'insertion';
+      for (const [kind, label] of [['code','+ Code'],['markdown','+ Markdown']]) rail.append(button(label, () => insertCells(position, [makeCell(kind)], true), `Insert ${kind} cell ${position ? `after cell ${position}` : 'at start'}`));
+      return rail;
+    }
+    async function runCell(key, advance = false, insert = false) {
+      const cell = notebook.state.cells[cellIndex(key)]; if (!cell) return;
+      notebook.finishEditing({ flush: false });
+      if (insert) insertAtSelection(true);
+      else if (advance) {
+        const next = selection.keys[selection.keys.indexOf(key) + 1];
+        if (next) focusCell(next); else insertAtSelection(true);
+      } else if (cell.kind === 'markdown') focusCell(key);
+      if (cell.kind === 'markdown') {
+        notebook.finishEditing();
+        if (!notebook.result?.rendering) { const result = await notebook.inspect(); notebook.result = result; notebook.emit('result'); }
+      } else await notebook.run(cellIndex(key));
+    }
+    function createCard(cell) {
+      const card = document.createElement('article'); card.className = 'cell'; card.dataset.key = cell.key; card.setAttribute('aria-roledescription','cell'); card.setAttribute('aria-describedby','navigation-help');
+      const gutter = button('', () => {}, 'Select cell'); gutter.className = 'gutter';
+      gutter.onclick = event => focusCell(cell.key, event.shiftKey);
+      const body = document.createElement('div'); body.className = 'cell-body';
+      const tools = document.createElement('div'); tools.className = 'cell-tools';
+      const menu = document.createElement('details'); menu.className = 'popover';
+      const summary = document.createElement('summary'); summary.textContent = '⋯'; summary.setAttribute('aria-label','Cell actions'); summary.title = 'Cell actions';
+      const menuPanel = document.createElement('div'); menuPanel.className = 'menu-panel';
+      const label = document.createElement('span'); label.className = 'cell-label';
+      const kindLabel = document.createElement('label'); kindLabel.textContent = 'Cell type';
+      const kind = document.createElement('select'); kind.className = 'cell-kind';
+      for (const [value, text] of [['code','Code'],['markdown','Markdown']]) { const option = document.createElement('option'); option.value = value; option.textContent = text; kind.append(option); }
+      kindLabel.append(kind);
+      const index = () => cellIndex(cell.key);
+      kind.onchange = () => { notebook.change(s => { s.cells[index()].kind = kind.value; s.cells[index()].outputs = []; s.cells[index()].collapsed = false; }); editCell(cell.key); };
+      const run = button('▷', () => runCell(cell.key), 'Run cell'); run.title = 'Run cell · ⌘ / Ctrl Enter';
+      const up = button('Move up', () => moveCells(actionKeys(cell.key), -1), 'Move cell up');
+      const down = button('Move down', () => moveCells(actionKeys(cell.key), 1), 'Move cell down');
+      const collapse = button('Collapse source', () => collapseCells(actionKeys(cell.key)), 'Collapse cell');
+      const merge = button('Merge with next', () => mergeCells(actionKeys(cell.key)));
+      const remove = button('Delete cell', () => removeCells([cell.key])); remove.className = 'danger';
+      menuPanel.append(label, kindLabel, button('Dependencies & timing',()=>showDependencies(index())), button('Split at cursor',()=>splitCell(cell.key)), merge, up, down, collapse, remove); menu.append(summary, menuPanel); tools.append(run, menu);
+      // Copies keep cell keys, so two panels can hold equal keys: prefix the id.
+      const results = document.createElement('div'); results.className = 'cell-result'; results.id = `${prefix}result-${cell.key}`; results.setAttribute('aria-live','polite');
+      const editor = new CellEditor(body,{
+        source:cell.source,kind:cell.kind,positions:cell.editorSelection,highlighter,
+        symbol:position=>symbolAt(notebook.result,index(),position),
+        completions:prefix=>completionOptions(notebook.result ?? notebook.lastChecked,prefix),
+        onRename:position=>openRename(index(),position),
+        onFocus:()=>{ selection.select(cell.key); selection.mode='text'; selectionActive=true; renderSelection(); },
+        onChange:(value,isComposing,positions)=>notebook.editCell(index(),value,isComposing || composing,positions),
+        onSelection:positions=>{ if(index()>=0) notebook.state.cells[index()].editorSelection=positions; notebook.group=null; },
+        onComposition:value=>{ composing=value; if(value) clearTimeout(notebook.timer); else notebook.schedule(); },
+        adjacent:(forward,goal)=>{
+          const next=selection.keys[selection.keys.indexOf(cell.key)+(forward?1:-1)];
+          if(!next) return false;
+          editCell(next); cards.get(next)?.editor.enter(forward,goal); return true;
+        },
+      });
+      const preview = document.createElement('div'); preview.className = 'cell-preview'; preview.title = 'Click to edit Markdown';
+      preview.onclick = event => {
+        if (event.target.closest('a,button') || window.getSelection()?.toString()) return;
+        if (event.shiftKey) focusCell(cell.key, true); else editCell(cell.key);
+      };
+      const expand = button('Collapsed cell · click to edit', () => editCell(cell.key)); expand.className = 'expand-cell';
+      const meta = document.createElement('div'); meta.className = 'cell-meta';
+      card.onfocus = () => { if (selection.focus !== cell.key || selection.mode !== 'cells') { selection.select(cell.key); selectionActive = true; renderSelection(); } };
+      card.onclick = event => { if (event.target === card || event.target === body) focusCell(cell.key, event.shiftKey); };
+      body.append(expand, preview, meta, results); card.append(gutter, body, tools);
+      const view = { card, gutter, editor, kind, label, run, up, down, collapse, merge, preview, expand, results, meta, previewSource:null, observations:{}, outputBlocks:{} };
+      cards.set(cell.key, view); return view;
+    }
+    function renderCells() {
+      const focused = document.activeElement;
+      const focusedEditor = editorFor(focused);
+      if (documentId !== notebook.state.id) { documentId = notebook.state.id; selection.anchor = selection.focus = null; selectionActive = false; selection.mode = 'cells'; for (const view of cards.values()) clearObservations(view, renderObservation); }
+      const cells = editable(); selection.reconcile(cells.map(c => c.key));
+      const current = new Set(selection.keys);
+      for (const [key, view] of cards) if (!current.has(key)) { view.editor.destroy(); view.card.remove(); cards.delete(key); }
+      const list = part('cells');
+      list.querySelectorAll('.insertion').forEach(n => n.remove());
+      let prior = null;
+      for (const [position, cell] of cells.entries()) {
+        const view = cards.get(cell.key) ?? createCard(cell);
+        if (prior ? prior.nextElementSibling !== view.card : list.firstElementChild !== view.card) list.insertBefore(view.card, prior ? prior.nextSibling : list.firstChild);
+        prior = view.card;
+        view.gutter.textContent = String(position + 1).padStart(2, '0'); view.gutter.setAttribute('aria-label',`Select cell ${position + 1}`); view.kind.value = cell.kind;
+        view.kind.setAttribute('aria-label', `Cell ${position + 1} kind`); view.editor.setLabel(`Cell ${position + 1} source`,view.results.id);
+        view.editor.sync(cell.source,cell.kind,cell.editorSelection);
+        view.run.setAttribute('aria-label', cell.kind === 'markdown' ? 'Render Markdown cell' : 'Run cell');
+      }
+      cells.forEach((cell, i) => list.insertBefore(insertion(i), cards.get(cell.key).card));
+      list.append(insertion(cells.length));
+      renderSelection(); renderResults();
+      if (focused.isConnected && document.activeElement !== focused && !focusedEditor?.dom.hidden) focused.focus({preventScroll:true});
+    }
+    function showDependencies(index) {
+      closeMenus();
+      const result=notebook.result, cell=result?.model?.cells[index];
+      const roots=[cell?.output,...(cell?.expectations ?? [])].filter(Boolean);
+      const items=result?.plan?.explanations?.filter(e=>roots.includes(e.root)) ?? [];
+      const content=$('dependencies-content'); content.replaceChildren();
+      if (!items.length) content.textContent='Run or check the notebook to inspect this cell’s dependencies.';
+      else {
+        for(const item of items) {
+          const label=item.root===cell.output?'Output':`Test ${cell.expectations.indexOf(item.root)+1}`;
+          const reason=document.createElement('p'); reason.textContent=`${label}: ${item.reason}`;
+          const nodes=[...result.graph.definitions,...(result.graph.types ?? [])];
+          const deps=document.createElement('pre'); deps.textContent=item.dependencies.map(name=>`${name}: ${(nodes.find(d=>d.name===name)?.dependencies ?? []).join(', ') || 'no notebook dependencies'}`).join('\n');
+          content.append(reason,deps);
+        }
+        const time=document.createElement('p');
+        const stats=engineStats(result);
+        time.textContent=`Last request: ${Math.round(stats.workerMs ?? 0)} ms in the worker · ${stats.evaluated} evaluations · ${stats.reused} reused.`;
+        content.append(time);
+        if (result.graph?.scope==='module') {const note=document.createElement('p');note.textContent='The compiler could not fully resolve this document’s dependencies, so any change re-runs every cell.';content.append(note);}
+      }
+      $('dependencies-dialog').showModal();
+    }
+    function openRename(index,position) {
+      if (notebook.state.cells[index]?.kind!=='code') return;
+      const d=symbolAt(notebook.result,index,position);
+      if (!d) {notice('Run or check, then place the cursor on a top-level name to rename it.');return;}
+      $('rename-name').value=d.name; $('rename-error').textContent='';
+      $('rename-apply').onclick=()=>perform(async()=>{
+        try {await notebook.rename(index,position,$('rename-name').value);$('rename-dialog').close();editCell(notebook.state.cells[index].key);}
+        catch(error){$('rename-error').textContent=error.message;}
+      });
+      $('rename-dialog').showModal();$('rename-name').select();
+    }
+    function renderResults() {
+      const result = notebook.result;
+      const showDiagnostics = !notebook.diagnosticsDeferred;
+      const diagnostics = part('document-diagnostics');
+      diagnostics.replaceChildren();
+      for (const view of cards.values()) {
+        for (const child of [...view.results.children]) if (!Object.values(view.outputBlocks).includes(child)) child.remove();
+        view.meta.textContent = '';
+      }
+      const cellAt = index => cards.get(notebook.state.cells[index]?.key);
+      if (result?.rendering) for (const item of result.rendering) {
+        const view = cellAt(item.cell); if (!view) continue;
+        view.preview.replaceChildren(renderMarkdown(item.events)); view.previewSource = notebook.state.cells[item.cell].source;
+      }
+      for (const cell of editable()) {
+        const view = cards.get(cell.key);
+        if (cell.kind === 'markdown' && view.previewSource !== cell.source) {
+          const fallback = document.createElement('div'); fallback.className = 'markdown-fallback'; fallback.textContent = cell.source;
+          view.preview.replaceChildren(...(cell.source ? [fallback] : [])); view.previewSource = cell.source;
+        }
+      }
+      const failures = showDiagnostics ? result?.model?.diagnostics ?? [] : [];
+      const diagnosticTexts = new Set();
+      for (const d of failures) {
+        const view = notebook.state.mode === 'notebook' ? cellAt(d.cell) : null;
+        const place = d.location ? ` · ${d.scope === 'cell' ? 'line ' : 'source '}${d.location.line}:${d.location.column}` : '';
+        const block = outputBlock(`${d.severity}: ${d.code}${place}`, d.message, 'diagnostic');
+        if(d.location && (view || notebook.state.mode==='source')) {
+          block.querySelector('.result-heading').append(button('Go to source',()=>{if(view) editCell(notebook.state.cells[d.cell].key);(view?.editor??sourceEditor).goTo(d.location.line,d.location.column,true);}));
+        }
+        (view?.results ?? diagnostics).append(block); diagnosticTexts.add(d.message);
+      }
+      for (const d of showDiagnostics ? result?.evaluation?.diagnostics ?? [] : []) if (!diagnosticTexts.has(d.message)) diagnostics.append(outputBlock(d.title ?? d.severity, d.message, 'diagnostic'));
+      if (showDiagnostics && result?.status !== 'partial' && (result?.failure || result?.evaluation?.failure)) diagnostics.append(outputBlock('Run failed', result.failure ?? result.evaluation.failure, 'diagnostic'));
+      const transcript = showDiagnostics || result?.status === 'ok' ? result?.evaluation?.events ?? [] : [];
+      for (const [index, cell] of notebook.state.cells.entries()) {
+        const view = cellAt(index); if (!view) continue;
+        const analyzed = result?.model?.cells?.[index];
+        const inferredId = analyzed?.id && !/(?:^|\s)id=/.test(cell.attributes) ? `id=${analyzed.id}` : '';
+        view.label.textContent = [`Cell ${selection.keys.indexOf(cell.key) + 1}`, inferredId, cell.attributes].filter(Boolean).join(' · ');
+        if (cell.kind === 'code') {
+          const root = analyzed?.output;
+          const value = result?.graph || result?.status === 'ok' ? result?.evaluation?.values?.find(v => v.root === root) : null;
+          const evaluated = (result?.graph || result?.status === 'ok') && ['ok','partial'].includes(result?.evaluation?.status) && Array.isArray(result.evaluation.values);
+          const removedOutput = evaluated && !root;
+          const type = value && result.evaluation.definitions?.find(d => d.name === root)?.type;
+          const displayed = value ? { heading:`Result${type ? ` · ${type}` : ''}`, text:value.text, display:value.display } : removedOutput ? null : view.observations.value;
+          renderObservation(view, 'value', displayed, !value);
+          if (!displayed && showDiagnostics) view.meta.textContent = result?.status === 'diagnostic' ? 'Blocked by document diagnostics' : '';
+          const error = result?.evaluation?.root_errors?.find(e=>e.root===root);
+          if (error && showDiagnostics) view.results.append(outputBlock('Output failed',error.failure ?? error.status,'diagnostic'));
+          const tests = result?.evaluation?.tests?.filter(t=>t.cell===index) ?? [];
+          const testFailures=tests.filter(t=>!t.passed);
+          const testLocation=test=>{
+            const at=test.scope==='source'?test.start-analyzed.body_start:test.start;
+            if(at==null) return null;
+            const prefix=new TextDecoder().decode(new TextEncoder().encode(cell.source).subarray(0,Math.max(0,at)));
+            const lines=prefix.split('\n');return {line:lines.length,column:new TextEncoder().encode(lines.at(-1)).length+1};
+          };
+          const testContent=tests.length ? {
+            heading:testFailures.length ? `Tests · ${testFailures.length} failed, ${tests.length-testFailures.length} passed` : `Tests · ${tests.length} passed`,
+            text:tests.map(t=>{const at=testLocation(t);return `${t.passed?'PASS':'FAIL'}${at?` · line ${at.line}:${at.column}`:''}: ${t.message}`;}).join('\n'),
+          } : evaluated ? null : view.observations.tests;
+          renderObservation(view, 'tests', testContent, !tests.length);
+          view.outputBlocks.tests?.classList.toggle('diagnostic', testFailures.length>0);
+          if (tests.length && view.outputBlocks.tests) {
+            const heading=view.outputBlocks.tests.querySelector('.result-heading');
+            const target=testFailures[0] ?? tests[0];
+            const at=testLocation(target);if(at) heading.append(button('Go to source',()=>{editCell(cell.key);view.editor.goTo(at.line,at.column,true);}));
+          }
+          const events = transcript.filter(e => e.cell === index);
+          const debug = events.length ? { heading:!error && ['ok','partial'].includes(result.status) ? 'Debug · current result' : 'Debug · failed run', text:events.map(e => `${e.kind === 'dbg' ? 'dbg' : e.kind}: ${e.message}`).join('\n') }
+            : value || removedOutput ? null : view.observations.debug;
+          renderObservation(view, 'debug', debug, !events.length);
+          const imported=notebook.state.savedResults?.snapshots?.filter(s=>s.cell===index)??[];
+          if(!displayed) for(const saved of imported) view.results.append(outputBlock('Imported result · unverified',saved.text,'unverified',saved.display));
+          const importedDebug=notebook.state.savedResults?.events?.filter(e=>e.cell===index)??[];
+          if(!debug && !notebook.result?.evaluation && importedDebug.length) view.results.append(outputBlock('Imported debug · unverified',importedDebug.map(e=>`${e.kind}: ${e.message}`).join('\n'),'unverified'));
+          const snapshots = analyzed?.outputs ?? cell.outputs;
+          if (!displayed && snapshots?.length) view.results.append(outputBlock('Saved snapshot · unverified', snapshots.map(o => o.source).join('\n'), 'unverified'));
+        } else clearObservations(view, renderObservation);
+      }
+      const unassigned = transcript.filter(e => e.cell == null);
+      if (unassigned.length) diagnostics.append(outputBlock('Notebook debug', unassigned.map(e => e.message).join('\n'), 'debug'));
+      if (notebook.state.mode === 'source' && result?.evaluation?.tests?.length) diagnostics.append(outputBlock('Tests',result.evaluation.tests.map(t=>`${t.passed?'PASS':'FAIL'}${t.location?` · source ${t.location.line}:${t.location.column}`:''}: ${t.message}`).join('\n'),result.evaluation.tests.some(t=>!t.passed)?'diagnostic':''));
+      if (notebook.state.mode === 'source' && result?.status === 'ok' && result?.evaluation?.values?.length) diagnostics.append(outputBlock('Current results', result.evaluation.values.map(v => `${v.root}: ${v.text}`).join('\n')));
+    }
+    function reflect(reason) {
+      if (!notebook?.state) return;
+      const s = notebook.state;
+      if (part('title').value !== s.title) part('title').value = s.title;
+      part('auto').checked = s.autoRun;
+      // Run and Stop swap in one slot while the current operation is active,
+      // and focus follows the control it was on.
+      const focused = document.activeElement, busy = notebook.busy;
+      part('run').hidden = busy; part('stop').hidden = !busy;
+      if (busy && focused === part('run')) part('stop').focus({preventScroll:true});
+      else if (!busy && focused === part('stop')) part('run').focus({preventScroll:true});
+      const status = notebook.diagnosticsDeferred && /^(Needs attention|Run failed · no current results)/.test(notebook.status) ? 'Editing · results pending' : notebook.status;
+      part('status').textContent = status; part('status').className = /failed|attention|conflict/i.test(status) ? 'error' : '';
+      // Engine details describe the panel's last completed response.
+      if (notebook.result?.workerMs != null) panel.lastResponse = notebook.result;
+      part('engine-status').hidden = !panel.preferences.engineDetails; part('engine-status').textContent = engineDetails(panel.lastResponse);
+      part('save-status').textContent = notebook.saveStatus; part('save-status').title = notebook.saveStatus; part('save-status').className = /^Not saved|unavailable/.test(notebook.saveStatus) ? 'error' : '';
+      part('notebook').hidden = s.mode !== 'notebook'; part('source-pane').hidden = s.mode !== 'source';
+      part('app-header').hidden = s.mode !== 'notebook';
+      const preamble=s.preamble ?? '';headerEditor.sync(preamble,'code',s.headerSelection);
+      if(s.mode==='notebook' && headerDocumentId!==s.id) {
+        headerDocumentId=s.id;part('app-header').open=s.headerExpanded ?? false;
+      }
+      if (s.mode === 'source') sourceEditor.sync(s.source,s.format==='roc'?'code':'markdown',s.editorSelection);
+      // Raw edits can change cell boundaries; do not attach retained observations to
+      // newly parsed cells merely because they occupy the same source positions.
+      if (reason === 'edit' && s.mode === 'source') for (const view of cards.values()) clearObservations(view, renderObservation);
+      if (reason === 'document') renderCells();
+      renderSelection();
+      if (reason === 'result' || reason === 'edit' || reason === 'diagnostics') renderResults();
+      if (!notebook.result && reason === 'status') renderResults();
+      if(!part('find-bar').hidden && searchSnapshot!==searchIdentity()){searchMatches=[];searchStatus('Searching…');clearTimeout(searchRefresh);searchRefresh=setTimeout(()=>updateFind(),120);}
+    }
+    const sourceEditor=new CellEditor(part('source'),{highlighter,
+      label:'Roclet notebook source',onChange:(value,isComposing,positions)=>notebook.editSource(value,isComposing || composing,positions),
+      onSelection:positions=>{if(notebook?.state) {notebook.state.editorSelection=positions;notebook.group=null;}},
+      onComposition:value=>{composing=value;if(value) clearTimeout(notebook.timer);else notebook.schedule();},
+    });
+    const headerEditor=new CellEditor(part('app-header-source'),{highlighter,label:'Roc app header',
+      onChange:(value,isComposing,positions)=>notebook.editPreamble(value,isComposing || composing,positions),
+      onFocus:()=>{notebook.finishEditing();selectionActive=false;renderSelection();},
+      onSelection:positions=>{if(notebook?.state){notebook.state.headerSelection=positions;notebook.group=null;}},
+      onComposition:value=>{composing=value;if(value)clearTimeout(notebook.timer);else notebook.schedule();},
+    });
+    this.sourceEditor = sourceEditor; this.headerEditor = headerEditor;
+
+    // Panel-scoped listeners. focusout and clipboard events bubble to the root;
+    // keydown is capture-phase on the root so it runs before CodeMirror's own
+    // handlers for targets inside this panel, after the page-level handler.
+    root.addEventListener('focusin', () => onActivate(panel));
+    root.addEventListener('pointerdown', () => onActivate(panel));
+    root.addEventListener('focusout', event => {
+      const editor = editorFor(event.target); if (!editor || !notebook.state) return;
+      const { id, revision } = notebook.state;
+      queueMicrotask(() => {
+        // Ignore editor-internal focus changes, DOM moves and old blur events
+        // delivered after another cell has already been edited.
+        if (notebook.state.id !== id || notebook.state.revision !== revision || !editor.dom.isConnected || editor.dom.contains(document.activeElement)) return;
+        notebook.finishEditing();
+        if (selection.mode === 'text' && cards.get(selection.focus)?.editor === editor && notebook.state.cells[cellIndex(selection.focus)]?.kind === 'code' && notebook.state.cells[cellIndex(selection.focus)]?.collapsed) {
+          selection.mode = 'cells';
+          renderSelection();
+        }
+      });
+    });
+    part('title').oninput = () => notebook.change(s => { s.title = part('title').value; }, {group:'title',source:notebook.state.sourceCurrent,reason:'edit'});
+    part('run').onclick = () => perform(() => notebook.run()); part('stop').onclick = () => notebook.stop();
+    part('auto').onchange = () => notebook.setAuto(part('auto').checked);
+    part('app-header').ontoggle=()=>{
+      if(!notebook?.state || notebook.state.mode!=='notebook')return;
+      notebook.state.headerExpanded=part('app-header').open;void notebook.persist();
+      if(part('app-header').open)headerEditor.view.requestMeasure();
+    };
+    part('back-notebook').onclick = () => this.setMode('notebook');
+    for(const id of ['find-query','replace-query','find-case','find-regex'])part(id).oninput=()=>updateFind();
+    part('find-close').onclick=closeFind;part('find-prev').onclick=()=>stepFind(-1);part('find-next').onclick=()=>stepFind(1);
+    part('replace-next').onclick=()=>replaceFind(false);part('replace-all').onclick=()=>replaceFind(true);
+    root.addEventListener('keydown', event => {
+      if (!notebook.state || panel.loading || event.defaultPrevented || event.isComposing || composing || event.keyCode === 229 || document.querySelector('dialog[open]')) return;
+      const mod = event.metaKey || event.ctrlKey, key = event.key.toLowerCase();
+      if(!part('find-bar').hidden && event.key==='Escape'){event.preventDefault();event.stopPropagation();closeFind();return;}
+      if(part('find-bar').contains(event.target)&&event.key==='Enter'){event.preventDefault();event.stopPropagation();stepFind(event.shiftKey?-1:1);return;}
+
+      const target = event.target, card = target.closest?.('.cell');
+      const menu = target.closest?.('details[open]');
+      const inNotebook = notebook.state.mode === 'notebook' && part('notebook').contains(target);
+      if(event.key==='Escape' && target.closest?.('.cm-search')) return;
+      if (event.key === 'Escape' && editorFor(target) === sourceEditor) { event.preventDefault(); event.stopPropagation(); notebook.finishEditing(); sourceEditor.element.blur(); return; }
+      if (event.key === 'Escape' && editorFor(target)?.closeCompletion()) {event.preventDefault();event.stopPropagation();return;}
+      if (event.key === 'Escape' && inNotebook) { event.preventDefault(); event.stopPropagation(); focusCell(card?.dataset.key ?? selection.focus); return; }
+      // Title, selects and menus retain native editing/navigation behavior.
+      const editor = !!editorFor(target);
+      if (mod && key === 'z' && (editor || (inNotebook && selection.mode === 'cells'))) {
+        event.preventDefault(); event.stopPropagation(); const wasCells = selection.mode === 'cells'; notebook.undo(event.shiftKey, { editing: editor });
+        if (wasCells && inNotebook) focusCell(selection.focus); return;
+      }
+      if(editorFor(target)===headerEditor && mod && event.key==='Enter') {event.preventDefault();event.stopPropagation();void perform(()=>notebook.run());return;}
+      if (!inNotebook || menu || target.closest?.('button,summary,select')) return;
+      if(mod && event.shiftKey && (key==='-' || key==='_') && card) {event.preventDefault();event.stopPropagation();void perform(()=>splitCell(card.dataset.key));return;}
+      if (event.key === 'Enter' && (mod || event.shiftKey || event.altKey) && card) {
+        event.preventDefault(); event.stopPropagation(); void perform(() => runCell(card.dataset.key, event.shiftKey && !mod, event.altKey && !mod)); return;
+      }
+      if (textTarget(target) || selection.mode !== 'cells') return;
+      if (mod && key === 'a') { event.preventDefault(); event.stopPropagation(); selection.all(); selectionActive = true; renderSelection(); cards.get(selection.focus)?.card.focus(); return; }
+      if (mod || event.altKey) return;
+      if(event.shiftKey && key==='m') {event.preventDefault();event.stopPropagation();void perform(()=>mergeCells(selection.selected));return;}
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        event.preventDefault(); event.stopPropagation(); selection.move(event.key === 'ArrowUp' ? -1 : 1, event.shiftKey); focusCell(selection.focus, true);
+      } else if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); editCell(selection.focus); }
+      else if (!event.shiftKey && (key === 'a' || key === 'b')) { event.preventDefault(); event.stopPropagation(); void perform(() => insertAtSelection(key === 'b')); }
+      else if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); event.stopPropagation(); removeCells(selection.selected); }
+      else if (event.key === '?') { event.preventDefault(); event.stopPropagation(); showHelp(); }
+    }, true);
+    const ownsClipboard = event => !panel.loading && notebook.state?.mode === 'notebook' && selection.mode === 'cells' && part('notebook').contains(event.target) && !textTarget(event.target) && !event.target.closest?.('details,button,a');
+    for (const action of ['copy','cut']) root.addEventListener(action, event => {
+      if (!ownsClipboard(event) || !selection.selected.length || !event.clipboardData || window.getSelection()?.toString()) return;
+      const keys = selection.selected, cells = editable().filter(c => keys.includes(c.key)), encoded = encodeCells(cells);
+      try {
+        // A plain-text envelope also preserves boundaries in browsers that strip custom MIME data.
+        event.clipboardData.setData('text/plain', encoded);
+        try { event.clipboardData.setData(cellMime, encoded); } catch { /* text/plain is sufficient */ }
+        event.preventDefault(); event.stopPropagation(); if (action === 'cut') removeCells(keys);
+        part('selection-status').textContent = `${cells.length} cell${cells.length === 1 ? '' : 's'} ${action === 'cut' ? 'cut' : 'copied'}`;
+      } catch { notice('The clipboard could not be written. The cells were kept.'); }
+    });
+    root.addEventListener('paste', event => {
+      if (!ownsClipboard(event) || !event.clipboardData) return;
+      const structured = event.clipboardData.getData(cellMime), text = structured || event.clipboardData.getData('text/plain');
+      if (!text) return;
+      event.preventDefault(); event.stopPropagation(); void perform(() => {
+        const additions = decodeCells(text, !!structured); if (!additions.length) return;
+        insertCells(selection.keys.indexOf(selection.selected.at(-1)) + 1, additions);
+      });
+    });
+
+    // Commands for the page header, which routes them to the active panel.
+    this.render = reflect;
+    this.focusSelection = () => { if (notebook.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); };
+    this.editSelection = () => editCell(selection.focus);
+    this.find = findNotebook;
+    this.undo = redo => { notebook.undo(redo); this.focusSelection(); };
+    this.setMode = mode => perform(async () => {
+      await notebook.mode(mode);
+      if (mode === 'source') sourceEditor.focus(); else if (notebook.state.mode === 'notebook') focusCell(selection.focus);
+    });
+    // Parse and render the panel's first document, including its equations,
+    // before showing it. Only then may automatic evaluation (and so external
+    // package downloads) start. A panel without a document is shown as is.
+    this.reveal = async ({ schedule = true } = {}) => {
+      if (!panel.loading) return;
+      try {
+        if (notebook.state) {
+          const parsed = notebook.result?.model ? notebook.result : await notebook.inspect('parse');
+          if (notebook.state.sourceCurrent && notebook.state.mode === 'notebook') {
+            notebook.state.cells = cellsFrom(parsed, notebook.state.cells);
+            notebook.state.preamble = parsed.model.preamble; notebook.state.metadata = parsed.model.metadata;
+          }
+          notebook.publish(parsed); reflect('document'); reflect('result');
+          if (root.querySelector('.roclet-math')) {
+            await settleMathStyles();
+            // KaTeX embeds its fonts, but their decoding can still change the
+            // initial equation layout.
+            root.getBoundingClientRect(); await document.fonts.ready;
+          }
+          sourceEditor.view.requestMeasure(); headerEditor.view.requestMeasure();
+          for (const view of cards.values()) view.editor.view.requestMeasure();
+          await new Promise(requestAnimationFrame);
+        }
+      } finally {
+        root.inert = false; root.dataset.loading = 'false';
+        if (schedule) notebook.resumeScheduling();
+      }
+    };
+    this.disposeEditors = () => { searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++; sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) view.editor.destroy(); };
+  }
+  get title() { return this.notebook.state?.title || 'Untitled'; }
+  get loading() { return this.root.dataset.loading === 'true'; }
+  // Labels and live regions set by the workbench. Background panels do not
+  // announce their status; the active one does.
+  present({ label, titleLabel, active, two, mode }) {
+    const root = this.root;
+    root.setAttribute('aria-label', label); root.dataset.active = String(active); root.dataset.selected = String(!two || active);
+    if (mode === 'tabs') root.setAttribute('role', 'tabpanel'); else root.removeAttribute('role');
+    this.part('title-label').textContent = titleLabel;
+    this.part('close-panel').hidden = !two;
+    for (const name of ['status', 'save-status', 'selection-status']) this.part(name).setAttribute('aria-live', active || !two ? 'polite' : 'off');
+  }
+  focus() { if (this.notebook.state) this.focusSelection(); else this.part('title').focus(); }
+  dispose() { this.disposeEditors(); Notebook.prototype.dispose.call(this.notebook); }
+}

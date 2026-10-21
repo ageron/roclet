@@ -19,9 +19,9 @@ try {
     if(fixture.expect.events) assert.equal(result.evaluation.events.length,fixture.expect.events.length);
     report(fixture.name);
   }
-  const oversize=await session.request({cells:[{key:'large',source:'import Display\ngrow = |s, n| if n == 0 { s } else { grow(Str.concat(s, s), n - 1) }\nout_1 = Display.image("Too big", "image/png", grow("AAAA", 18))'}],roots:['out_1']});
-  assert(oversize.status==='ok',JSON.stringify(oversize));assert.match(oversize.values[0].text,/Image preview omitted/);assert.equal(oversize.values[0].display.kind,'text');
-  const custom=await session.request({cells:[{key:'custom',source:'import Display\nout_1 = Display.({text: "custom"})'}],roots:['out_1'],modules:[{name:'Display',content:'Display := { text : Str }'}]});assert.equal(custom.status,'ok');assert.equal(custom.values[0].display,undefined);
+  const oversize=await session.request({operation:'document',action:'evaluate',format:'roc',source:'import Display\ngrow = |s, n| if n == 0 { s } else { grow(Str.concat(s, s), n - 1) }\nout_1 = Display.image("Too big", "image/png", grow("AAAA", 18))'});
+  assert(oversize.status==='ok',JSON.stringify(oversize));assert.match(oversize.evaluation.values[0].text,/Image preview omitted/);assert.equal(oversize.evaluation.values[0].display.kind,'text');
+  const custom=await session.request({operation:'document',action:'evaluate',format:'roc',source:'import Display\nout_1 = Display.({text: "custom"})',modules:[{name:'Display',content:'Display := { text : Str }'}]});assert.equal(custom.status,'ok');assert.equal(custom.evaluation.values[0].display,undefined);
   report('oversized images return readable text; replacement modules cannot opt into trusted display decoding');
   const table={version:1,kind:'table',text:'Plain table',columns:['Exact','Label'],rows:Array.from({length:123},(_,i)=>['9007199254740993',`Row ${i+1}`]),row_count:123,column_count:2};
   const view=renderDisplay(table,table.text);document.body.append(view);assert.equal(view.querySelectorAll('tbody tr').length,50);assert.equal(view.querySelector('td').textContent,'9007199254740993');
