@@ -30,14 +30,16 @@ test('session mounts unchanged files once and remounts after worker restart',asy
   session.stop();
 });
 
-test('session omits only a confirmed compiler baseline graph from later requests',async()=>{
+test('session forwards reactivity untouched and never adds a baseline graph',async()=>{
   let worker;class Worker {constructor(){worker=this;} postMessage(data){this.sent=data;} terminate(){}}
-  const session=new DocumentSession(new ArrayBuffer(1),Worker),graph={context:'one',definitions:[]};
-  const first=session.request({source:'a'});worker.onmessage({data:{result:{status:'ok',workspaceCache:{hits:0},graph}}});await first;
-  const request={operation:'document',reactivity:{known:true,previous:graph,current:graph,available:['out_1']}};
-  const second=session.request(request);assert.deepEqual(worker.sent.request.reactivity,{known:true,available:['out_1']});worker.onmessage({data:{result:{status:'ok',workspaceCache:{hits:1},graph}}});await second;
-  const placeholder=session.request({...request,reactivity:{...request.reactivity,current:{context:'',scope:'module',definitions:[]}}});assert.deepEqual(worker.sent.request.reactivity,{known:true,available:['out_1']});worker.onmessage({data:{result:{status:'ok',workspaceCache:{hits:1},graph}}});await placeholder;
-  const different=session.request({...request,reactivity:{...request.reactivity,previous:{context:'different'}}});assert.equal(worker.sent.request.reactivity.previous.context,'different');worker.onmessage({data:{result:{status:'ok'}}});await different;session.stop();
+  const session=new DocumentSession(new ArrayBuffer(1),Worker),graph={context:'one',scope:'definitions',definitions:[]};
+  const send=async request=>{const result=session.request(request);const sent=worker.sent.request;worker.onmessage({data:{result:{status:'ok',workspaceCache:{hits:0},graph}}});await result;return sent;};
+  assert.deepEqual(await send({operation:'document',reactivity:{reset:true}}),{operation:'document',reactivity:{reset:true}});
+  assert.deepEqual(await send({operation:'document',reactivity:{}}),{operation:'document',reactivity:{}});
+  session.stop();
+  // A restarted worker receives the request unchanged; it simply has no baseline.
+  assert.deepEqual(await send({operation:'document',reactivity:{force:['out_1']}}),{operation:'document',reactivity:{force:['out_1']}});
+  session.stop();
 });
 
 test('real-worker boot shares a compiled module across restarts without copying compiler bytes',async()=>{

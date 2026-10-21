@@ -55,8 +55,43 @@ the document syntax model between internal compiler stages. The compiler receive
 source slices directly. Changed project files and binary compiler-cache entries
 use byte-oriented WASM entry points. Compact notebook responses omit unused
 intermediate syntax, duplicate source, and export encodings. Subsequent requests
-also omit the worker's already confirmed dependency graph.
+carry no dependency graph at all: the engine keeps the reactive baseline and
+returns complete results with `reused` flags.
 
+Inside the engine there is no JSON at all. The request is parsed once at the
+boundary and the response serialised once; the document layer reaches the
+retained revision through typed calls (`notebook.checkDocument` and
+`Checked.evaluate`) rather than re-entering the public entry point once for the
+check and once per output root, and the check/run/export script path calls
+`script.run` directly. The dependency analysis is computed once per revision
+and cached on it (`workspaceCache.analyses`); previously it ran N+2 times for N
+evaluated roots, each copy round-tripped through JSON. It builds the dependency
+graph (version 2) from checked data: parser-token fingerprints, value edges
+from the compiler's strict-demand relation united with name references, and
+nodes for local types and imported modules, so comments, annotations, type
+declarations and supplied-module edits invalidate only the roots that depend
+on them instead of every root.
+
+`tests/pipeline-benchmark.mjs` times one native `--bridge` document `evaluate`
+of generated notebooks (`a = 1`, one `out_i = a + i` per cell, a `dbg` in every
+tenth cell, one `expect`). Median of five runs, Zig self-hosted backend
+(`-Dllvm=false`, several times slower than release builds), same machine:
+
+| Code cells (roots) | Before | After |
+| --- | ---: | ---: |
+| 10 (9) | 51.0 ms | 56.0 ms |
+| 30 (29) | 134.2 ms | 92.4 ms |
+| 60 (59) | 377.1 ms | 179.7 ms |
+
+Every run is one frontend build, one lowering and one analysis. Small notebooks
+are dominated by fixed costs; the gap grows with the number of roots.
+
+Each worker owns one compiler engine instance. All mutable adapter state (the
+virtual filesystem, live compiler cache, retained revision, reactive baseline and
+request counters) belongs to that engine rather than to module globals, and
+observations are attributed through a request-scoped observer that carries its
+root. Native hosts and the in-process `zig build test-engine` suite can hold
+several engines in one process.
 The worker keeps its virtual filesystem and live compiler cache between edits.
 IndexedDB stores checked/canonicalized artifacts under the compiler identity and
 actual WASM digest, with entry checksums and a global 32 MiB/512-entry artifact
@@ -79,40 +114,55 @@ per worker. The normal WASM file retains function names; its companion
 
 ## Browser measurements
 
-Measured on 2026-10-19 with Chrome 153.0.8010.52 on Linux x86_64, AMD Ryzen 7
-9700X. Both engines used ReleaseFast. The profiling WASM retains DWARF symbols.
-The browser benchmark uses three warmup edits followed by 15 measured edits,
-verifies both output values after every edit, and waits for durable cache writes
-before completing each request. Builds and our other browser suites were idle
-during measurement; unrelated user workloads were still running on the host.
+Measured on 2026-10-20 with Chrome 153.0.8010.52 on Linux x86_64, AMD Ryzen 7
+9700X, against the ReleaseFast (LLVM) engine. The browser benchmark uses three
+warmup edits followed by 15 measured edits, verifies both output values after
+every edit, and waits for durable cache writes before completing each request.
+Unrelated user workloads were still running on the host.
 
-| Workload | Warm round trip, median | Worker request, median | Request / response bytes, median |
-| --- | ---: | ---: | ---: |
-| Wall Area source edit | 19.2 ms | 9.7 ms | 687 / 4,764 |
-| Imported Geometry implementation edit | 13.0 ms | 8.1 ms | 304 / 2,558 |
+| Workload | Warm round trip, median | Worker request, median | Request / response bytes, median | Worker linear memory, median |
+| --- | ---: | ---: | ---: | ---: |
+| Wall Area source edit | 13.2 ms | 9.1 ms | 614 / 5,132 | 65 MiB |
+| Imported Geometry implementation edit | 8.2 ms | 5.4 ms | 234 / 3,198 | 68 MiB |
 
-Every measured edit performed exactly one frontend build, one lowering, and two
-root executions. Wall Area transferred no project-file bytes. The module edit
-transferred only the changed Geometry source (84 bytes at the median); unchanged
-Materials source was not resent. Wall Area's original UI request was 1,502 bytes
-at the median; retaining the confirmed graph in the worker reduced the JSON sent
-to WASM to 687 bytes. These request/response byte counts exclude separate file
-and cache streams.
+Every measured edit performed exactly one frontend build, one lowering, one
+dependency analysis and two root executions, with no image buffer retries. The
+LIR images are about 5 KiB. Before the image buffer and the revision arena were
+separated, every retained revision reserved a fixed 512 MiB, so linear memory
+could not be below that. Requests carry no dependency graph: the engine owns the
+reactive baseline. The module edit transferred only the changed Geometry source
+(84 bytes); unchanged Materials source was not resent. Request/response byte
+counts exclude separate file and cache streams.
 
-First Wall Area request startup was 609.2 ms. First multi-module request startup
-was 388.6 ms. A restarted module worker took 202.3 ms and reported five compiler
-artifact hits with zero misses; its outputs matched the previous worker. Startup
-includes worker/runtime initialization and cache restoration and is separate
-from the warm-edit measurements. It excludes the page's earlier WASM download.
-`workerMs` times the worker's evaluation request, excluding the subsequent durable
-cache write; the round trip includes that write, transport, and scheduling.
+First Wall Area request startup was 480.6 ms and first multi-module request
+startup 290.7 ms. A restarted module worker took 216.3 ms, restored compiler
+artifacts from IndexedDB, and matched the previous worker's outputs. Startup
+includes worker/runtime initialization and cache restoration and excludes the
+page's WASM download. `workerMs` times the worker's evaluation request,
+excluding the subsequent durable cache write; the round trip includes that
+write, transport, and scheduling.
 
-That measured browser compiler was 25,063,956 bytes. Its SHA-256 is
-`0fd7ec11335d36f30f7b96bef14f1c0cf33d5e53f3ef6bf075e712d11e9e933f`.
-Run the benchmark with:
+The earlier 2026-10-19 measurement of the original pipeline was 19.2 ms / 9.7 ms
+(Wall Area) and 13.0 ms / 8.1 ms (module edit) on the same machine. These runs
+are not a controlled same-session comparison.
+
+`tests/pipeline-benchmark.mjs` times generated notebooks through the native
+ReleaseFast `--bridge` CLI (median of five cold processes). Each request performs
+one frontend build, one lowering and one analysis regardless of size:
+
+| Code cells (output roots) | Median | Response bytes |
+| ---: | ---: | ---: |
+| 10 (9) | 7.5 ms | 16,715 |
+| 30 (29) | 16.1 ms | 49,483 |
+| 60 (59) | 29.5 ms | 98,789 |
+
+The measured browser compiler is 25,144,618 bytes, SHA-256
+`276514f632236c9d24004c2111df825f6c4c71a63ea9cdbbbf0009f91fea96ec`.
+Run the benchmarks with:
 
 ```sh
 node tools/browser-check.mjs --page web/workspace-benchmark.html --timeout 180000
+node tests/pipeline-benchmark.mjs
 ```
 
 ## Notebook assertions
@@ -128,21 +178,29 @@ module/package test suites are not selected. See the
 
 The merged ReleaseFast native/WASM pair passes:
 
-- 146 native document contracts, 36 compiler cases, and 30 complete selective/full
-  evaluation responses.
-- 226 complete native/WASM document comparisons and 80 fresh-worker runs,
+- 170 native document contracts (one an `operation: "program"` run, one each
+  for `operation: "syntax"` and `"markdown"`) and 84 complete selective/full
+  evaluation responses across 28 recomputation workloads, with every recorded
+  request and response matching the wire shape pinned in
+  `tests/protocol-shape.json`.
+- 264 complete native/WASM document comparisons and 115 fresh-worker runs,
   including Unicode mappings, failure isolation, missing-module diagnostics,
-  checked runnable exports, and the upstream pinned Display package.
-- 46 Edit UI contracts at each desktop/compact width, 21 lifecycle contracts,
-  18 rich-output contracts, seven math contracts, 11 sharing/offline contracts,
-  and the workspace/cache/package suite.
+  checked runnable exports, and the upstream pinned Display package; the M4
+  responses replay in the same order through one worker, including the engine's
+  retained reactive baseline.
+- 56 Edit UI contracts at desktop, compact and 600 px widths, 20 side-by-side
+  contracts at wide, medium and tabbed widths, 10 startup contracts, the
+  lifecycle contracts, 18
+  rich-output contracts, seven math contracts, 11 sharing/offline contracts,
+  three ordinary-Roc demos in WASM, and the workspace/cache/package suite.
 - Desktop/compact top-level assertion and App header probes, including source
   links, dependency changes, selected-cell execution, undo, and persistence.
 - Real released roc-parser 2.0.0 with transitive Unicode 4.2.0, and roc-time 0.2.0,
-  through local and separate-origin archive proxy configurations.
-- Native unit/workspace checks, 11 Node unit contracts, 13 Node workspace tests,
-  five ordinary-Roc demo/fixture runs against an extracted Display package,
-  artifact verification, and packaging with 87 verified offline assets.
+  through the local archive proxy and through the static-host file picker, in one
+  panel and shared by two panels.
+- In-process engine tests, native unit/workspace checks, 44 Node tests,
+  `zig build check` (formatting, tidy rules, lints, dead files, module globals),
+  artifact verification, and packaging with 90 verified offline assets.
 
 The formatted calendar notebook evaluates six outputs and two assertions with
 one frontend build and one lowering, including fresh-worker restoration with
@@ -150,15 +208,56 @@ package networking disabled. Compiler artifacts and verified package archives
 have separate bounded eviction budgets, so compiler-cache churn does not discard
 package inputs. Screenshots were inspected at desktop and compact widths.
 
-The validated browser artifact is 25,097,937 bytes, SHA-256
-`cd92bdd279d304fecf80ed7cc6602923808a72fa5131df04fa521eb8fa1f2c7e`.
-The performance table above describes its explicitly identified earlier artifact;
-those timings were not remeasured after the package/assertion changes.
+The validated browser artifact is the one measured above.
 
 Workspace correctness tests use ReleaseSafe. The document suite also passes
-against the Debug engine. The expanded formatted roc-time notebook currently
-reports `OutOfMemory` with the Debug engine; native and browser ReleaseFast
-execution pass within the 512 MiB retained-revision arena.
+against the Debug engine. The expanded formatted roc-time notebook passes with
+the native Debug engine since checking and lowering moved out of the fixed
+512 MiB revision buffer into growable arenas; only its 461 KiB LIR image is
+flat (`compiler-adapter/README.md`).
+
+## Two notebooks side by side
+
+The editor can show two notebooks at once (`web/workbench.mjs`,
+`web/notebook-panel.mjs`). Each panel owns a `Notebook`, so it has its own
+notebook worker and therefore its own `Engine`, retained revision, reactive
+baseline and workspace files; it also saves through its own `DraftStore`
+instance. The panels share the syntax highlighter worker, one `PackagePrompts`
+coordinator for the page's package dialog, and the compiler `ArrayBuffer`, so
+every worker starts from one compiled `WebAssembly.Module`. The compiler
+artifact and package caches in IndexedDB are shared by design: a panel opened
+after another has run starts warm, and a worker that misses a package re-reads
+the persistent cache before downloading or prompting. Requests are unchanged;
+the side-by-side layout adds no protocol fields.
+
+`web/dual-conformance.html` exercises the engine changes with two engines alive:
+concurrent evaluation equal to each document alone, per-engine `workspaceCache`
+counters and retained revisions, reuse that ignores the other panel (including a
+comment edit and a type declaration), `reset` on a document switch, `dbg` and
+`expect` attribution, per-panel Stop, one shared package prompt, one module
+compilation, per-worker `memoryBytes` within 256 MiB each and 512 MiB together,
+per-panel project files, focus routing, concurrent saves, a per-panel loading
+state that defers evaluation until the panel's document is rendered, the
+one-panel-per-draft rule (also through **File → Open recent…**) and closing
+either panel, including a panel whose draft another tab changed: it stays open
+with **Download a copy** and **Close without saving** instead of refusing
+forever. A document switch away from such a draft offers the same choice. `tools/browser-dual-package-probe.mjs` repeats
+the package flow with the real file picker.
+
+```sh
+node tools/browser-check.mjs --page web/dual-conformance.html
+node tools/browser-check.mjs --page 'web/dual-conformance.html?medium'
+node tools/browser-check.mjs --page 'web/dual-conformance.html?compact'
+node tools/browser-check.mjs --page 'web/edit.html?example=meeting-windows&right=example:meeting-windows' \
+  --script tools/browser-dual-package-probe.mjs --upload-plan plan.json
+```
+
+The upload plan selects the roc-time 0.2.0 bundle once; add `--viewport 390x960`
+for the tabs layout.
+
+In the 2026-10-20 run both panels reported 74 and 66 MiB of worker linear memory,
+with no image retries, and every side-by-side contract and the two-panel package
+probe passed at each width.
 
 ## Package hosting
 

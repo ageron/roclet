@@ -33,7 +33,24 @@ pi * radius * radius
 ```
 
 Press **Cmd/Ctrl+Enter** to run a cell. **Esc** selects the cell; **Enter** edits it.
-With Auto-run enabled, changes update dependent results as you type.
+With Auto-run enabled, changes update dependent results as you type. Each
+notebook's title, Auto-run and Run all sit at its top; while it is saving,
+running or waiting for a package, Stop takes Run all's place without moving the
+bar. Its status and save state sit in a bar at its bottom. Roclet shows a
+loading screen until the notebook and its prose are ready; evaluation and
+package downloads start only then. **File → Open recent…** lists the drafts in
+this browser; **Help → Keyboard shortcuts** (or **?** with a cell selected)
+lists the keys.
+
+To work with two notebooks at once, choose **View → Open side by side…**. Each
+notebook gets its own column and its own compiler, so running or stopping one
+never disturbs the other; menu commands act on the notebook you last clicked,
+named at the top of each menu. Below 900px wide the two notebooks become tabs.
+A notebook can be open in only one column at a time; Roclet offers to switch to
+it or to open an independent copy instead. If another tab changed a draft, closing
+or switching away from it offers a download or to continue without saving. **View → Show engine details** adds
+the last run's worker time, evaluated and reused results, and memory to each
+status bar.
 
 Drafts are saved in your browser. **Download copies of work you want to keep**:
 browser storage is separate from files on your computer.

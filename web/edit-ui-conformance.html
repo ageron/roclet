@@ -2,7 +2,11 @@
 const frame = document.querySelector('iframe');
 if (new URL(location.href).searchParams.has('compact')) frame.style.width = '390px';
 const html = await fetch('./edit.html').then(r=>r.text());
-frame.srcdoc = html.replace('<script type="module">import { startNotebook } from "./edit.mjs"; await startNotebook();<'+ '/script>', '<script type="module" src="./edit-ui-conformance.mjs"><' + '/script>');
+const page = new DOMParser().parseFromString(html, 'text/html');
+const bootstrap = page.getElementById('notebook-bootstrap');
+if (!bootstrap) throw new Error('Notebook bootstrap was not found');
+bootstrap.textContent = ''; bootstrap.src = './edit-ui-conformance.mjs';
+frame.srcdoc = '<!doctype html>' + page.documentElement.outerHTML;
 window.addEventListener('message', event => {
   if (event.source !== frame.contentWindow || event.origin !== location.origin || !event.data?.rocletUiTest) return;
   document.getElementById('status').textContent = event.data.status;

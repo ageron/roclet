@@ -32,7 +32,7 @@ onmessage = async ({ data }) => {
     const result = packages?await packages.evaluate(transport,data.request):await transport(data.request);
     const workerMs=performance.now()-start;
     if(cache) {try {await cache.save(transport.takeCacheUpdates());} catch {await cache.clear();}}
-    postMessage({ result, workerMs, transportMetrics:{requestBytes:transport.lastRequestBytes,responseBytes:transport.lastResponseBytes,
+    postMessage({ result, workerMs, transportMetrics:{requestBytes:transport.lastRequestBytes,responseBytes:transport.lastResponseBytes,memoryBytes:transport.memoryBytes?.(),
       fileBytes:(data.workspace?.put??[]).reduce((n,file)=>n+new TextEncoder().encode(file.source).length,0)} });
   } catch (error) { postMessage({ error: error.stack ?? error.message, errorName:error.name }); }
 };

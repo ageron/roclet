@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os';
 
 const args=process.argv.slice(2),option=(key,fallback)=>{const i=args.indexOf(key);return i<0?fallback:args[i+1];};
 const root=resolve(import.meta.dirname,'..'),page=option('--page','web/workspace-conformance.html');
-const timeout=Number(option('--timeout','120000')),profile=await mkdtemp(resolve(tmpdir(),'roclet-browser-'));
+const timeout=Number(option('--timeout','120000')),startupTimeout=Number(option('--startup-timeout','60000')),profile=await mkdtemp(resolve(tmpdir(),'roclet-browser-'));
 const networkLog=option('--network-log',null),requests=new Map(),networkFailures=[];
 const packageEndpoint=option('--package-endpoint',null);
 const uploadPlanFile=option('--upload-plan',null),uploads=uploadPlanFile?JSON.parse(await readFile(uploadPlanFile,'utf8')):[];
@@ -27,17 +27,19 @@ const server=createServer(async(req,res)=>{
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const base=option('--base-url',`http://127.0.0.1:${server.address().port}`);
-const chrome=spawn(option('--chrome',process.env.CHROME_PATH??'google-chrome'),['--headless=new','--no-sandbox','--disable-gpu','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
+const chrome=spawn(option('--chrome',process.env.CHROME_PATH??'google-chrome'),['--headless=new','--no-sandbox','--disable-gpu','--no-first-run','--no-default-browser-check','--disable-dev-shm-usage','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:['ignore','ignore','pipe']});
 let startupError;chrome.on('error',error=>{startupError=error;});
 let stderr='';chrome.stderr.on('data',chunk=>{stderr+=chunk;});
 let socket;
 try {
+  // A cold first launch on a CI runner that has just finished a large build
+  // can take well over 15 seconds before DevToolsActivePort appears.
   const started=Date.now();let port;
   while(!port) {
     if(startupError)throw startupError;
     if(chrome.exitCode!=null)throw new Error(`Chrome exited: ${stderr}`);
     try {port=Number((await readFile(resolve(profile,'DevToolsActivePort'),'utf8')).split('\n')[0]);} catch {}
-    if(Date.now()-started>15000)throw new Error(`Chrome startup timed out: ${stderr}`);
+    if(Date.now()-started>startupTimeout)throw new Error(`Chrome startup timed out after ${startupTimeout}ms: ${stderr}`);
     if(!port)await sleep(100);
   }
   const pages=await fetch(`http://127.0.0.1:${port}/json/list`).then(r=>r.json());

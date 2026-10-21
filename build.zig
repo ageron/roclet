@@ -10,13 +10,22 @@ pub fn build(b: *std.Build) void {
     _ = b.option([]const u8, "roc-source", "Deprecated: use the roc path dependency in build.zig.zon");
     _ = b.option(u32, "compiler-jobs", "Deprecated: use zig build -j");
     const optimize = b.option(std.builtin.OptimizeMode, "optimize", "Optimization mode (default ReleaseFast)") orelse .fast;
+    // Zig's self-hosted backend builds the native adapter in seconds instead of
+    // minutes, but the result runs several times slower. Use -Dllvm=false for
+    // local iteration; release artifacts and CI keep the default (LLVM).
+    const use_llvm = b.option(bool, "llvm", "Use LLVM for the native and WASM adapters (default: Zig's choice, LLVM for release modes)");
     const compiler_max_rss = b.option(u64, "compiler-max-rss", "Estimated peak bytes per compiler build for memory-aware scheduling") orelse 0;
     const roc = b.dependency("roc", .{ .target = b.graph.host, .optimize = optimize });
-    const native = adapter(b, roc, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
+    const option_values = b.addOptions();
+    option_values.addOption(?u64, "image_initial_bytes", b.option(u64, "image-initial-bytes", "First LIR image buffer size, a power of two (default 1 MiB WASM, 64 MiB native)"));
+    const options = option_values.createModule();
+    const native = adapter(b, roc, options, b.graph.host, optimize, "roclet-native", "compiler-adapter/native.zig");
+    native.use_llvm = use_llvm;
     native.step.max_rss = compiler_max_rss;
     b.step("native-adapter", "Build only the native engine").dependOn(&native.step);
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
-    const wasm = adapter(b, roc, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
+    const wasm = adapter(b, roc, options, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
+    wasm.use_llvm = use_llvm;
     wasm.step.max_rss = compiler_max_rss;
     b.step("wasm-adapter", "Build only the browser engine").dependOn(&wasm.step);
     wasm.entry = .disabled;
@@ -88,29 +97,28 @@ pub fn build(b: *std.Build) void {
     fixture_run.setCwd(b.path("."));
     fixture_run.has_side_effects = true;
     b.step("package-fixture", "Write a verified local package for browser integration tests").dependOn(&fixture_run.step);
-    const unit_step = b.step("test-unit", "Test the snapshot protocol and host utilities");
-    inline for (.{ "compiler-adapter/snapshot.zig", "compiler-adapter/document.zig", "tools/build-tool.zig", "tools/serve.zig", "tools/package-proxy.zig" }) |file| {
+    const unit_step = b.step("test-unit", "Test the document layer and host utilities");
+    inline for (.{ "tools/build-tool.zig", "tools/serve.zig", "tools/package-proxy.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
     }
-    const test_exe = b.addExecutable(.{ .name = "roclet-conformance", .root_module = b.createModule(.{
-        .root_source_file = b.path("tests/native.zig"),
-        .target = b.graph.host,
-        .optimize = .small,
-    }) });
-    const native_tests = b.addRunArtifact(test_exe);
-    native_tests.addArg(root);
-    native_tests.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
-    native_tests.has_side_effects = true;
-    native_tests.step.dependOn(&cli.step);
-    // Parity reports include the manifest for the exact native/WASM pair.
-    // Installing the native runner alone does not publish that manifest.
-    native_tests.step.dependOn(ready);
+    // In-process tests embed the whole compiler. An LLVM build of each peaks near
+    // 13 GiB, so on x86_64 they default to the self-hosted backend (about 3 GiB,
+    // under a minute); the shipped engines keep LLVM and the parity suites test them.
+    const test_llvm = b.option(bool, "test-llvm", "Use LLVM for in-process compiler tests (default: self-hosted on x86_64)") orelse
+        if (b.graph.host.result.cpu.arch == .x86_64) false else use_llvm;
+    const test_max_rss = if (test_llvm orelse true) compiler_max_rss else 0;
+    const image_tests = b.addTest(.{ .use_llvm = test_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/image.zig") });
+    image_tests.step.max_rss = test_max_rss;
+    unit_step.dependOn(&b.addRunArtifact(image_tests).step);
+    // The document layer calls the engine's typed API.
+    const document_unit_tests = b.addTest(.{ .use_llvm = test_llvm, .root_module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/document.zig") });
+    document_unit_tests.step.max_rss = test_max_rss;
+    unit_step.dependOn(&b.addRunArtifact(document_unit_tests).step);
     const test_step = b.step("test", "Run native conformance and unit tests; generate browser parity cases");
     test_step.dependOn(unit_step);
     test_step.dependOn(&workspace_run.step);
     test_step.dependOn(&fixture_run.step);
-    test_step.dependOn(&native_tests.step);
     const document_tests = b.addExecutable(.{ .name = "roclet-document-tests", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/documents.zig"),
         .target = b.graph.host,
@@ -120,9 +128,9 @@ pub fn build(b: *std.Build) void {
     documents.addArg(root);
     documents.addFileArg(.{ .relative = .{ .base = .install_bin, .sub_path = "roclet" } });
     documents.step.dependOn(&cli.step);
+    // Parity cases record the manifest for this exact native/WASM pair.
     documents.step.dependOn(ready);
     documents.has_side_effects = true;
-    b.step("test-documents", "Test document formats and generate WASM parity cases").dependOn(&documents.step);
     test_step.dependOn(&documents.step);
     const m4 = b.addExecutable(.{ .name = "roclet-m4-tests", .root_module = b.createModule(.{
         .root_source_file = b.path("tests/m4.zig"),
@@ -137,25 +145,92 @@ pub fn build(b: *std.Build) void {
     m4_tests.has_side_effects = true;
     b.step("test-m4", "Check selective evaluation against full recomputation").dependOn(&m4_tests.step);
     test_step.dependOn(&m4_tests.step);
+    // The wire shape pin covers every request and result both suites record.
+    const protocol_shape = b.addRunArtifact(document_tests);
+    protocol_shape.addArgs(&.{ root, "--protocol-shape" });
+    if (b.option(bool, "update-protocol-shape", "Rewrite tests/protocol-shape.json from the recorded document and M4 cases") orelse false) protocol_shape.addArg("--update");
+    protocol_shape.step.dependOn(&documents.step);
+    protocol_shape.step.dependOn(&m4_tests.step);
+    protocol_shape.has_side_effects = true;
+    test_step.dependOn(&protocol_shape.step);
+    const documents_step = b.step("test-documents", "Test document formats, generate WASM parity cases and check the pinned wire shape");
+    documents_step.dependOn(&documents.step);
+    documents_step.dependOn(&protocol_shape.step);
+    const engine_tests = b.addTest(.{ .use_llvm = test_llvm, .root_module = b.createModule(.{
+        .root_source_file = b.path("tests/engine.zig"),
+        .target = b.graph.host,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{
+            .{ .name = "bridge", .module = adapterModule(b, roc, options, b.graph.host, optimize, "compiler-adapter/bridge.zig") },
+            .{ .name = "roclet_options", .module = options },
+        },
+    }) });
+    engine_tests.step.max_rss = test_max_rss;
+    const engine_run = b.addRunArtifact(engine_tests);
+    b.step("test-engine", "Run in-process engine tests (several engines, attribution, request state)").dependOn(&engine_run.step);
+    test_step.dependOn(&engine_run.step);
+
+    // Code checks borrowed from the Roc compiler's CI (ci/tidy.zig, ci/zig_lints.zig).
+    // `zig build check` runs them all; `zig build test` depends on it so CI runs them too.
+    const check_step = b.step("check", "Check Zig formatting, tidy rules, lints, and dead Zig files");
+    const zig_format = b.addFmt(.{ .paths = &.{ b.path("build.zig"), b.path("compiler-adapter"), b.path("tools"), b.path("tests"), b.path("ci") }, .check = true });
+    b.step("run-check-zig-format", "Check Zig formatting (zig fmt --check)").dependOn(&zig_format.step);
+    check_step.dependOn(&zig_format.step);
+    const tidy = b.addExecutable(.{ .name = "tidy", .root_module = b.createModule(.{ .root_source_file = b.path("ci/tidy.zig"), .target = b.graph.host, .optimize = .debug }) });
+    const run_tidy = b.addRunArtifact(tidy);
+    run_tidy.setCwd(b.path("."));
+    run_tidy.has_side_effects = true;
+    b.step("run-check-tidy", "Run code tidiness checks over every tracked file").dependOn(&run_tidy.step);
+    check_step.dependOn(&run_tidy.step);
+    const run_git_lints = b.addRunArtifact(tidy);
+    run_git_lints.addArg("--git-lints");
+    run_git_lints.setCwd(b.path("."));
+    run_git_lints.has_side_effects = true;
+    b.step("run-check-git-lints", "Report tracked Zig files that nothing imports or builds").dependOn(&run_git_lints.step);
+    check_step.dependOn(&run_git_lints.step);
+    const zig_lints = b.addExecutable(.{ .name = "zig_lints", .root_module = b.createModule(.{ .root_source_file = b.path("ci/zig_lints.zig"), .target = b.graph.host, .optimize = .debug }) });
+    const run_zig_lints = b.addRunArtifact(zig_lints);
+    run_zig_lints.setCwd(b.path("."));
+    run_zig_lints.has_side_effects = true;
+    b.step("run-check-zig-lints", "Run Zig source lints").dependOn(&run_zig_lints.step);
+    check_step.dependOn(&run_zig_lints.step);
+    const globals = b.addExecutable(.{ .name = "globals", .root_module = b.createModule(.{ .root_source_file = b.path("ci/globals.zig"), .target = b.graph.host, .optimize = .debug }) });
+    const run_globals = b.addRunArtifact(globals);
+    run_globals.setCwd(b.path("."));
+    run_globals.has_side_effects = true;
+    b.step("check-globals", "Allow only the documented module-level variables in compiler-adapter").dependOn(&run_globals.step);
+    check_step.dependOn(&run_globals.step);
+    inline for (.{ "ci/tidy.zig", "ci/zig_lints.zig", "ci/globals.zig" }) |file| {
+        const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = b.graph.host }) });
+        check_step.dependOn(&b.addRunArtifact(tests).step);
+    }
+    test_step.dependOn(check_step);
 }
 
-fn adapter(b: *std.Build, roc: *std.Build.Dependency, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, name: []const u8, root: []const u8) *std.Build.Step.Compile {
-    const exe = b.addExecutable(.{ .name = name, .root_module = b.createModule(.{
+fn adapter(b: *std.Build, roc: *std.Build.Dependency, options: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, name: []const u8, root: []const u8) *std.Build.Step.Compile {
+    return b.addExecutable(.{ .name = name, .root_module = adapterModule(b, roc, options, target, optimize, root) });
+}
+
+/// A module rooted in compiler-adapter/ with the compiler modules, builtins,
+/// md4c, embedded package files and Roclet build options the adapter imports.
+fn adapterModule(b: *std.Build, roc: *std.Build.Dependency, options: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, root: []const u8) *std.Build.Module {
+    const module = b.createModule(.{
         .root_source_file = b.path(root),
         .target = target,
         .optimize = optimize,
         .link_libc = target.result.os.tag != .freestanding,
-    }) });
-    inline for (.{ "compile", "lir", "eval", "check", "base", "ctx", "builtins", "roc_target", "build_options", "can", "collections", "reporting", "parse", "unbundle" }) |module| exe.root_module.addImport(module, roc.module(module));
+    });
+    inline for (.{ "compile", "lir", "eval", "check", "base", "ctx", "builtins", "roc_target", "build_options", "can", "collections", "reporting", "parse", "unbundle" }) |name| module.addImport(name, roc.module(name));
     const compiled_builtins = roc.module("eval").import_table.get("compiled_builtins").?;
-    exe.root_module.addImport("compiled_builtins", compiled_builtins);
-    if (target.result.cpu.arch == .wasm32) exe.root_module.addImport("compressed_builtins", compressedBuiltins(b, roc, compiled_builtins));
-    exe.root_module.addCSourceFile(.{ .file = b.path("vendor/md4c/md4c.c"), .flags = &.{ "-std=c99", "-O2" } });
-    exe.root_module.addIncludePath(b.path("vendor/md4c"));
-    exe.root_module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("package/Display.roc") });
-    exe.root_module.addAnonymousImport("display-package-url.txt", .{ .root_source_file = b.path("package/display-package-url.txt") });
-    exe.root_module.addAnonymousImport("Document.roc", .{ .root_source_file = b.path("core/Document.roc") });
-    return exe;
+    module.addImport("compiled_builtins", compiled_builtins);
+    if (target.result.cpu.arch == .wasm32) module.addImport("compressed_builtins", compressedBuiltins(b, roc, compiled_builtins));
+    module.addCSourceFile(.{ .file = b.path("vendor/md4c/md4c.c"), .flags = &.{ "-std=c99", "-O2" } });
+    module.addIncludePath(b.path("vendor/md4c"));
+    module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("package/Display.roc") });
+    module.addAnonymousImport("display-package-url.txt", .{ .root_source_file = b.path("package/display-package-url.txt") });
+    module.addImport("roclet_options", options);
+    return module;
 }
 
 fn compressedBuiltins(b: *std.Build, roc: *std.Build.Dependency, builtins: *std.Build.Module) *std.Build.Module {

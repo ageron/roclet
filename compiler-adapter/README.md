@@ -4,25 +4,70 @@ Roclet embeds the pinned Roc compiler as a Zig package dependency. Run
 `sh tools/prepare-compiler.sh /path/to/roc` before building. The script archives the
 commit in `compiler.lock.json`, applies `embedding.patch`, and prepares
 `.toolchain/roc` without modifying the supplied checkout. `build.zig.zon` imports
-that dependency's compiler modules directly. The historical `overlay.json` is not
-part of the build.
+that dependency's compiler modules directly.
 
-`bridge.zig`, `engine.zig`, `workspace.zig`, and `snapshot.zig` are shared by native
-and WASM hosts. User programs execute through Roc's checked lowering and
+`bridge.zig` and everything it imports (`document.zig`, `notebook.zig`,
+`script.zig`, `engine.zig`, `workspace.zig`, ...) are shared by native and WASM
+hosts. User programs execute through Roc's checked lowering and
 interpreter. Generating WebAssembly for user programs is outside this interface.
 Compiler embedding additions expose notebook parsing and structured compile-time
 observations with their checked module/root provenance. Normal Roc parsing and
 checking semantics remain the compiler's responsibility. The upstream license is
 included in `ROC-LICENSE`.
 
+## Engine instances and process-wide state
+
+All mutable adapter state belongs to an explicit `Engine` (`engine_state.zig`):
+the virtual workspace and compiler artifact store, `packagesRequired`, the
+retained checked/lowered notebook revision, the reactive baseline,
+the synthetic or native source paths, and the `workspaceCache` counters.
+`bridge.process(&engine, request)` serves one top-level request and starts with
+`engine.beginRequest()`, which clears `packagesRequired` and the counters. A
+native host may construct several engines in one process (`tests/engine.zig`
+does); the WASM export layer owns exactly one per worker instance.
+
+JSON exists only at that boundary. `bridge.process` parses the request once,
+dispatches on its `operation` alone (`document`, `syntax` and `markdown` go to
+`document.zig`, `program` to `script.zig`; anything else, including the retired
+M0 `cells` snapshot, is a `protocol_error` response), and serialises one typed
+response with `workspaceCache` and `packagesRequired` appended; everything
+between is typed Zig. Document requests become a `document.Request` and leave as a
+`document.Response`; notebook evaluation is `notebook.checkDocument`, which
+prepares or reuses the retained revision and returns a `Checked` handle whose
+`evaluate(roots)` runs the selected roots against the same image; whole
+programs (`check`, `run`, `export` verification, `operation: "program"`) run
+through `script.run`. Nothing inside the engine re-enters `bridge.process`.
+
+Request-scoped sinks collect what compiler callbacks report: an
+`engine.DiagnosticList` (rendered reports and the failure message) behind
+`Diagnostics.ctx`, and a per-root `platform.EventBuffer` behind a
+`platform.Observer`. The observer carries
+the root it stamps on every `value`, `dbg`, `expect_failed`, `crashed` and
+`test_*` event; it travels in the interpreter's `EchoEnv`, so RocOps callbacks
+read it from `ops.env`, and the notebook pipeline derives one observer per
+executed or replayed root. Attribution therefore never depends on global state.
+App headers are parsed from memory; nothing is written to the workspace.
+
+Three module-level variables remain, and `zig build check-globals` (part of
+`zig build check` and `zig build test`, implemented in `ci/globals.zig`)
+rejects any other:
+
+- `platform.active_roc_ops`: hosted platform functions receive no RocOps or
+  environment pointer (natural C ABI on native, `(args, ret)` on wasm32), yet
+  `Echo.line!` must decref its argument. The interpreter run that owns the
+  current RocOps publishes it with `enterRocOps`/`leaveRocOps`, which assert
+  that runs never nest. It carries no attribution state.
+- `engine.builtin_modules`: the decoded builtin modules are immutable and
+  borrowed by every `BuildEnv`, so engines in one process share them.
+- `bridge.wasm_engine`: the worker's single `Engine` instance, a struct rather
+  than scattered state.
+
 ## Document preparation
 
 `document_frontend.zig` implements document segmentation, expression lowering,
 source maps, export policy, and reactive planning directly in Zig.
-`document.zig` coordinates the frontend and compiler. The former interpreted
-`core/Document.roc` implementation remains as a reference; it is not executed on
-the editing path. Typed source preparation replaces the former interpreted JSON
-calls between document stages.
+`document.zig` coordinates the frontend and compiler. Typed source preparation
+replaces the former interpreted JSON calls between document stages.
 
 Notebook code cells produce one UTF-8 application source. Supporting modules
 remain ordinary files, resolved by Roc's normal import rules. The document API
@@ -31,6 +76,25 @@ actions include `parse`, `convert`, `normalize`, `view`, `export`, `compose`,
 `analyze`, `evaluate`, `check`, and `run`. Formats are `roc` and `markdown`.
 `operation: "syntax"` returns version-pinned Roc/Markdown syntax facts;
 `operation: "markdown"` returns Markdown rendering events.
+`operation: "program"` with `{protocol: 1, source, user_bytes, args?,
+check_only?, app_header?, modules?, root?, files?}` checks and runs one whole
+headerless program on the echo platform and returns the protocol-1 program
+response. A request without one of these four operations is answered with
+`status: "protocol_error"`.
+
+The wire shape is pinned in `tests/protocol-shape.json` and checked by
+`zig build test-documents`; `operation: syntax` and `operation: markdown` are
+part of that shape. The pin is the sorted set of
+`"<operation>.<request|result>.<key.path> <types>"` lines (`[]` marks array
+elements; types are as JSON sees them) observed across every request and
+response the document and M4 suites record, so it names each key the engine
+accepts or sends and says nothing about values. The typed Zig structs that
+serialise responses (`document.Response`, `notebook.Evaluation`,
+`script.Outcome`) and this README describe the protocol; the pin checks it.
+An intentional protocol change regenerates the pin in the same commit with
+`zig build test-documents -Dupdate-protocol-shape`, so the diff is reviewed;
+an accidental one fails `zig build test`. A field appears in the pin only once
+a fixture exercises it, so add the fixture with the field.
 
 `compact: true` on `analyze` or `evaluate` omits export encodings, duplicate draft
 and source strings, and internal parser facts. Editor cells, mappings,
@@ -52,14 +116,40 @@ once and produces an immutable LIR image containing the output entrypoints.
 Metadata queries and later output selections reuse that graph and image. A source,
 module, file, or configuration change replaces the retained revision.
 
-The retained checked/lowered revision reserves a 512 MiB arena, including space
-for dependency packages such as roc-time. Each selected output gets a fresh
-interpreter and temporary allocation arena.
+A retained revision has three allocation lifetimes. Its inputs, `BuildEnv` and
+checked modules (including dependency packages such as roc-time), cache manager,
+debug events and root names live in a growable revision arena. Lowering output
+(`takeRuntime`, artifact views, static data, entrypoints) lives in a temporary
+arena that is freed as soon as `image.zig` has copied it into the flat LIR image.
+Only the image must be one contiguous buffer: it is copied in the compiler's copy
+mode (`ByteContract.mapped`), header first, into a buffer that starts at 1 MiB on
+WASM and 64 MiB natively and doubles when exhausted, up to an image-only cap of
+512 MiB on WASM and 2 GiB natively. An image over the cap is reported as
+`OutOfMemory`, the failure a full revision buffer produced before.
+`zig build -Dimage-initial-bytes=N` overrides the first buffer size so tests can
+force doubling. Each selected output gets a fresh interpreter and temporary
+allocation arena that views the image in place.
 Rich outputs also have a checked value entrypoint and a concrete serializer for
 the bundled nominal `Display` type. No evaluated Roc value is retained between
-responses. `workspaceCache.frontend_builds`, `lowerings`, `executions`, and
-`prepared_hits` expose the actual work so tests can verify reuse independently of
-wall-clock timing.
+responses. `workspaceCache.frontend_builds`, `lowerings`, `executions`,
+`prepared_hits` and `analyses` expose the actual work so tests can verify reuse
+independently of wall-clock timing. `prepared_hits` is 1 when the request was
+served by the retained revision and 0 when it prepared one. `analyses` counts
+dependency analyses (`analysis.zig`): one per new revision, cached on the
+revision for every later request and root, plus one per script run.
+`demand_union_fallbacks` counts what those analyses kept as dependency edges
+although the compiler's strict-demand closure does not reach it (see
+Reactive baseline). The input
+key is hashed once per request. `image_bytes` is the size of the image the
+request built (0 when it reused a revision) and `image_retries` the buffer
+doublings it took.
+
+Script runs (`check`, `run`, `export` verification) deliberately bypass the
+revision: they compile the exact runnable `execution` text users run with
+ordinary `roc`, in a fresh pipeline (`engine.runEcho`) whose scratch is an
+ordinary arena and whose image comes from the same adaptive `image.build`.
+Scripts and revisions share one app header synthesiser,
+`engine.synthesizeAppHeader`.
 
 ## Notebook assertions
 
@@ -78,8 +168,8 @@ module-wide diagnostics. Inline expects keep their existing compiler semantics.
 
 Assertions use the same resolved definition dependencies and reactive planner as
 outputs. Run all forces every assertion; Run cell forces all assertions in that
-cell. Passing statuses can be reused for unchanged dependencies, with source
-locations remapped to the current revision. Test-only cells and notebooks work
+cell. Passing statuses can be reused for unchanged dependencies; the engine
+locates reused tests in the current revision. Test-only cells and notebooks work
 without output roots. Top-level expects in the App header are diagnosed explicitly;
 move them into code cells to execute them.
 
@@ -140,16 +230,85 @@ corruption recovery, and offline verified-package restoration.
 The live virtual compiler-artifact store has its own 24 MiB / 512-entry LRU
 budget; editable files and package inputs are not evicted as compiler artifacts.
 
-The compiler retains its previous dependency graph. The transport omits an
-unchanged confirmed graph on subsequent requests; explicit alternate baselines
-remain supported. Changes to workspace files participate in reactive invalidation.
+## Reactive baseline
+
+The engine owns the reactive baseline (`baseline.zig`, an `Engine` field that
+outlives revisions): the dependency graph of the last participating request
+and, per root, the presentation (value, test outcome, events) of that root's
+last successful evaluation in this engine. Requests never carry graphs.
+
+- `reactivity` present (even `{}`): the request participates. The planner
+  (`document_frontend.plan`) compares the current graph with the baseline graph:
+  a root is reused when the graph version, context and scope are unchanged,
+  every node (definition, type or module) in its dependency closure has the
+  same fingerprint, binders and dependencies, it is not forced (`force`, `forceAll`, `selectedCell`) and the
+  baseline holds a successful presentation for it. The response is complete:
+  `evaluation.values`, `tests` and `events` list every current root in root
+  order, the retained presentation for `plan.reused` roots and the fresh one
+  otherwise, each with `reused`. Cell attribution, test locations, event
+  `sequence` and Markdown rendering are computed for the current revision.
+  `analyze` returns retained presentations too. `evaluated_roots` and
+  `root_errors` describe this request only.
+- After a participating request whose check succeeded, the engine keeps the
+  presentations of reused roots, stores fresh successful ones (a value, or a
+  passed test) and drops the rest (failed roots, roots an `analyze` did not run,
+  roots no longer in the document). A request whose check fails leaves the
+  baseline unchanged.
+- `reactivity: {reset: true}` forgets the baseline first. The notebook sends it
+  for the first reactive request of a different document.
+- `reactivity` absent: stateless. Every root is evaluated, the baseline is
+  neither read nor written, and entries carry `reused: false` (parity replays,
+  rename candidate checks).
+- The removed caller-held members `known`, `previous`, `current`, `available`
+  and `roots` are rejected with `protocol_error`.
+- Memory only: never persisted, never imported, never Roc values. Retained
+  presentations are capped at 64 MiB; above that the least recently stored are
+  evicted before the next participating request plans, and simply re-evaluated.
+- A restarted worker (Stop, timeout, trap, cancelled package load) has a fresh
+  engine and no baseline, so its first run evaluates every root once.
+
+The `graph` member of a checked document response is graph version 2
+(`version: 2`), built by `analysis.zig` once per revision from the checked
+module. `definitions` holds the value definitions (associated items as `Type.item`) and expectation roots,
+`types` the local type declarations, and `modules` the imported modules nodes
+refer to (`module:<name>`, fingerprinted by the module's deep content
+identity). Every node has `name`, `binders`, `fingerprint` and `dependencies`;
+a dependency names another node. Edges come from checked CIR: the compiler's
+strict-demand relation (`ModuleEnv.topLevelDemandDependencies`, which includes
+associated items and resolved local dispatch targets) united with compiler
+name references, type references in annotations, constructions and patterns,
+external lookups, method dispatch on a local nominal receiver (a
+type-variable receiver depends on every local type), and from each type to
+its associated items and the definitions its declaration reads (field
+defaults). The union is permanent: strict demand does not follow a lambda
+passed to a builtin (`List.map(xs, f)` demands `f`, not what `f` reads), and
+`workspaceCache.demand_union_fallbacks` counts the definitions a non-function
+definition reaches only through name references.
+
+A definition or type fingerprint is SHA-256 over the parser tokens the node
+owns (tag and text, length-prefixed, never offsets; each token belongs to the
+innermost node span, and a definition's span starts at its annotation) plus,
+for values and expectations, the inferred type. Comments, whitespace and
+reordering change nothing. The `context` covers the compiler identity, the app
+header's tokens, the program tokens outside every node (imports, statements
+without a binder), the rich Display flag and the workspace fingerprint;
+supplied module contents enter only through module nodes. `scope` is
+`module` only defensively (the compiler's demand relation is missing or a
+reference never settled import resolution); then any change re-evaluates
+every root. A baseline of another graph version invalidates every root.
+
+`roclet --bridge a.json b.json ...` serves a sequence with one engine, one
+response per line; `tests/m4.zig` records before/selective/full sequences so the
+browser replay sees the same engine state. Changes to workspace files
+participate in reactive invalidation through the graph's context.
 
 ## WASM byte operations
 
 Requests are synchronous within an instance and must not overlap.
 
 - `roclet_alloc(n)` / `roclet_free(ptr,n)` own input memory.
-- `roclet_process(ptr,n)` returns a JSON response.
+- `roclet_process(ptr,n)` returns a JSON response. The request is parsed once
+  and the response serialised once; no nested JSON requests are issued.
 - `roclet_file_put(pathPtr,pathLen,ptr,len)` mounts raw UTF-8 bytes;
   `roclet_file_drop(ptr,len)` removes a path.
 - `roclet_cache_identity()` returns the compiler cache namespace.
@@ -195,8 +354,9 @@ conversions, exhaustiveness failures, and other compile-time errors remain
 module-wide. Ordinary non-isolating requests retain their diagnostic behavior.
 All supplied application definitions are checked, including unused definitions.
 
-Document sources are bounded to 256 KiB and 500 cells. The snapshot source limit
-is 1 MiB of user source, with generated notebook code bounded separately. Each root retains at most 1,000 observations,
+Document sources are bounded to 256 KiB and 500 cells. The whole-program source limit
+is 1 MiB of user source, with generated notebook code bounded separately. Each
+root retains at most 1,000 observations,
 256 KiB of observations, and 64 KiB per text message/result; rich payloads have a
 separate 512 KiB bound. Arbitrary platform effects and external foreign functions
 are outside this embedding's supported scope.

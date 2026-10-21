@@ -49,8 +49,6 @@ export class DocumentSession {
     this.worker?.terminate();
     this.worker = null;
     this.files = new Map();
-    this.graph = null;
-    this.engineBaseline = false;
     this.pending?.controller.abort();
     this.pending?.reject(new DOMException('Stopped', 'AbortError'));
     this.pending = null;
@@ -65,11 +63,6 @@ export class DocumentSession {
       const changes=fileChanges(fresh?new Map():this.files??new Map(),request.files??[]);
       this.files=changes.next;workspace=changes.patch;
       request={...request};delete request.files;
-    }
-    if(!fresh && this.engineBaseline && this.graph && request.reactivity) {
-      const {previous,current,...reactivity}=request.reactivity;
-      const placeholder=current?.context==='' && current.scope==='module' && current.definitions?.length===0;
-      if(previous && JSON.stringify(previous)===this.graph && (!current || placeholder || JSON.stringify(current)===this.graph)) request={...request,reactivity};
     }
     return new Promise((resolve, reject) => {
       const controller=new AbortController();
@@ -97,8 +90,6 @@ export class DocumentSession {
           this.stop();
           const error=new Error(data.error);error.name=data.errorName??'Error';reject(error);
         } else {
-          this.engineBaseline=!!data.result.workspaceCache;
-          if(data.result.graph && ['ok','partial'].includes(data.result.status)) this.graph=JSON.stringify(data.result.graph);
           resolve({...data.result,workerMs:data.workerMs,...(data.transportMetrics?{transportMetrics:data.transportMetrics}:{})});
         }
       };
@@ -113,8 +104,10 @@ export class DocumentSession {
       if(fresh && this.WorkerType===globalThis.Worker) {
         // Structured cloning a compiled Module shares browser-managed code,
         // avoiding another copy of the compiler binary on every worker restart.
+        // The post waits for compilation, so take the request's snapshot now.
+        const owned=structuredClone({...message,bytes:undefined});
         prepareCompiler(this.bytes).then(prepared=>{
-          if(this.worker===worker && this.pending?.resolve===resolve) worker.postMessage({...message,bytes:undefined,...prepared});
+          if(this.worker===worker && this.pending?.resolve===resolve) worker.postMessage({...owned,...prepared});
         },error=>{
           if(this.worker!==worker || this.pending?.resolve!==resolve) return;
           this.pending=null;this.stop();reject(error);

@@ -1,0 +1,17 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Roclet side-by-side checks</title><style>body{font:14px/1.5 system-ui;margin:2rem}iframe{width:1280px;max-width:none;height:900px;border:1px solid #ddd}pre{white-space:pre-wrap}</style><h1>Roclet side-by-side checks</h1><p id="status">Starting isolated notebooks…</p><pre id="log"></pre><iframe title="Isolated Roclet side-by-side test"></iframe><script type="module">
+// ?medium runs the contracts at 1000px (columns), ?compact at 390px (tabs).
+const frame = document.querySelector('iframe'), params = new URL(location.href).searchParams;
+if (params.has('compact')) frame.style.width = '390px'; else if (params.has('medium')) frame.style.width = '1000px';
+const html = await fetch('./edit.html').then(r=>r.text());
+const page = new DOMParser().parseFromString(html, 'text/html');
+const bootstrap = page.getElementById('notebook-bootstrap');
+if (!bootstrap) throw new Error('Notebook bootstrap was not found');
+bootstrap.textContent = ''; bootstrap.src = './dual-conformance.mjs';
+frame.srcdoc = '<!doctype html>' + page.documentElement.outerHTML;
+window.addEventListener('message', event => {
+  if (event.source !== frame.contentWindow || event.origin !== location.origin || !event.data?.rocletDualTest) return;
+  document.getElementById('status').textContent = event.data.status;
+  document.getElementById('log').textContent = event.data.log;
+  if (event.data.result) document.documentElement.dataset.result = event.data.result;
+});
+</script></html>

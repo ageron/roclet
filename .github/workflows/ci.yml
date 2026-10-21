@@ -58,9 +58,7 @@ jobs:
         # Only these large steps claim memory; other jobs remain parallel.
         run: /usr/bin/time -v zig build test -Dcompiler-max-rss=15032385536 --summary all
       - name: Run JavaScript unit and workspace tests
-        run: |
-          node --input-type=module -e 'await import("./tests/unit.test.mjs"); const {runTests}=await import("./tests/harness.mjs"); console.log("Passed",await runTests(console.log));'
-          node --test tests/workspace.test.mjs
+        run: node --test tests/*.test.mjs
       - name: Package the verified site
         run: zig build package -Dcompiler-max-rss=15032385536 --summary all
       - name: Run Chrome conformance tests
