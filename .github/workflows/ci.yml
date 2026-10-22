@@ -19,11 +19,11 @@ jobs:
     name: Build, test, and package
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    env:
-      # Hosted runners can have different CPUs. Keep cached native binaries portable.
-      ROCLET_BUILD_FLAGS: -Dtarget=x86_64-linux-gnu -Dcpu=baseline -Dcompiler-max-rss=15032385536
     steps:
       - uses: actions/checkout@v4
+      - name: Read engine build settings
+        # Baseline CPU flags make cached binaries portable across hosted runners.
+        run: sed '/^#/d; /^$/d' ci/engine-build.env >> "$GITHUB_ENV"
       - name: Read pinned Zig version
         id: zig-version
         run: |
@@ -44,7 +44,7 @@ jobs:
         with:
           path: .engine-cache
           # Exact matches only: never run engines from different source/build inputs.
-          key: roclet-engines-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'package/**/*', 'vendor/**/*', 'tools/**/*', '.github/workflows/ci.yml') }}
+          key: roclet-engines-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'package/**/*', 'vendor/**/*', 'tools/build-tool.zig', 'tools/compress-builtins.zig', 'tools/prepare-compiler.sh', 'ci/engine-build.env') }}
       - name: Restore Zig build cache
         uses: actions/cache/restore@v4
         id: compiler-cache
@@ -79,7 +79,21 @@ jobs:
           key: ${{ steps.engines.outputs.cache-primary-key }}
       - name: Run native tests with cached engines
         # Tests, manifests and parity reports still run against this checkout.
-        run: /usr/bin/time -v zig build test $ROCLET_BUILD_FLAGS -Dcached-engines=.engine-cache --summary all
+        run: |
+          set -o pipefail
+          /usr/bin/time -v zig build test $ROCLET_BUILD_FLAGS -Dcached-engines=.engine-cache --summary all 2>&1 | tee "$RUNNER_TEMP/roclet-native-tests.log"
+      - name: Summarize native build and test timings
+        if: ${{ always() }}
+        run: |
+          if [ -f "$RUNNER_TEMP/roclet-native-tests.log" ]; then
+            {
+              echo '### Native build and test timings'
+              echo 'Compile steps show whether binaries were cached, reused within this build, or rebuilt.'
+              echo '```text'
+              sed -n '/^Build Summary:/,$p' "$RUNNER_TEMP/roclet-native-tests.log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Run JavaScript unit and workspace tests
         run: node --test tests/*.test.mjs
       - name: Package the verified site

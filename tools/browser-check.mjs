@@ -102,6 +102,11 @@ try {
   if(uploads.length)throw new Error(`${uploads.length} file selections from the upload plan were not exercised`);
 } finally {
   socket?.close();chrome.kill();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));
-  if(chrome.exitCode==null)await new Promise(resolve=>{chrome.once('exit',resolve);setTimeout(resolve,3000);});
+  if(chrome.exitCode==null)await new Promise(resolve=>{
+    // Do not keep Node alive for the full timeout after Chrome has exited.
+    const finished=()=>{clearTimeout(timer);chrome.off('exit',finished);resolve();};
+    const timer=setTimeout(finished,3000);
+    chrome.once('exit',finished);
+  });
   await rm(profile,{recursive:true,force:true,maxRetries:10,retryDelay:100});
 }

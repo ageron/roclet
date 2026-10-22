@@ -199,8 +199,8 @@ PR artifacts are never deployed. No execution server is needed.
 
 CI installs the Zig version in `compiler.lock.json` and prepares the pinned Roc
 compiler. Native and WASM engines have a separate cache keyed by their source,
-dependencies, build tools and workflow configuration. A UI or demo edit reuses
-these binaries; an engine input change builds a new pair. Native CI builds use
+dependencies, compiler build tools and `ci/engine-build.env` settings. A UI or
+demo edit reuses these binaries; an engine input change builds a new pair. Native CI builds use
 an explicit baseline x86-64 target so binaries work across hosted runner CPUs.
 
 Zig's build cache is also restored for test executables and other tools, with
@@ -209,6 +209,10 @@ are saved even when tests fail. Every run still checks the current notebooks,
 runs browser tests, and regenerates manifests, parity reports and site packages.
 The `-Dcached-engines=.engine-cache` build option is for CI's exact-input cache;
 normal local builds let Zig manage compilation as before.
+
+The run summary includes native build/cache timings and durations for every
+browser suite. Browser suites run two at a time with independent Chrome profiles
+and servers; set `ROCLET_BROWSER_JOBS=1` for serial local troubleshooting.
 
 The first cold build still takes longer. CI declares a 14 GiB memory estimate
 per compiler build so Zig can schedule the native and WASM compile steps within
