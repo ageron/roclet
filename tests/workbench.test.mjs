@@ -109,8 +109,8 @@ test('two notebooks keep their own workers: stop and document switches stay in t
 test('layout URLs name the right slot and leave one-panel URLs alone',()=>{
   const base='https://roclet.test/web/edit.html';
   assert.deepEqual(parseLayout(`${base}?notebook=A&right=B`),{left:{id:'A',fresh:false,example:null,publication:null},right:{id:'B'}});
-  assert.deepEqual(parseLayout(`${base}?example=reactivity&right=example:weather`).right,{example:'weather'});
-  assert.equal(parseLayout(`${base}?example=reactivity&right=example:weather`).left.example,'reactivity');
+  assert.deepEqual(parseLayout(`${base}?example=reactivity&right=example:coding-puzzle`).right,{example:'coding-puzzle'});
+  assert.equal(parseLayout(`${base}?example=reactivity&right=example:coding-puzzle`).left.example,'reactivity');
   assert.deepEqual(parseSlot('new'),{fresh:true});
   assert.match(parseSlot('example:https://evil.invalid/x.roc').error,/Unknown example/);
   assert.equal(parseSlot(''),null);assert.equal(parseLayout(`${base}?notebook=A`).right,null);

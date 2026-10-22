@@ -6,9 +6,8 @@ import { newDraft, validDraft, independentCopy, openedDraft } from './edit-model
 
 // Bundled examples only, never arbitrary URLs supplied by a query parameter.
 export const examples = new Map([
+  ['coding-puzzle', ['../demos/02-coding-puzzle.roc', 'Coding puzzle: longest streak.roc']],
   ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
-  ['weather', ['../demos/02-a-little-data.roc', 'Three days of weather.roc']],
-  ['circle', ['../demos/03-circle.roc', 'A bigger circle.roc']],
   ['meeting-windows', ['../demos/04-meeting-windows.roc', 'Finding room for a design review.roc']],
   ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich outputs.roc']],
 ]);

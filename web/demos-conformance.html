@@ -3,14 +3,15 @@ import {DocumentSession} from './document-session.mjs';
 import {assert} from '../tests/harness.mjs';
 const session=new DocumentSession(await fetch('../artifacts/roclet.wasm').then(r=>r.arrayBuffer()));let log='';
 try {
-for(const [file,expected] of [['01-reactivity.roc','12.0'],['02-a-little-data.roc','71.6'],['03-circle.roc','28.274333882308137']]) {
+for(const [file,expected] of [['01-reactivity.roc','12.0'],['02-coding-puzzle.roc',null]]) {
  const source=await fetch('../demos/'+file).then(r=>{assert(r.ok);return r.text();});
  const request={operation:'document',action:'evaluate',format:'roc',source,render:true};
- const result=await session.request(request);assert.equal(result.status,'ok');assert(result.evaluation.values[0].text.includes(expected));
+ const result=await session.request(request);if(expected!==null){assert.equal(result.status,'ok');assert(result.evaluation.values[0].text.includes(expected));}
  if(file==='01-reactivity.roc') {const changed=await session.request({...request,source:source.replace('guests = 4','guests = 6')});assert.equal(changed.evaluation.values[0].text,'18.0');}
+ if(file==='02-coding-puzzle.roc') {assert.equal(result.status,'partial');assert.equal(result.evaluation.values.length,0);const tests=result.evaluation.tests;assert.equal(tests.length,7);assert.equal(tests.filter(t=>t.passed).length,2);assert.equal(tests.filter(t=>!t.passed).length,5);}
  log+='PASS '+file+'\n';
 }
-document.documentElement.dataset.result='pass';log+='PASS all three demos in WASM';
+document.documentElement.dataset.result='pass';log+='PASS reactive demo and coding puzzle in WASM';
 } catch(e) {document.documentElement.dataset.result='fail';log+=e.stack;}
 finally {session.stop();document.querySelector('#log').textContent=log;}
 </script>

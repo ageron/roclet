@@ -170,7 +170,7 @@ Downloaded `.roc` notebooks are ordinary runnable Roc programs, including the de
 
 ```sh
 roc demos/01-reactivity.roc
-roc demos/02-a-little-data.roc
+roc demos/02-coding-puzzle.roc
 ```
 
 Final cell expressions become named outputs, and a generated `main!` prints them

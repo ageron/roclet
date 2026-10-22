@@ -20,8 +20,8 @@ Roclet runs Roc locally through WebAssembly—and keeps working offline.
 change `width`, and see what happens. The [installation guide](docs/installation.md)
 covers offline use and running locally.
 
-Or explore the [little demos](demos/README.md): a reactive calculation, a tiny
-weather dataset, and a mathematical notebook. Each takes just a few minutes.
+Or explore the [little demos](demos/README.md): a simple reactive calculation, a coding
+puzzle with checks and hints, and a meeting scheduler using roc-time.
 
 In a code cell, definitions are shared across the notebook. The last expression
 is the result to display:
