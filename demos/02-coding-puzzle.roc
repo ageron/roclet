@@ -42,7 +42,6 @@ expect longest_streak([Completed, Skipped, Completed, Completed, Completed]) == 
 ## Separated runs
 expect longest_streak([Completed, Skipped, Completed, Skipped, Completed]) == 1
 
-
 # %%
 # ## Hints
 # - Rename `_days` to `days` when you start using the argument.
