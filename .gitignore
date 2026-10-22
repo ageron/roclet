@@ -14,3 +14,6 @@ artifacts/
 .release/
 /package/*.tar.zst
 /tools/__pycache__/
+
+# CI compiled engine cache
+.engine-cache/

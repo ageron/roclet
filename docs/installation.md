@@ -198,13 +198,22 @@ or rerun tests. Failed CI and superseded commits cannot replace the live site;
 PR artifacts are never deployed. No execution server is needed.
 
 CI installs the Zig version in `compiler.lock.json` and prepares the pinned Roc
-compiler. Only compiler sources and Zig build caches are restored; generated
-manifests and parity reports are recreated, so a warm cache cannot hide missing
-build dependencies. Compatible cache snapshots are reused across source edits,
-and partial build caches are saved even when tests fail. The first cold build
-still takes longer. CI declares a 14 GiB memory estimate per compiler build so
-Zig can schedule the native and WASM compile steps within the runner's 16 GiB.
-Other build jobs remain parallel; local builds keep their default scheduling.
+compiler. Native and WASM engines have a separate cache keyed by their source,
+dependencies, build tools and workflow configuration. A UI or demo edit reuses
+these binaries; an engine input change builds a new pair. Native CI builds use
+an explicit baseline x86-64 target so binaries work across hosted runner CPUs.
+
+Zig's build cache is also restored for test executables and other tools, with
+snapshots keyed by build inputs rather than every commit. Partial build caches
+are saved even when tests fail. Every run still checks the current notebooks,
+runs browser tests, and regenerates manifests, parity reports and site packages.
+The `-Dcached-engines=.engine-cache` build option is for CI's exact-input cache;
+normal local builds let Zig manage compilation as before.
+
+The first cold build still takes longer. CI declares a 14 GiB memory estimate
+per compiler build so Zig can schedule the native and WASM compile steps within
+the runner's 16 GiB. Other build jobs remain parallel; local builds keep their
+default scheduling.
 
 To redeploy the current verified site without rebuilding, use **Actions → Deploy
 Roclet → Run workflow** and supply the successful `main` CI run ID. In **Settings →

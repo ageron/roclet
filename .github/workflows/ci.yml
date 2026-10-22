@@ -19,6 +19,9 @@ jobs:
     name: Build, test, and package
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      # Hosted runners can have different CPUs. Keep cached native binaries portable.
+      ROCLET_BUILD_FLAGS: -Dtarget=x86_64-linux-gnu -Dcpu=baseline -Dcompiler-max-rss=15032385536
     steps:
       - uses: actions/checkout@v4
       - name: Read pinned Zig version
@@ -33,16 +36,26 @@ jobs:
           version: ${{ steps.zig-version.outputs.version }}
           # Restore/save below owns both Zig caches and the prepared compiler.
           use-cache: false
-      - uses: actions/cache/restore@v4
+      - name: Check generated artifacts are absent
+        run: test ! -e artifacts/manifest.json
+      - name: Restore compiled engines
+        id: engines
+        uses: actions/cache/restore@v4
+        with:
+          path: .engine-cache
+          # Exact matches only: never run engines from different source/build inputs.
+          key: roclet-engines-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'package/**/*', 'vendor/**/*', 'tools/**/*', '.github/workflows/ci.yml') }}
+      - name: Restore Zig build cache
+        uses: actions/cache/restore@v4
         id: compiler-cache
         with:
           path: |
             .toolchain
             .zig-cache
             ~/.cache/zig
-          key: roclet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-${{ github.sha }}
+          key: roclet-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-${{ hashFiles('build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'package/**/*', 'vendor/**/*', 'tools/**/*', 'tests/**/*', 'ci/**/*', '.github/workflows/ci.yml') }}
           restore-keys: |
-            roclet-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-
+            roclet-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-
       - name: Prepare pinned compiler dependency
         shell: bash
         run: |
@@ -51,16 +64,26 @@ jobs:
           git -C "$RUNNER_TEMP/roc" remote add origin "$(jq -r .compilerRepository compiler.lock.json)"
           git -C "$RUNNER_TEMP/roc" fetch --depth=1 origin "$(jq -r .compilerCommit compiler.lock.json)"
           sh tools/prepare-compiler.sh "$RUNNER_TEMP/roc"
-      - name: Check generated artifacts are absent
-        run: test ! -e artifacts/manifest.json
-      - name: Build compilers and run native tests (ReleaseFast)
-        # The native and WASM LLVM compilations can exceed 16 GiB together.
-        # Only these large steps claim memory; other jobs remain parallel.
-        run: /usr/bin/time -v zig build test -Dcompiler-max-rss=15032385536 --summary all
+      - name: Build engines on cache miss (ReleaseFast)
+        if: steps.engines.outputs.cache-hit != 'true'
+        run: |
+          /usr/bin/time -v zig build adapter $ROCLET_BUILD_FLAGS --summary all
+          mkdir -p .engine-cache
+          cp artifacts/roclet-native artifacts/roclet-profile.wasm .engine-cache/
+          chmod +x .engine-cache/roclet-native
+      - name: Save compiled engines
+        if: steps.engines.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .engine-cache
+          key: ${{ steps.engines.outputs.cache-primary-key }}
+      - name: Run native tests with cached engines
+        # Tests, manifests and parity reports still run against this checkout.
+        run: /usr/bin/time -v zig build test $ROCLET_BUILD_FLAGS -Dcached-engines=.engine-cache --summary all
       - name: Run JavaScript unit and workspace tests
         run: node --test tests/*.test.mjs
       - name: Package the verified site
-        run: zig build package -Dcompiler-max-rss=15032385536 --summary all
+        run: zig build package $ROCLET_BUILD_FLAGS -Dcached-engines=.engine-cache --summary all
       - name: Run Chrome conformance tests
         run: node tools/test-browser.mjs
       - name: Save compiler build cache
