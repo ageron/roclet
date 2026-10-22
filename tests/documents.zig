@@ -408,7 +408,7 @@ pub fn main(init: std.process.Init) !void {
     const fixtures = try parse(a, try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, "tests/documents.json" }), a, .limited(1024 * 1024)));
     for (fixtures.array.items) |fixture| try suite.run(root, fixture);
     // Published notebooks must already be in runnable form, not editing drafts.
-    for ([_][]const u8{ "demos/01-reactivity.roc", "demos/02-a-little-data.roc", "demos/03-circle.roc", "fixtures/documents/rich-outputs.roc" }) |file| {
+    for ([_][]const u8{ "demos/01-reactivity.roc", "demos/02-coding-puzzle.roc", "fixtures/documents/rich-outputs.roc" }) |file| {
         const source = try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, file }), a, .limited(256 * 1024));
         const exported = try suite.call(file, try parse(a, try json(a, .{ .operation = "document", .action = "export", .format = "roc", .target = "roc", .source = source })));
         errdefer std.debug.print("FAIL runnable demo: {s}\n", .{file});
