@@ -11,7 +11,7 @@ async function refresh() {
     if (current !== generation) return;
     list.replaceChildren();
     status.hidden = records.length > 0;
-    status.textContent = 'A fresh start. Create a notebook or try a demo — your recent work will appear here.';
+    status.textContent = 'No notebooks saved in this browser yet. Create a notebook or open a demo to get started.';
     more.hidden = records.length <= 6;
     more.textContent = expanded ? 'Show fewer' : `Show all ${records.length} notebooks`;
     for (const record of expanded ? records : records.slice(0,6)) {
