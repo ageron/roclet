@@ -19,6 +19,72 @@ Roc fetches and caches the package on first use. Roclet embeds the matching
 implementation, so browser and native notebook execution work offline.
 The initial `0.1.0` URL becomes available when the first release is published.
 
+## New markup constructors (not yet released)
+
+The source package also provides `Display.html(plain_text, source)`,
+`Display.svg(plain_text, source)`, and `Display.widget(plain_text, source)`.
+HTML and SVG are inert; widgets allow inline JavaScript inside an isolated frame.
+Markup is limited to 16 KiB. Widgets can update their own controls but do not
+feed values into Roc definitions. Saved snapshots and reports disable scripts.
+
+These constructors need a new package release before exported notebooks using
+them can run against a public package URL. The updated demo is tested against the local package until that release is
+published and its URL pinned.
+
+## Reactive slider inputs (not yet released)
+
+```roc
+import roclet.Display
+import roclet.Input
+
+width_control = Input.slider({
+    key: "width", label: "Width", min: 1, max: 20, step: 1, default: 5,
+})
+width = width_control.value
+out_width = width_control.display
+
+# In another cell:
+out_area = width * 3
+```
+
+`value` is an `F64`. Give each control a stable, unique key (a letter followed
+by letters, digits, underscores or hyphens, at most 64 characters).
+Use finite bounds with `min < max`, a positive step and a default within bounds.
+Roclet stores the current value in the notebook, without rewriting your code.
+Moving the slider updates dependent results when auto-run is on; otherwise,
+run the notebook to apply the change. Browser drafts and Roclet bundles retain
+input values. Ordinary Roc apps and source-only exports use the declared default.
+Saved output previews and reports show disabled controls until run in Roclet.
+
+This first version shares one input-state module, so changing a slider may also
+recompute other input-dependent results. Use `Input.custom` for a custom HTML control that sends a numeric value to Roc. Keep `import roclet.Display` alongside `Input`
+so Roclet can recognize rich output values.
+
+## Custom numeric inputs (not yet released)
+
+`Input.custom({ key, label, min, max, default, html })` returns the same
+`{ value, display }` pair as `Input.slider`. `value` is an F64. Controls using
+the same key share one notebook input; otherwise use distinct keys.
+
+The HTML can call `roclet.setValue(number)` and subscribe with
+`roclet.onValue(value => { ... })`. Subscribing delivers the current value once
+the frame connects, then subsequent evaluated values, including restored values
+after undo. `onValue` returns an unsubscribe function. Updating controls inside
+an `onValue` callback does not send another change back to Roclet.
+
+```javascript
+slider.oninput = () => roclet.setValue(Number(slider.value));
+roclet.onValue(value => { slider.value = value; redraw(value); });
+```
+
+HTML is limited to 16 KiB. The frame retains its sandbox and receives only its
+own numeric input through a private message channel. Non-numeric, non-finite,
+and out-of-range updates are ignored. Changing only the input value preserves
+the frame; changing its HTML or configuration recreates it. Reports and imported
+snapshots disable scripts and the bridge. Browser saves and bundles retain input
+values; standalone Roc uses the default. `Display.widget` remains available for
+self-contained HTML/JavaScript without a Roc binding.
+
 ## Build and test locally
 
 ```sh

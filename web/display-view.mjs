@@ -1,8 +1,10 @@
+import {connectWidget,widgetBootstrap} from './widget-bridge.mjs';
+import {sliderConfig} from './input-values.mjs';
 import {renderMarkdown} from './markdown-view.mjs';
 
 // Validate even cached/imported snapshots. Renderers never interpret inspected Roc.
 export function normalizeDisplay(value) {
-  if (!value || value.version!==1 || !['text','markdown','table','image'].includes(value.kind)) return null;
+  if (!value || value.version!==1 || !['text','markdown','table','image','html','svg','widget','slider','input'].includes(value.kind)) return null;
   if (typeof value.text!=='string' || value.text.length>65536) return null;
   const out={version:1,kind:value.kind,text:value.text};
   if (value.kind==='table') {
@@ -19,6 +21,12 @@ export function normalizeDisplay(value) {
       size+=event.text.length; if(size>262144) return null;
     }
     out.content=value.content;out.events=value.events.map(({event,kind,text,detail})=>({event,kind,text,detail}));
+  } else if(value.kind==='slider' || value.kind==='input') {
+    if(!sliderConfig(value.content,value.kind==='input')) return null;
+    out.content=value.content;
+  } else if(['html','svg','widget'].includes(value.kind)) {
+    if(typeof value.content!=='string' || new TextEncoder().encode(value.content).length>16384) return null;
+    out.content=value.content;
   } else if(value.kind==='image') {
     if (!['image/png','image/jpeg','image/webp'].includes(value.mime) || typeof value.content!=='string' || value.content.length>131072 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.content) || !value.content) return null;
     let signature;try {signature=atob(value.content.slice(0,32));}catch {return null;}
@@ -30,7 +38,7 @@ export function normalizeDisplay(value) {
   return out;
 }
 
-export function renderDisplay(raw,text,{doc=document,interactive=true}={}) {
+export function renderDisplay(raw,text,{doc=document,interactive=true,onInput}={}) {
   if (raw==null) return null;
   const root=doc.createElement('div');root.className='rich-output';
   const value=normalizeDisplay(raw);
@@ -39,7 +47,54 @@ export function renderDisplay(raw,text,{doc=document,interactive=true}={}) {
   if (!value) {note('Rich preview unavailable. The plain-text result is still available.');fallback().open=true;return root;}
   try {
     if (value.kind==='text') {const pre=doc.createElement('pre');pre.textContent=text;root.append(pre);return root;}
+    if (value.kind==='slider') {
+      const config=sliderConfig(value.content),label=doc.createElement('label'),input=doc.createElement('input'),current=doc.createElement('output');
+      label.textContent=config.label+' ';input.type='range';input.min=config.min;input.max=config.max;input.step=config.step;input.value=config.value;
+      input.disabled=!interactive || !onInput;input.setAttribute('aria-label',config.label);current.value=String(config.value);
+      input.style.cssText='width:min(300px,55vw);vertical-align:middle;accent-color:var(--accent,#8050be);margin:0 1em;';
+      input.oninput=()=>{const n=input.valueAsNumber;if(!Number.isFinite(n)||n<config.min||n>config.max)return;current.value=String(n);onInput?.(config.key,n);};
+      label.append(input,current);root.append(label);root.sliderKey=config.key;
+      root.updateInput=(raw,text)=>{
+        const next=normalizeDisplay(raw),c=next?.kind==='slider'?sliderConfig(next.content):null;
+        if(!c || JSON.stringify({...c,value:0})!==JSON.stringify({...config,value:0})) return false;
+        // Do not jump backwards during an active drag; the next result catches up.
+        if(doc.activeElement!==input) {input.value=c.value;current.value=String(c.value);}
+        const pre=root.querySelector('pre');if(pre)pre.textContent=text;
+        return true;
+      };
+    }
     if (value.kind==='markdown') root.append(renderMarkdown(value.events,doc));
+    if (value.kind==='svg') {
+      // SVG in an image cannot execute scripts or access the surrounding document.
+      const img=doc.createElement('img');img.alt=text;img.className='display-image';
+      img.src=`data:image/svg+xml;charset=utf-8,${encodeURIComponent(value.content)}`;
+      img.onerror=()=>{img.remove();note('SVG preview unavailable.');};root.append(img);
+    }
+    if (value.kind==='html' || value.kind==='widget' || value.kind==='input') {
+      const frame=doc.createElement('iframe');
+      const config=value.kind==='input'?sliderConfig(value.content,true):null;
+      const scripts=interactive && (value.kind==='widget' || (config && !!onInput));
+      frame.title=text || (scripts?'Interactive output':'HTML output');
+      frame.className='display-html';frame.setAttribute('sandbox',scripts?'allow-scripts':'');
+      frame.referrerPolicy='no-referrer';
+      // No same-origin, fetch/subresource, form, popup, or parent navigation privileges.
+      // The policy precedes user markup and cannot be relaxed by another meta tag.
+      const policy=`default-src 'none'; script-src ${scripts?"'unsafe-inline'":"'none'"}; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'`;
+      frame.srcdoc=`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${policy}"><meta name="referrer" content="no-referrer"><style>:root{color-scheme:light dark}body{font:16px system-ui;margin:12px;overflow-wrap:anywhere}img,svg{max-width:100%}input,button,select{font:inherit;accent-color:#8050be}a{color:inherit}</style></head><body>${config && scripts?widgetBootstrap:''}${config?config.html:value.content}</body></html>`;
+      frame.style.cssText='width:100%;height:280px;border:0;display:block;resize:vertical;min-height:80px;max-height:900px;';
+      if(config && scripts) {
+        connectWidget(root,frame,config,onInput);
+        root.updateInput=(raw,text)=>{
+          const next=normalizeDisplay(raw),c=next?.kind==='input'?sliderConfig(next.content,true):null;
+          if(!c || JSON.stringify({...c,value:0})!==JSON.stringify({...config,value:0})) return false;
+          root.setWidgetValue(c.value);
+          const pre=root.querySelector('pre');if(pre)pre.textContent=text;
+          return true;
+        };
+      }
+      root.append(frame);
+      if((value.kind==='widget' || config) && !scripts)note('Saved widget preview. Run this cell to enable interaction.');
+    }
     if (value.kind==='image') {
       const img=doc.createElement('img');img.alt=text;img.src=`data:${value.mime};base64,${value.content}`;img.className='display-image';
       img.onerror=()=>{img.remove();note('Image preview unavailable.');};root.append(img);

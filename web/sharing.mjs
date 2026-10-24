@@ -1,3 +1,4 @@
+import {inputValues} from './input-values.mjs';
 import {zip,unzip,utf8,text} from './archive.mjs';
 import {sha256,verified} from './offline-cache.mjs';
 import {workerSource} from './offline.mjs';
@@ -15,7 +16,7 @@ export async function captureExport(notebook,compiler,{results=false,debug=false
   const parsed=await notebook.inspect('export');
   if(state.format==='roc' && parsed.status!=='ok') throw new Error('Fix the errors before exporting runnable Roc, or switch to Markdown to save unfinished source.');
   const document={schema:1,title:state.title,format:state.format,preamble:state.preamble??'',metadata:state.metadata??'',source:state.sourceCurrent?state.source:'',sourceCurrent:!!state.sourceCurrent,mode:state.mode,
-    files:projectFiles(state.files),
+    inputValues:inputValues(state.inputValues),files:projectFiles(state.files),
     cells:(state.sourceCurrent?(parsed.draft?.cells??parsed.model.cells):state.cells).map(({kind,source,attributes,outputs})=>({kind,source,attributes:attributes??'',outputs:outputs??[]}))};
   const snapshots=results && ['ok','partial'].includes(current?.status) ? (current.evaluation?.values??[]).map(v=>({cell:current.model.cells.findIndex(c=>c.output===v.root),root:v.root,text:v.text,...(v.display?{display:normalizeDisplay(v.display)}:{})})) : [];
   const events=debug ? (current?.evaluation?.events??[]).map(({cell,root,kind,message})=>({cell,root,kind,message})) : [];
@@ -51,6 +52,7 @@ export async function importBundle(bytes,compiler) {
   const doc=JSON.parse(text(files.get('document.json')));
   if(doc.schema!==1 || !['roc','markdown'].includes(doc.format) || typeof doc.title!=='string' || doc.title.length>120 || typeof doc.source!=='string' || typeof doc.preamble!=='string' || typeof doc.metadata!=='string' || typeof doc.sourceCurrent!=='boolean' || !['source','notebook'].includes(doc.mode) || !Array.isArray(doc.cells) || doc.cells.length>500) throw new Error('Malformed notebook in bundle.');
   const record=newDraft(doc.title);
+  record.inputValues=inputValues(doc.inputValues);
   record.format=doc.format;record.source=doc.source;record.sourceCurrent=doc.sourceCurrent;record.preamble=doc.preamble;record.metadata=doc.metadata;record.mode=doc.mode;record.autoRun=false;
   if(doc.files!=null && !Array.isArray(doc.files)) throw new Error('Malformed project file list.');
   record.files=projectFiles((doc.files??[]).map(file=>{
@@ -74,7 +76,7 @@ export async function importBundle(bytes,compiler) {
 }
 export async function exportReport(capture,{source=true}={}) {
   const doc=document.implementation.createHTMLDocument(capture.document.title),meta=doc.createElement('meta');
-  meta.httpEquiv='Content-Security-Policy';meta.content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; base-uri 'none'; form-action 'none'";doc.head.prepend(meta);
+  meta.httpEquiv='Content-Security-Policy';meta.content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-src 'self'; base-uri 'none'; form-action 'none'";doc.head.prepend(meta);
   const charset=doc.createElement('meta');charset.setAttribute('charset','utf-8');doc.head.prepend(charset);
   const viewport=doc.createElement('meta');viewport.name='viewport';viewport.content='width=device-width, initial-scale=1';doc.head.append(viewport);
   const css=doc.createElement('style');css.textContent='body{max-width:850px;margin:3rem auto;padding:0 1.5rem;font:16px/1.65 system-ui;color:#294338}h1,h2,h3{line-height:1.2}section{margin:1.8rem 0}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:1rem;background:#f4f7f4;border-radius:6px;font:14px/1.6 monospace}small{color:#65766a}table{border-collapse:collapse}th,td{border:1px solid #ddd;padding:.4rem}a{color:#356e58}.display-table-scroll{overflow:auto}.display-image{max-width:100%;max-height:480px}.display-note,.display-pagination{font-size:.8rem;color:#65766a}';doc.head.append(css);

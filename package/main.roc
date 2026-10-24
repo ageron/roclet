@@ -1,3 +1,4 @@
-package [Display] {}
+package [Display, Input] {}
 
 import Display
+import Input

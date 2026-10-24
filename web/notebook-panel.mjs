@@ -24,7 +24,7 @@ function outputBlock(label, text, kind = '', display = null) {
   const heading = document.createElement('div'); heading.className = 'result-heading'; heading.textContent = label;
   const output = document.createElement('pre'); output.textContent = text;
   block.append(heading, output);
-  const rich=renderDisplay(display,text);if(rich) {output.hidden=true;block.append(rich);}
+  const rich=renderDisplay(display,text,{interactive:kind!=='unverified'});if(rich) {output.hidden=true;block.append(rich);}
   return block;
 }
 function clearObservations(view, render) {
@@ -79,7 +79,7 @@ export class NotebookPanel {
     // pending. The model still invalidates results immediately for execution/export.
     function renderObservation(view, kind, content, stale = false) {
       view.observations[kind] = content;
-      if (!content) { view.outputBlocks[kind]?.remove(); delete view.outputBlocks[kind]; return; }
+      if (!content) { view.outputBlocks[kind]?.querySelector(':scope > .rich-output')?.dispose?.();view.outputBlocks[kind]?.remove(); delete view.outputBlocks[kind]; return; }
       let block = view.outputBlocks[kind];
       if (!block) {
         block = view.outputBlocks[kind] = outputBlock('', '', kind);
@@ -93,9 +93,16 @@ export class NotebookPanel {
       if(block.displayValue!==content.display || block.displayText!==content.text) {
         const richKey=JSON.stringify([content.display??null,content.text]);
         if(block.richKey!==richKey) {
-          block.querySelector(':scope > .rich-output')?.remove();
-          const rich=renderDisplay(content.display,content.text);output.hidden=!!rich;
-          if(rich) block.insertBefore(rich,output);block.richKey=richKey;
+          const existing=block.querySelector(':scope > .rich-output');
+          if(!existing?.updateInput?.(content.display,content.text)) {
+            existing?.dispose?.();existing?.remove();
+            const id=notebook.state.id;
+            const rich=renderDisplay(content.display,content.text,{onInput:(key,value)=>{
+              if(notebook.state.id===id) notebook.setInputValue(key,value);
+            }});output.hidden=!!rich;
+            if(rich) block.insertBefore(rich,output);
+          }
+          block.richKey=richKey;
         }
         block.displayValue=content.display;block.displayText=content.text;
       }
@@ -363,7 +370,7 @@ export class NotebookPanel {
       if (documentId !== notebook.state.id) { documentId = notebook.state.id; selection.anchor = selection.focus = null; selectionActive = false; selection.mode = 'cells'; for (const view of cards.values()) clearObservations(view, renderObservation); }
       const cells = editable(); selection.reconcile(cells.map(c => c.key));
       const current = new Set(selection.keys);
-      for (const [key, view] of cards) if (!current.has(key)) { view.editor.destroy(); view.card.remove(); cards.delete(key); }
+      for (const [key, view] of cards) if (!current.has(key)) { view.editor.destroy(); for(const rich of view.results.querySelectorAll('.rich-output'))rich.dispose?.();view.card.remove(); cards.delete(key); }
       const list = part('cells');
       list.querySelectorAll('.insertion').forEach(n => n.remove());
       let prior = null;
@@ -531,7 +538,7 @@ export class NotebookPanel {
       if (reason === 'edit' && s.mode === 'source') for (const view of cards.values()) clearObservations(view, renderObservation);
       if (reason === 'document') renderCells();
       renderSelection();
-      if (reason === 'result' || reason === 'edit' || reason === 'diagnostics') renderResults();
+      if (reason === 'result' || reason === 'edit' || reason === 'input' || reason === 'diagnostics') renderResults();
       if (!notebook.result && reason === 'status') renderResults();
       if(!part('find-bar').hidden && searchSnapshot!==searchIdentity()){searchMatches=[];searchStatus('Searching…');clearTimeout(searchRefresh);searchRefresh=setTimeout(()=>updateFind(),120);}
     }
@@ -675,7 +682,7 @@ export class NotebookPanel {
         if (schedule) notebook.resumeScheduling();
       }
     };
-    this.disposeEditors = () => { titleSize.disconnect(); searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++; sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) view.editor.destroy(); };
+    this.disposeEditors = () => { titleSize.disconnect(); searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++; sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) {view.editor.destroy();for(const rich of view.results.querySelectorAll('.rich-output'))rich.dispose?.();} };
   }
   get title() { return this.notebook.state?.title || 'Untitled'; }
   get loading() { return this.root.dataset.loading === 'true'; }

@@ -12,6 +12,27 @@ Display :: { version : U64, kind : Str, text : Str, content : Str, mime : Str, c
         Display.({ version: 1, kind: "image", text: clip(alt, 16384), content: base64, mime, columns: [], rows: [], row_count: 0, column_count: 0 })
     }
 
+    # HTML and widgets are isolated from the notebook. SVG is rendered as an image.
+    markup = |kind, alt, source| if List.len(Str.to_utf8(source)) > 16384 {
+        text("${clip(alt, 16000)}\nMarkup preview omitted: source is limited to 16 KiB.")
+    } else {
+        Display.({ version: 1, kind, text: clip(alt, 16384), content: source, mime: "", columns: [], rows: [], row_count: 0, column_count: 0 })
+    }
+    html = |alt, source| markup("html", alt, source)
+    svg = |alt, source| markup("svg", alt, source)
+    widget = |alt, source| markup("widget", alt, source)
+
+    # Native notebook input; custom HTML widgets remain isolated.
+    slider : { key : Str, label : Str, min : F64, max : F64, step : F64, default : F64, value : F64 } -> Display
+    slider = |config| Display.({ version: 1, kind: "slider", text: "${config.label}: ${config.value.to_str()}", content: Json.to_str({ key: config.key, label: config.label, min: config.min.to_str(), max: config.max.to_str(), step: config.step.to_str(), default: config.default.to_str(), value: config.value.to_str() }), mime: "", columns: [], rows: [], row_count: 0, column_count: 0 })
+
+    custom_input : { key : Str, label : Str, min : F64, max : F64, default : F64, html : Str, value : F64 } -> Display
+    custom_input = |config| if List.len(Str.to_utf8(config.html)) > 16384 {
+        text("Custom input omitted: HTML is limited to 16 KiB.")
+    } else {
+        Display.({ version: 1, kind: "input", text: "${config.label}: ${config.value.to_str()}", content: Json.to_str({ key: config.key, label: config.label, min: config.min.to_str(), max: config.max.to_str(), default: config.default.to_str(), value: config.value.to_str(), html: config.html }), mime: "", columns: [], rows: [], row_count: 0, column_count: 0 })
+    }
+
     # Up to 200 rows and 16 columns; each preview cell is bounded to 128 UTF-8 bytes.
     # Convert numbers with Str.inspect: JavaScript never rounds them through Number.
     table = |columns, rows| {

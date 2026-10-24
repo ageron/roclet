@@ -3913,5 +3913,57 @@
         "events"
       ]
     }
+  },
+  {"name": "M5: rich html has plain alternative", "request": {"operation": "document", "action": "evaluate", "format": "roc", "source": "import Display\n# %%\nDisplay.html(\"Plain html\", \"<h2>Hello</h2>\")"}, "expect": {"status": "ok", "display_kinds": ["html"], "evaluated_values": ["Plain html"]}},
+  {"name": "M5: rich svg has plain alternative", "request": {"operation": "document", "action": "evaluate", "format": "roc", "source": "import Display\n# %%\nDisplay.svg(\"Plain svg\", \"<svg xmlns=\\\"http://www.w3.org/2000/svg\\\"><rect width=\\\"10\\\" height=\\\"10\\\"/></svg>\")"}, "expect": {"status": "ok", "display_kinds": ["svg"], "evaluated_values": ["Plain svg"]}},
+  {"name": "M5: rich widget has plain alternative", "request": {"operation": "document", "action": "evaluate", "format": "roc", "source": "import Display\n# %%\nDisplay.widget(\"Plain widget\", \"<button>Click</button>\")"}, "expect": {"status": "ok", "display_kinds": ["widget"], "evaluated_values": ["Plain widget"]}},
+  {"name": "M5: oversized markup keeps a readable result", "request": {"operation": "document", "action": "evaluate", "format": "roc", "source": "import Display\ngrow = |s, n| if n == 0 { s } else { grow(Str.concat(s, s), n - 1) }\n# %%\nDisplay.html(\"Too big\", grow(\"AAAA\", 13))"}, "expect": {"status": "ok", "display_kinds": ["text"], "evaluated_values": ["Too big\nMarkup preview omitted: source is limited to 16 KiB."]}},
+  {"name": "multiline strings preserve later cell boundaries", "request": {"operation": "document", "action": "convert", "format": "roc", "target": "markdown", "source": "# %%\nname = \"world\"\nmessage =\n    \\\\Hello ${name}\n    \\\\# %% literal marker\nout_message = message\n\n# %%\nout_next = 7\n"}, "expect": {"status": "ok", "kinds": ["code", "code"], "roundtrip": true}}
+,
+{
+  "name": "M5: slider defaults",
+  "request": {
+    "operation": "document",
+    "action": "evaluate",
+    "format": "roc",
+    "source": "import Display\nimport Input\n# %%\ncontrol = Input.slider({ key: \"width\", label: \"Width\", min: 1, max: 20, step: 1, default: 5 })\nout_control = control.display\n# %%\nout_area = control.value * 3"
+  },
+  "expect": {
+    "status": "ok",
+    "display_kinds": [
+      "slider",
+      null
+    ],
+    "evaluated_values": [
+      "Width: 5",
+      "15"
+    ]
   }
+},
+{
+  "name": "M5: slider browser value",
+  "request": {
+    "operation": "document",
+    "action": "evaluate",
+    "format": "roc",
+    "source": "import Display\nimport Input\n# %%\ncontrol = Input.slider({ key: \"width\", label: \"Width\", min: 1, max: 20, step: 1, default: 5 })\nout_control = control.display\n# %%\nout_area = control.value * 3",
+    "modules": [
+      {
+        "name": "InputValues",
+        "content": "InputValues := [].{\n    get : Str, F64 -> F64\n    get = |_key, _default| 8.0\n}\n"
+      }
+    ]
+  },
+  "expect": {
+    "status": "ok",
+    "display_kinds": [
+      "slider",
+      null
+    ],
+    "evaluated_values": [
+      "Width: 8",
+      "24"
+    ]
+  }
+}
 ]

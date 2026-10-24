@@ -16,7 +16,8 @@ pub fn main(init: std.process.Init) !void {
     while (lines.next()) |line| {
         if (std.mem.startsWith(u8, line, "Created: ")) archive_path = std.mem.trim(u8, line[9..], "\r");
     }
-    const archive = archive_path orelse return error.MissingBundle;
+    // Roc may print a path relative to the project, but unbundle runs elsewhere.
+    const archive = try std.fs.path.resolve(a, &.{ root, archive_path orelse return error.MissingBundle });
     const basename = std.fs.path.basename(archive);
     const extracted = try std.fs.path.join(a, &.{ bundle_dir, basename[0 .. basename.len - ".tar.zst".len] });
     // This directory contains only this test's generated extraction.
@@ -24,7 +25,7 @@ pub fn main(init: std.process.Init) !void {
     const unpacked = try std.process.run(a, init.io, .{ .argv = &.{ roc, "unbundle", archive }, .cwd = .{ .path = bundle_dir }, .stdout_limit = .limited(1024 * 1024), .stderr_limit = .limited(1024 * 1024) });
     if (unpacked.term != .exited or unpacked.term.exited != 0) return error.PackageExtractionFailed;
     const bundled_package = try std.fs.path.join(a, &.{ extracted, "main.roc" });
-    inline for (.{ "Display.roc", "main.roc" }) |name| {
+    inline for (.{ "Display.roc", "Input.roc", "InputValues.roc", "main.roc" }) |name| {
         const from_archive = try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ extracted, name }), a, .limited(1024 * 1024));
         const from_source = try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, "package", name }), a, .limited(1024 * 1024));
         if (!std.mem.eql(u8, from_archive, from_source)) return error.StaleDisplayPackage;

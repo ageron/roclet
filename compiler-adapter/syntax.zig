@@ -23,8 +23,10 @@ pub fn roc(a: A, source: []const u8) !Facts {
         if (tag == .EndOfFile) break;
         const r = ast.tokens.resolve(i);
         try tokens.append(a, .{ .start = r.start.offset, .end = r.end.offset, .depth = depth, .tag = @tagName(tag) });
+        // MultilineStringStart prefixes one line; it has no closing StringEnd.
+        // Its StringPart tokens cover the literal bytes, while interpolations nest.
         switch (tag) {
-            .OpenRound, .NoSpaceOpenRound, .OpenSquare, .OpenCurly, .OpenStringInterpolation, .StringStart, .MultilineStringStart => depth += 1,
+            .OpenRound, .NoSpaceOpenRound, .OpenSquare, .OpenCurly, .OpenStringInterpolation, .StringStart => depth += 1,
             .CloseRound, .CloseSquare, .CloseCurly, .CloseStringInterpolation, .StringEnd => depth -|= 1,
             else => {},
         }

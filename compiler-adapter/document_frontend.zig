@@ -148,7 +148,7 @@ fn safe(facts: syntax.Facts, pos: u64) bool {
         if (t.end <= pos) before = t;
     }
     const t = before orelse return true;
-    const depth = if (oneOf(t.tag, &.{ "OpenCurly", "OpenSquare", "OpenRound", "NoSpaceOpenRound", "StringStart", "MultilineStringStart", "OpenStringInterpolation" })) t.depth + 1 else if (oneOf(t.tag, &.{ "CloseCurly", "CloseSquare", "CloseRound", "StringEnd", "CloseStringInterpolation" })) t.depth -| 1 else t.depth;
+    const depth = if (oneOf(t.tag, &.{ "OpenCurly", "OpenSquare", "OpenRound", "NoSpaceOpenRound", "StringStart", "OpenStringInterpolation" })) t.depth + 1 else if (oneOf(t.tag, &.{ "CloseCurly", "CloseSquare", "CloseRound", "StringEnd", "CloseStringInterpolation" })) t.depth -| 1 else t.depth;
     return depth == 0;
 }
 fn diagnostic(a: A, ds: *std.ArrayList(Diagnostic), code: S, message: S, start: u64, end: u64, index: usize) !void {

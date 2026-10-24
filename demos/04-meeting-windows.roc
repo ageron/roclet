@@ -166,7 +166,12 @@ recommend_meeting = |result, minutes| {
                 .map_err(|error| Str.inspect(error))?
             meeting = PosixSpan.new(start, end).map_err(|error| Str.inspect(error))?
             chosen = describe_span(meeting)?
-            Ok("**Book ${chosen.label}.**\n\nThis gives us ${minutes.to_str()} uninterrupted minutes. Qualifying gaps: **${windows.len().to_str()}**.")
+            recommendation =
+                \\**Book ${chosen.label}.**
+                \\
+                \\This gives us ${minutes.to_str()} uninterrupted minutes.
+                \\Qualifying gaps: **${windows.len().to_str()}**.
+            Ok(recommendation)
         }
     }
 }

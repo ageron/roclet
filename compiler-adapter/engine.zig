@@ -177,6 +177,17 @@ pub fn programModules(arena: Allocator, workspace_io: Io, extras_prefix: []const
             try extras.append(arena, .{ .name = "Display", .content = content });
         } else try extras.append(arena, .{ .name = "Display", .content = bundled });
     }
+    inline for (.{ "Input", "InputValues" }) |name| {
+        var found = false;
+        for (supplied) |module| if (std.mem.eql(u8, module.name, name)) {
+            found = true;
+        };
+        if (!found) {
+            const path = try std.mem.concat(arena, u8, &.{ extras_prefix, name, ".roc" });
+            const content = workspace_io.readFile(path, arena) catch @embedFile(name ++ ".roc");
+            try extras.append(arena, .{ .name = name, .content = content });
+        }
+    }
     var rich_support = false;
     if (trusted_display) {
         const facts = try @import("syntax.zig").roc(arena, user_source);

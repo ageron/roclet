@@ -1,3 +1,4 @@
+import {inputValues, inputModule} from './input-values.mjs';
 import { DocumentSession } from './document-session.mjs';
 import { renameEdits } from './compiler-tools.mjs';
 import { projectFiles, projectPath } from './project-files.mjs';
@@ -13,7 +14,7 @@ export function newDraft(title = 'Untitled', demo = false) {
     makeCell('code', 'area = width * height\nout_dimensions = {\n    dbg area\n    area\n}'),
   ] : [makeCell()];
   return { schema: 1, id: key(), title, format: 'roc', preamble: 'app [main!] {}', metadata: '', cells,
-    source: '', sourceCurrent: false, files: [], mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
+    source: '', sourceCurrent: false, inputValues: {}, files: [], mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
 }
 // A new draft with the same content as another: new id, fresh cell keys, so it
 // can be open and saved beside the original without sharing anything.
@@ -30,7 +31,7 @@ export function openedDraft(source, filename) {
   return record;
 }
 export function validDraft(record) {
-  try { projectFiles(record?.files); } catch { return false; }
+  try { projectFiles(record?.files); inputValues(record?.inputValues); } catch { return false; }
   return record?.schema === 1 && typeof record.id === 'string' && typeof record.title === 'string'
     && ['roc', 'markdown'].includes(record.format) && typeof record.source === 'string'
     && Array.isArray(record.cells) && record.cells.every(c => typeof c.key === 'string' && typeof c.source === 'string' && ['code','markdown','generated'].includes(c.kind));
@@ -40,6 +41,7 @@ export function requestFor(state, action, target = state.format) {
   request.files = projectFiles(state.files).map(file => ({...file, path:`/workspace/${file.path}`}));
   if (state.sourceCurrent) request.context = { preamble: state.preamble, metadata: state.metadata };
   else request.draft = { preamble: state.preamble, metadata: state.metadata, cells: state.cells.map(({ kind, source, attributes, outputs }) => ({ kind, source, attributes, outputs })) };
+  if(['evaluate','analyze','check'].includes(action)) request.modules=[inputModule(state.inputValues)];
   return request;
 }
 export function cellsFrom(result, previous = []) {
@@ -61,6 +63,11 @@ export class Notebook {
     this.diagnosticsDeferred = false; this.lastChecked = null; this.baselineId = null; this.resetBaseline = false;
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
     this.activeOperation = null;
+  }
+  setInputValue(key, value) {
+    const values=inputValues({...this.state.inputValues,[key]:value});
+    if(this.state.inputValues?.[key]===value) return;
+    this.change(s=>{s.inputValues=values;}, {group:`input:${key}`,source:this.state.sourceCurrent,reason:'input'});
   }
   get busy() { return this.activeOperation === this.runId; }
   finishOperation(token) {

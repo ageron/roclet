@@ -238,6 +238,8 @@ fn adapterModule(b: *std.Build, roc: *std.Build.Dependency, options: *std.Build.
     if (target.result.cpu.arch == .wasm32) module.addImport("compressed_builtins", compressedBuiltins(b, roc, compiled_builtins));
     module.addCSourceFile(.{ .file = b.path("vendor/md4c/md4c.c"), .flags = &.{ "-std=c99", "-O2" } });
     module.addIncludePath(b.path("vendor/md4c"));
+    module.addAnonymousImport("Input.roc", .{ .root_source_file = b.path("package/Input.roc") });
+    module.addAnonymousImport("InputValues.roc", .{ .root_source_file = b.path("package/InputValues.roc") });
     module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("package/Display.roc") });
     module.addAnonymousImport("display-package-url.txt", .{ .root_source_file = b.path("package/display-package-url.txt") });
     module.addImport("roclet_options", options);

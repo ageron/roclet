@@ -348,11 +348,11 @@ fn displayImports(a: A, source: []const u8, packaged: bool) ![]const u8 {
         if (ts.len < 2) continue;
         const start: usize = @intCast(ts[1].start);
         const end: usize = @intCast(ts[1].end);
-        if (packaged and std.mem.eql(u8, source[start..end], "Display")) {
+        if (packaged and (std.mem.eql(u8, source[start..end], "Display") or std.mem.eql(u8, source[start..end], "Input"))) {
             try edits.appendSlice(a, source[cursor..start]);
             try edits.appendSlice(a, "roclet.");
             cursor = start;
-        } else if (!packaged and ts.len >= 3 and std.mem.eql(u8, source[start..end], "roclet") and std.mem.eql(u8, source[@intCast(ts[2].start)..@intCast(ts[2].end)], ".Display")) {
+        } else if (!packaged and ts.len >= 3 and std.mem.eql(u8, source[start..end], "roclet") and (std.mem.eql(u8, source[@intCast(ts[2].start)..@intCast(ts[2].end)], ".Display") or std.mem.eql(u8, source[@intCast(ts[2].start)..@intCast(ts[2].end)], ".Input"))) {
             // Keep byte positions identical for diagnostics and dependency spans.
             try edits.appendSlice(a, source[cursor..start]);
             try edits.appendNTimes(a, ' ', @intCast(ts[2].start + 1 - start));
