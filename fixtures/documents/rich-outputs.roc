@@ -3,54 +3,49 @@ import roclet.Display
 import roclet.Input
 
 # %%
-# # Rich outputs
-# Move the width slider to update the summary, table, HTML card, and SVG diagram. Expand **Plain text**
-# beneath a result to see what the same value prints in a standalone Roc script.
-#
-# Inline math: $A = w \times h$. Display math:
-#
-# $$\int_0^1 x^2\,dx = \frac{1}{3}$$
+# # Rich Outputs and Widgets
+# Roclet supports several rich outputs and widgets. For example, the following code creates a slider widget. Changing its position will automatically recompute the dependent Roc cells.
 
 # %%
-width_control = Input.slider({
+width_slider = Input.slider({
     key: "width", label: "Width", min: 1, max: 20, step: 1, default: 5,
 })
-width = wall_control.value
+out_1 = width_slider.display
+
+# %%
+# The slider's value is available in Roc:
+
+# %%
 height = 3
-out_width = width_control.display
+width = width_slider.value
+wall_area = height * width
+out_2 = wall_area
+
+# %%
+# Let's display the area using Markdown, including a LaTeX math equation:
 
 # %%
 summary =
     \\## Wall area
-    \\The area is **${(width * height).to_str()}** square metres.
+    \\The area is **${wall_area.to_str()}** square metres.
     \\
-    \\$A = ${(width * height).to_str()}$
-out_1 = Display.markdown(summary)
+    \\$A = W \\times H = ${wall_area.to_str()}$
+
+out_3 = Display.markdown(summary)
 
 # %%
-out_2 = Display.table(["Measurement", "Value"], [
+# Now let's display this data as a table:
+
+# %%
+out_4 = Display.table(["Measurement", "Value"], [
     ["Width", width.to_str()],
     ["Height", height.to_str()],
     ["Area", (width * height).to_str()],
-    ["Exact large integer", "9007199254740993"],
 ])
 
 # %%
-# Images contain their own data, so this swatch also works offline.
-# PNG, JPEG, and WebP images are supported.
-
-# %%
-swatch = Str.join_with([
-    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGOwrw2h",
-    "KWIYtWDUglELRi0YtWDUglELRi0YtWDUglELhooFADqrQD2nQXpjAAAAAElFTkSu",
-    "QmCC",
-], "")
-out_3 = Display.image("Green colour swatch", "image/png", swatch)
-
-# %%
-# ## HTML and SVG
-# HTML supports styled layouts and native controls such as expandable details.
-# SVG diagrams scale without losing sharpness. Change `width` above to redraw both.
+# ## HTML
+# Roclet also supports HTML with styled layouts and native controls such as expandable details:
 
 # %%
 title = "Wall area: ${(width * height).to_str()} square metres"
@@ -63,12 +58,17 @@ html =
     \\        <p>Width × height: ${width.to_str()} × ${height.to_str()}</p>
     \\    </details>
     \\</article>
-out_4 = Display.html(title, html)
+out_5 = Display.html(title, html)
+
+# %%
+# ## Images
+#
+# Roclet can generate SVG images:
 
 # %%
 diagram_title = "A ${width.to_str()} by ${height.to_str()} metre wall"
 svg =
-    \\<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 160">
+    \\<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 160">
     \\    <rect x="20" y="15"
     \\        width="${(width * 30).to_str()}"
     \\        height="${(height * 30).to_str()}"
@@ -77,14 +77,25 @@ svg =
     \\        ${width.to_str()} × ${height.to_str()} metres
     \\    </text>
     \\</svg>
-out_5 = Display.svg(diagram_title, svg)
+out_6 = Display.svg(diagram_title, svg)
 
 # %%
-# ## An interactive wall
-# This custom control shares the width input with the slider above. It sends
-# the width to Roc, which computes the area in the other outputs. With auto-run
-# off, use Run all to update those results. The frame stays alive during updates.
-# Imported snapshots and exported reports do not execute widget scripts.
+# You can also output PNG, JPEG, and WebP images:
+
+# %%
+green_square = Str.join_with([
+    "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGOwrw2h",
+    "KWIYtWDUglELRi0YtWDUglELRi0YtWDUglELhooFADqrQD2nQXpjAAAAAElFTkSu",
+    "QmCC",
+], "")
+out_7 = Display.image("Green square", "image/png", green_square)
+
+# %%
+# ## Custom widgets
+# You can define your own custom widgets using HTML and JavaScript. They run in their own frame and stay alive during updates.
+# This widget shares the `"width"` key with the first slider, so either control updates
+# the same Roc value. `roclet.setValue` sends changes to Roc, and `roclet.onValue`
+# receives changes from the other slider. With auto-run off, use **Run all** to update the results:
 
 # %%
 widget_html =
@@ -122,22 +133,23 @@ widget_html =
     \\    };
     \\    roclet.onValue(value => { width.value = value; update(); });
     \\</script>
-wall_control = Input.custom({
+custom_slider = Input.custom({
     key: "width", label: "Interactive wall", min: 1, max: 20, default: 5,
     html: widget_html,
 })
-out_6 = wall_control.display
+out_8 = custom_slider.display
 
 # %% generated
 display! = |value| echo!("${Str.inspect(value)}\n")
 
 main! = |_args| {
-    display!(out_width)
     display!(out_1)
     display!(out_2)
     display!(out_3)
     display!(out_4)
     display!(out_5)
     display!(out_6)
+    display!(out_7)
+    display!(out_8)
     Ok({})
 }

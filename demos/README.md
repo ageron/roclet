@@ -14,8 +14,8 @@ or offline Roclet installation, or run it directly with `roc notebook.roc`.
 Rich-output demos fetch the Display package automatically on the first ordinary
 Roc run; Roclet already includes it for offline use.
 
-For Markdown, tables, and an embedded image together, use
-[open the rich outputs demo](https://ageron.github.io/roclet/web/edit.html?example=rich-outputs).
+For Markdown, tables, HTML, images, and interactive widgets,
+[open the Rich Outputs and Widgets demo](https://ageron.github.io/roclet/web/edit.html?example=rich-outputs).
 
 These are small, editable examples, not screenshots. Keep experimenting, then
 use **Download a copy** to save your version. [Installation and offline use](../docs/installation.md).

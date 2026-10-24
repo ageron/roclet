@@ -9,7 +9,7 @@ export const examples = new Map([
   ['coding-puzzle', ['../demos/02-coding-puzzle.roc', 'Coding puzzle: longest streak.roc']],
   ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
   ['meeting-windows', ['../demos/04-meeting-windows.roc', 'Finding room for a design review.roc']],
-  ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich outputs.roc']],
+  ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich Outputs and Widgets.roc']],
 ]);
 export const exampleTitle = name => examples.get(name)?.[1].replace(/\.roc$/, '');
 

@@ -10,7 +10,7 @@ the compiler, so give it a moment to load.
 
 Choose a demo from the home page, or select **New notebook** to start an empty
 notebook. Recent notebooks reopen your saved drafts. In the editor, use
-**File → Rich outputs example** to try a first calculation, or **File → New notebook**
+**File → Rich Outputs and Widgets example** to try a first calculation, or **File → New notebook**
 to start another. Change `width` and see its results update. Use the insertion buttons between
 cells to add code or Markdown. Press Cmd+Enter on macOS or Ctrl+Enter elsewhere
 to run a cell. Auto-run updates results after edits.

@@ -166,7 +166,7 @@ function bind() {
   $('undo').onclick = () => active().undo(false); $('redo').onclick = () => active().undo(true);
   $('recovery-copy').onclick=()=>perform(()=>notebook().recoveryCopy());
   $('new').onclick = () => perform(async () => { const target = active(); await bench.load(target, { fresh: true }); bench.writeUrl(); target.editSelection(); });
-  $('rich-example').onclick=()=>perform(async()=>{const response=await fetch('../fixtures/documents/rich-outputs.roc');if(!response.ok) throw new Error('Example unavailable; rebuild the offline distribution.');await notebook().open(await response.text(),'Rich outputs.roc');closeMenus();});
+  $('rich-example').onclick=()=>perform(async()=>{const response=await fetch('../fixtures/documents/rich-outputs.roc');if(!response.ok) throw new Error('Example unavailable; rebuild the offline distribution.');await notebook().open(await response.text(),'Rich Outputs and Widgets.roc');closeMenus();});
   $('recent').onclick = () => {
     closeMenus(); $('recent-list').replaceChildren(); $('recent-status').textContent = 'Loading notebooks…';
     $('recent-dialog').showModal(); void refreshLibrary();

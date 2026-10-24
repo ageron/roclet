@@ -68,14 +68,14 @@ try {
   const rows=Array.from({length:205},(_,i)=>`["${i}"]`).join(',');const bounded=await session.request({operation:'document',action:'evaluate',format:'roc',source:`import Display\n# %%\nDisplay.table(["Index"], [${rows}])`});assert.equal(bounded.status,'ok');assert.equal(bounded.evaluation.values[0].display.rows.length,200);assert.equal(bounded.evaluation.values[0].display.row_count,205);
   report('Roc bounds table previews before crossing the WASM boundary');
   notebook=await startNotebook({save:async()=>{},list:async()=>[]});await until(()=>notebook.result?.status==='ok');
-  await notebook.open(await fetch('../fixtures/documents/rich-outputs.roc').then(r=>r.text()),'Rich outputs.roc');notebook.setAuto(false);await notebook.run();
-  assert.equal(notebook.result.status,'ok');assert.equal(document.querySelectorAll('#cells .rich-output').length,7);assert.equal(document.querySelectorAll('#cells .display-image').length,2);assert.match(document.querySelector('#cells table').textContent,/9007199254740993/);
+  await notebook.open(await fetch('../fixtures/documents/rich-outputs.roc').then(r=>r.text()),'Rich Outputs and Widgets.roc');notebook.setAuto(false);await notebook.run();
+  assert.equal(notebook.result.status,'ok');assert.equal(document.querySelectorAll('#cells .rich-output').length,7);assert.equal(document.querySelectorAll('#cells .display-image').length,2);assert.match(document.querySelector('#cells table').textContent,/Measurement[\s\S]*Width[\s\S]*Area/);
   await until(()=>document.querySelector('#cells .display-image')?.complete);assert(document.querySelector('#cells .display-image').naturalWidth>0);
   const original=document.querySelector('#cells table'),slider=document.querySelector('#cells input[type="range"]');
   // A srcdoc frame finishing navigation can reset focus in its parent.
   await until(()=>[...document.querySelectorAll('#cells iframe')].every(frame=>loadedFrames.has(frame)));
   assert(slider && !slider.disabled);slider.focus();assert(document.activeElement===slider,`Initial focus: ${document.activeElement?.outerHTML.slice(0,200)}`);slider.value=8;slider.dispatchEvent(new Event('input',{bubbles:true}));
-  assert(document.activeElement===slider,'Focus lost on input event');assert.equal(notebook.state.inputValues.width,8);assert(document.contains(original));assert.equal(original.closest('.result-block').dataset.stale,'true');await notebook.run();assert.match(document.querySelector('#cells .markdown').textContent,/Rich outputs|area/);assert(notebook.result.evaluation.values.some(v=>v.text.includes('24')));
+  assert(document.activeElement===slider,'Focus lost on input event');assert.equal(notebook.state.inputValues.width,8);assert(document.contains(original));assert.equal(original.closest('.result-block').dataset.stale,'true');await notebook.run();assert.match(document.querySelector('#cells .markdown').textContent,/Rich Outputs|area/);assert(notebook.result.evaluation.values.some(v=>v.text.includes('24')));
   assert.equal(document.querySelector('#cells input[type="range"]'),slider);assert(document.activeElement===slider,`After run focus: ${document.activeElement?.outerHTML.slice(0,200)}`);
   assert.equal(slider.value,'8');
   notebook.setAuto(true);slider.value=7;slider.dispatchEvent(new Event('input',{bubbles:true}));
@@ -91,7 +91,7 @@ try {
   const imported=await importBundle(await bundle.arrayBuffer(),compiler);assert(imported.record.savedResults.snapshots.some(s=>s.display?.kind==='table'));await notebook.replace(imported.record);await until(()=>document.querySelectorAll('#cells .unverified .rich-output').length===7);assert.equal(notebook.state.autoRun,false);assert.equal(notebook.state.inputValues.width,9);assert([...document.querySelectorAll('#cells .unverified iframe')].every(f=>f.getAttribute('sandbox')===''));
   assert(document.querySelector('#cells .unverified input[type=range]').disabled);
   await notebook.run();assert(notebook.result.evaluation.values.some(v=>v.text.includes('27')));
-  const html=new DOMParser().parseFromString(await (await exportReport(capture)).text(),'text/html');assert(html.querySelector('table'));assert.equal(html.querySelectorAll('iframe').length,2);assert([...html.querySelectorAll('iframe')].every(f=>f.getAttribute('sandbox')===''));assert(html.querySelector('img[src^="data:image/png;base64,"]'));assert.equal(html.querySelectorAll('script,[onerror]').length,0);assert.match(html.body.textContent,/9007199254740993/);
+  const html=new DOMParser().parseFromString(await (await exportReport(capture)).text(),'text/html');assert(html.querySelector('table'));assert.equal(html.querySelectorAll('iframe').length,2);assert([...html.querySelectorAll('iframe')].every(f=>f.getAttribute('sandbox')===''));assert(html.querySelector('img[src^="data:image/png;base64,"]'));assert.equal(html.querySelectorAll('script,[onerror]').length,0);assert.match(html.body.textContent,/Measurement[\s\S]*Width[\s\S]*Area/);
   report('bundles preserve unverified rich snapshots and the pinned Display package; reports preserve safe rich output');
   const bridgeHtml=`<script>
     roclet.onValue(value=>{parent.postMessage({customValue:value},'*');roclet.setValue(value);});
