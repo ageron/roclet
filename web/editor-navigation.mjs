@@ -7,7 +7,8 @@ export function horizontalGoal(view, range = view.state.selection.main) {
   return coords ? coords.left - view.contentDOM.getBoundingClientRect().left : 18;
 }
 export function cursorOnLine(view, line, goal) {
-  const coords = view.coordsAtPos(line.from), rect = view.contentDOM.getBoundingClientRect();
+  const rendered = line.to >= view.viewport.from && line.from <= view.viewport.to;
+  const coords = rendered ? view.coordsAtPos(line.from) : null, rect = view.contentDOM.getBoundingClientRect();
   let pos = coords && view.posAtCoords({x:rect.left + goal,y:(coords.top + coords.bottom) / 2}, true);
   // CodeMirror's column helper accounts for tabs and grapheme clusters when the
   // target line is not yet drawn. A measurement refines it after scrolling.
@@ -41,10 +42,10 @@ export function moveVertical(view, forward, page, extend, adjacent) {
   const ranges = state.selection.ranges.map(range => {
     if (!extend && !range.empty) return EditorSelection.cursor(forward ? range.to : range.from);
     const goal = horizontalGoal(view,range), start = EditorSelection.cursor(range.head,range.assoc,undefined,goal);
-    let moved = view.moveVertically(start,forward,page ? height : undefined);
-    const target = state.doc.lineAt(moved.head);
-    moved = cursorOnLine(view,target,goal);
-    // Extending a page selection through an edge includes the entire edge line.
+    const target = page==='edge' ? state.doc.line(forward ? state.doc.lines : 1)
+      : state.doc.lineAt(view.moveVertically(start,forward,page ? height : undefined).head);
+    let moved = cursorOnLine(view,target,goal);
+    // Page and cell-edge selections include the entire boundary line.
     if (page && extend && target.number === (forward ? state.doc.lines : 1)) moved = EditorSelection.cursor(forward ? state.doc.length : 0, 0, undefined, goal);
     return extend ? EditorSelection.range(range.anchor,moved.head,goal) : EditorSelection.cursor(moved.head,moved.assoc,undefined,goal);
   });

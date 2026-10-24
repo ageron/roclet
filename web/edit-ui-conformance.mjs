@@ -252,7 +252,7 @@ try {
   key('z',{metaKey:true}); assert.deepEqual(notebook.state.cells.map(c=>c.source),importedSources);
   report('Markdown merges remain literal; imported Roc with saved snapshots uses current editable spans and stays runnable');
   // Navigation fixtures deliberately mix short lines, tabs, Unicode and cell kinds.
-  notebook.change(s=>{s.cells=[makeCell('code','abcdefghij\nx\nabcdefghij'),makeCell('markdown','first line\nsecond line'),makeCell('code','0123456789\nlast line')];});
+  notebook.change(s=>{s.preamble='app [main!] {}';s.cells=[makeCell('code','abcdefghij\nx\nabcdefghij'),makeCell('markdown','first line\nsecond line'),makeCell('code','0123456789\nlast line')];});
   const viewAt=i=>editorFor(inputs()[i]).view;
   const setCursor=(i,line,column)=>{const view=viewAt(i);inputs()[i].focus();view.dispatch({selection:{anchor:view.state.doc.line(line).from+column}});};
   const at=i=>{const view=viewAt(i),r=view.state.selection.main,l=view.state.doc.lineAt(r.head);return [l.number,r.head-l.from];};
@@ -260,15 +260,22 @@ try {
   setCursor(0,1,7);await measure();key('ArrowDown');assert.deepEqual(at(0),[2,1]);key('ArrowDown');assert.deepEqual(at(0),[3,7]);
   key('ArrowDown');await measure();assert(document.activeElement===inputs()[1]);assert.deepEqual(at(1),[1,7]);assert(!isHidden(inputs()[1]));
   key('ArrowUp');await measure();assert(document.activeElement===inputs()[0]);assert.deepEqual(at(0),[3,7]);
-  key('ArrowUp');key('ArrowUp');assert.deepEqual(at(0),[1,7]);key('ArrowUp');assert.deepEqual(at(0),[1,7]);
+  key('ArrowUp');key('ArrowUp');assert.deepEqual(at(0),[1,7]);key('ArrowUp');await measure();
+  const header=editorFor(document.querySelector('[data-part="app-header-source"] .cm-content'));
+  assert(document.activeElement===header.element,`Expected header focus; got ${document.activeElement.outerHTML.slice(0,250)}`);assert(document.querySelector('[data-part="app-header"]').open);
+  const headerGoal=header.view.state.selection.main.goalColumn;
+  key('ArrowDown');await measure();assert(document.activeElement===inputs()[0]);assert(at(0)[1]===7,`Column ${at(0)} header goal ${headerGoal}, cell goal ${viewAt(0).state.selection.main.goalColumn}`);
+  key('Escape');key('ArrowUp');assert(document.activeElement===document.querySelector('[data-part="app-header"] > summary'));
+  key('Enter');assert(document.activeElement===header.element,`Expected header focus; got ${document.activeElement.outerHTML.slice(0,250)}`);key('Escape');key('ArrowDown');assert(document.activeElement===cards()[0]);
+  report('App header joins editor boundary navigation and cell selection in both directions');
   report('vertical motion keeps its goal through short lines and crosses both code and Markdown cell boundaries');
   // Tab expansion and Unicode use the editor engine’s horizontal geometry.
   input(inputs()[0],'\tabcdefgh\nabcdefghijklm');setCursor(0,1,4);await measure();key('ArrowDown');assert.deepEqual(at(0),[2,7]);key('ArrowUp');assert.deepEqual(at(0),[1,4]);
   input(inputs()[0],'🙂abcdefgh\nabcdefghijklm');setCursor(0,1,7);await measure();const goalX=viewAt(0).coordsAtPos(viewAt(0).state.selection.main.head).left;key('ArrowDown');assert(Math.abs(viewAt(0).coordsAtPos(viewAt(0).state.selection.main.head).left-goalX)<viewAt(0).defaultCharacterWidth);
   report('column tracking respects tab stops and Unicode visual positions');
   input(inputs()[0],'abcdefghij\nx\nabcdefghij');setCursor(0,1,7);await measure();key('PageDown');assert.deepEqual(at(0),[3,7]);key('PageDown');await measure();assert.deepEqual(at(1),[1,7]);key('PageUp');await measure();assert.deepEqual(at(0),[3,7]);key('ArrowUp',{metaKey:true});assert.deepEqual(at(0),[1,7]);
-  input(inputs()[0],Array.from({length:100},()=> 'abcdefghij').join('\n'));setCursor(0,1,7);await measure();key('PageDown');const pageLine=at(0)[0];assert(pageLine>2 && pageLine<100);assert.equal(at(0)[1],7);key('ArrowDown',{metaKey:true});assert(at(0)[0]>pageLine && at(0)[0]<100);assert.equal(at(0)[1],7);
-  report('Page and Cmd+Up/Down move by the editor viewport, clamp to edge lines, then cross cells');
+  input(inputs()[0],Array.from({length:100},()=> 'abcdefghij').join('\n'));setCursor(0,1,7);await measure();key('PageDown');const pageLine=at(0)[0];assert(pageLine>2 && pageLine<100);assert.equal(at(0)[1],7);key('ArrowDown',{metaKey:true});await measure();assert.deepEqual(at(0),[100,7]);key('ArrowDown',{metaKey:true});await measure();assert(document.activeElement===inputs()[1]);assert.deepEqual(at(1),[1,7]);key('ArrowUp',{metaKey:true});await measure();assert.deepEqual(at(0),[100,7]);key('ArrowUp',{metaKey:true});await measure();assert.deepEqual(at(0),[1,7]);
+  report('Page keys move by a viewport; Cmd+Up/Down jump to cell edges and cross cells at boundaries, preserving columns');
   input(inputs()[0],'abcdefghij\nx\nlast full line');setCursor(0,1,4);await measure();key('ArrowDown',{metaKey:true,shiftKey:true});await measure();
   assert.equal(viewAt(0).state.selection.main.anchor,4);assert.equal(viewAt(0).state.selection.main.head,viewAt(0).state.doc.length);
   setCursor(0,3,4);key('PageUp',{shiftKey:true});await measure();assert.equal(viewAt(0).state.selection.main.head,0);

@@ -49,7 +49,7 @@ export class CellEditor {
       {key:'Tab',run:()=>this.acceptCompletion()},
       {key:'ArrowUp',run:view=>this.moveCompletion(-1)||motion(false)(view),shift:motion(false,false,true)}, {key:'ArrowDown',run:view=>this.moveCompletion(1)||motion(true)(view),shift:motion(true,false,true)},
       {key:'PageUp',run:motion(false,true),shift:motion(false,true,true)}, {key:'PageDown',run:motion(true,true),shift:motion(true,true,true)},
-      {key:'Meta-ArrowUp',run:motion(false,true),shift:motion(false,true,true)}, {key:'Meta-ArrowDown',run:motion(true,true),shift:motion(true,true,true)},
+      {key:'Meta-ArrowUp',run:motion(false,'edge'),shift:motion(false,'edge',true)}, {key:'Meta-ArrowDown',run:motion(true,'edge'),shift:motion(true,'edge',true)},
       {key:'Home',run:view=>smartHome(view),shift:view=>smartHome(view,true)}, {key:'Meta-ArrowLeft',run:view=>smartHome(view),shift:view=>smartHome(view,true)},
       {key:'Mod-Alt-ArrowUp',run:addCursorAbove}, {key:'Mod-Alt-ArrowDown',run:addCursorBelow},
       {key:'Mod-d',run:selectNextOccurrence}, {key:'Mod-Shift-l',run:selectSelectionMatches}, indentWithTab,

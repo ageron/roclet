@@ -115,6 +115,16 @@ export class NotebookPanel {
     }
     const editable = () => notebook.state.cells.filter(c => c.kind !== 'generated');
     const cellIndex = key => notebook.state.cells.findIndex(c => c.key === key);
+    function focusHeader() {
+      notebook.finishEditing();closeMenus();selectionActive=false;selection.mode='cells';renderSelection();
+      const summary=part('app-header').querySelector('summary');
+      summary.focus({preventScroll:true});summary.scrollIntoView({block:'nearest'});
+    }
+    function editHeader(goal) {
+      part('app-header').open=true;
+      headerEditor.focus();
+      if(goal!==undefined)headerEditor.enter(false,goal);
+    }
     function focusCell(key, extend = false) {
       notebook.finishEditing();
       closeMenus(); window.getSelection()?.removeAllRanges(); selection.select(key, extend); selectionActive = true; renderSelection();
@@ -358,7 +368,7 @@ export class NotebookPanel {
         onComposition:value=>{ composing=value; if(value) clearTimeout(notebook.timer); else notebook.schedule(); },
         adjacent:(forward,goal)=>{
           const next=selection.keys[selection.keys.indexOf(cell.key)+(forward?1:-1)];
-          if(!next) return false;
+          if(!next) {if(!forward) {editHeader(goal);return true;}return false;}
           editCell(next); cards.get(next)?.editor.enter(forward,goal); return true;
         },
       });
@@ -560,7 +570,11 @@ export class NotebookPanel {
     });
     const headerEditor=new CellEditor(part('app-header-source'),{highlighter,label:'Roc app header',
       onChange:(value,isComposing,positions)=>notebook.editPreamble(value,isComposing || composing,positions),
-      onFocus:()=>{notebook.finishEditing();selectionActive=false;renderSelection();},
+      onFocus:()=>{notebook.finishEditing();selectionActive=false;selection.mode='cells';renderSelection();},
+      adjacent:(forward,goal)=>{
+        const first=selection.keys[0];if(!forward || !first)return false;
+        notebook.finishEditing();editCell(first);cards.get(first)?.editor.enter(true,goal);return true;
+      },
       onSelection:positions=>{if(notebook?.state){notebook.state.headerSelection=positions;notebook.group=null;}},
       onComposition:value=>{composing=value;if(value)clearTimeout(notebook.timer);else notebook.schedule();},
     });
@@ -609,12 +623,17 @@ export class NotebookPanel {
       if(event.key==='Escape' && target.closest?.('.cm-search')) return;
       if (event.key === 'Escape' && editorFor(target) === sourceEditor) { event.preventDefault(); event.stopPropagation(); notebook.finishEditing(); sourceEditor.element.blur(); return; }
       if (event.key === 'Escape' && editorFor(target)?.closeCompletion()) {event.preventDefault();event.stopPropagation();return;}
+      if(event.key==='Escape' && editorFor(target)===headerEditor) {event.preventDefault();event.stopPropagation();focusHeader();return;}
+      if(target===part('app-header').querySelector('summary') && !mod && !event.altKey && !event.shiftKey) {
+        if(event.key==='ArrowDown' && selection.keys.length) {event.preventDefault();event.stopPropagation();focusCell(selection.keys[0]);return;}
+        if(event.key==='Enter') {event.preventDefault();event.stopPropagation();editHeader();return;}
+      }
       if (event.key === 'Escape' && inNotebook) { event.preventDefault(); event.stopPropagation(); focusCell(card?.dataset.key ?? selection.focus); return; }
       // Title, selects and menus retain native editing/navigation behavior.
       const editor = !!editorFor(target);
       if (mod && key === 'z' && (editor || (inNotebook && selection.mode === 'cells'))) {
         event.preventDefault(); event.stopPropagation(); const wasCells = selection.mode === 'cells'; notebook.undo(event.shiftKey, { editing: editor });
-        if (wasCells && inNotebook) focusCell(selection.focus); return;
+        if (wasCells && inNotebook && !editor) focusCell(selection.focus); return;
       }
       if(editorFor(target)===headerEditor && mod && event.key==='Enter') {event.preventDefault();event.stopPropagation();void perform(()=>notebook.run());return;}
       if (!inNotebook || menu || target.closest?.('button,summary,select')) return;
@@ -627,7 +646,9 @@ export class NotebookPanel {
       if (mod || event.altKey) return;
       if(event.shiftKey && key==='m') {event.preventDefault();event.stopPropagation();void perform(()=>mergeCells(selection.selected));return;}
       if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-        event.preventDefault(); event.stopPropagation(); selection.move(event.key === 'ArrowUp' ? -1 : 1, event.shiftKey); focusCell(selection.focus, true);
+        event.preventDefault(); event.stopPropagation();
+        if(event.key==='ArrowUp' && !event.shiftKey && selection.focus===selection.keys[0]) {focusHeader();return;}
+        selection.move(event.key === 'ArrowUp' ? -1 : 1, event.shiftKey); focusCell(selection.focus, true);
       } else if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); editCell(selection.focus); }
       else if (!event.shiftKey && (key === 'a' || key === 'b')) { event.preventDefault(); event.stopPropagation(); void perform(() => insertAtSelection(key === 'b')); }
       else if (event.key === 'Backspace' || event.key === 'Delete') { event.preventDefault(); event.stopPropagation(); removeCells(selection.selected); }
