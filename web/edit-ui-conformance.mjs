@@ -260,10 +260,18 @@ try {
   setCursor(0,1,7);await measure();key('ArrowDown');assert.deepEqual(at(0),[2,1]);key('ArrowDown');assert.deepEqual(at(0),[3,7]);
   key('ArrowDown');await measure();assert(document.activeElement===inputs()[1]);assert.deepEqual(at(1),[1,7]);assert(!isHidden(inputs()[1]));
   key('ArrowUp');await measure();assert(document.activeElement===inputs()[0]);assert.deepEqual(at(0),[3,7]);
-  key('ArrowUp');key('ArrowUp');assert.deepEqual(at(0),[1,7]);key('ArrowUp');await measure();
+  // Separate synthetic key presses so CodeMirror and the browser can settle
+  // their DOM selection before focus moves to another editor.
+  key('ArrowUp');await measure();key('ArrowUp');await measure();assert.deepEqual(at(0),[1,7]);
+  // Exercise an idle, fully collapsed header as well as the return trip.
+
+  const headerView=editorFor(document.querySelector('[data-part="app-header-source"] .cm-content')).view;
+  document.querySelector('[data-part="app-header"]').open=false;headerView.requestMeasure();await measure();
+  assert.deepEqual(at(0),[1,7]);key('ArrowUp');await measure();
   const header=editorFor(document.querySelector('[data-part="app-header-source"] .cm-content'));
   assert(document.activeElement===header.element,`Expected header focus; got ${document.activeElement.outerHTML.slice(0,250)}`);assert(document.querySelector('[data-part="app-header"]').open);
   const headerGoal=header.view.state.selection.main.goalColumn;
+  assert.equal(header.view.state.selection.main.head,7);
   key('ArrowDown');await measure();assert(document.activeElement===inputs()[0]);assert(at(0)[1]===7,`Column ${at(0)} header goal ${headerGoal}, cell goal ${viewAt(0).state.selection.main.goalColumn}`);
   key('Escape');key('ArrowUp');assert(document.activeElement===document.querySelector('[data-part="app-header"] > summary'));
   key('Enter');assert(document.activeElement===header.element,`Expected header focus; got ${document.activeElement.outerHTML.slice(0,250)}`);key('Escape');key('ArrowDown');assert(document.activeElement===cards()[0]);
