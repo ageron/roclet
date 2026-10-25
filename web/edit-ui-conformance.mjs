@@ -260,6 +260,11 @@ try {
   setCursor(0,1,7);await measure();key('ArrowDown');assert.deepEqual(at(0),[2,1]);key('ArrowDown');assert.deepEqual(at(0),[3,7]);
   key('ArrowDown');await measure();assert(document.activeElement===inputs()[1]);assert.deepEqual(at(1),[1,7]);assert(!isHidden(inputs()[1]));
   key('ArrowUp');await measure();assert(document.activeElement===inputs()[0]);assert.deepEqual(at(0),[3,7]);
+  // Rapid navigation must retain its column after delayed highlighting/painting.
+  for(let repeat=0;repeat<4;repeat++) {
+    key('ArrowUp');key('ArrowUp');await measure();assert.deepEqual(at(0),[1,7]);
+    key('ArrowDown');key('ArrowDown');await measure();assert.deepEqual(at(0),[3,7]);
+  }
   // Separate synthetic key presses so CodeMirror and the browser can settle
   // their DOM selection before focus moves to another editor.
   key('ArrowUp');await measure();key('ArrowUp');await measure();assert.deepEqual(at(0),[1,7]);
@@ -277,6 +282,23 @@ try {
   key('Enter');assert(document.activeElement===header.element,`Expected header focus; got ${document.activeElement.outerHTML.slice(0,250)}`);key('Escape');key('ArrowDown');assert(document.activeElement===cards()[0]);
   report('App header joins editor boundary navigation and cell selection in both directions');
   report('vertical motion keeps its goal through short lines and crosses both code and Markdown cell boundaries');
+  // Highlighting may arrive after the user moves the caret or selects text.
+  // Wrapping/unwrapping text nodes must not let Chrome collapse that selection.
+  const highlighted=editorFor(inputs()[0]);
+  highlighted.highlight(highlighted.source,[]);await measure();
+  setCursor(0,3,7);await measure();key('ArrowUp');key('ArrowUp');
+  const beforeHighlight=highlighted.view.state.selection;
+  queueMicrotask(()=>highlighted.highlight(highlighted.source,[{from:0,to:10,kind:'variable'},{from:11,to:12,kind:'variable'},{from:13,to:23,kind:'variable'}]));
+  await measure();assert(highlighted.view.state.selection.eq(beforeHighlight),'A late highlight response moved the caret after arrow navigation');
+  for(const ranges of [EditorSelection.single(7),EditorSelection.single(9,2),EditorSelection.create([EditorSelection.cursor(7),EditorSelection.cursor(20)],1)]) {
+    highlighted.focus();highlighted.view.dispatch({selection:ranges});
+    for(const spans of [[{from:0,to:10,kind:'variable'},{from:13,to:23,kind:'variable'}],[]]) {
+      const expected=highlighted.view.state.selection;
+      highlighted.highlight(highlighted.source,spans);await measure();
+      assert(highlighted.view.state.selection.eq(expected),'Syntax highlighting changed the caret or selection');
+    }
+  }
+  report('asynchronous syntax highlighting preserves the caret, reversed selections and multiple cursors');
   // Tab expansion and Unicode use the editor engine’s horizontal geometry.
   input(inputs()[0],'\tabcdefgh\nabcdefghijklm');setCursor(0,1,4);await measure();key('ArrowDown');assert.deepEqual(at(0),[2,7]);key('ArrowUp');assert.deepEqual(at(0),[1,4]);
   input(inputs()[0],'🙂abcdefgh\nabcdefghijklm');setCursor(0,1,7);await measure();const goalX=viewAt(0).coordsAtPos(viewAt(0).state.selection.main.head).left;key('ArrowDown');assert(Math.abs(viewAt(0).coordsAtPos(viewAt(0).state.selection.main.head).left-goalX)<viewAt(0).defaultCharacterWidth);

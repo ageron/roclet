@@ -100,7 +100,18 @@ export class CellEditor {
   highlight(source,spans) {
     if(this.destroyed || this.source!==source) return;
     const marks=spans.filter(s=>s.to>s.from && s.to<=source.length).map(s=>Decoration.mark({class:`tok-${s.kind}`}).range(s.from,s.to));
-    this.view.dispatch({effects:colorEffect.of(Decoration.set(marks,true))});
+    const view=this.view, selection=view.state.selection, focused=view.hasFocus;
+    view.dispatch({effects:colorEffect.of(Decoration.set(marks,true))});
+    // Chrome can collapse its native selection when highlighting wraps an
+    // existing text node, even though CodeMirror retained the same selection.
+    // Restore the main DOM range before the next selectionchange is observed.
+    // Secondary cursors remain in CodeMirror's selection/drawing state.
+    if(focused && view.hasFocus && !view.composing && view.state.selection.eq(selection)) {
+      const anchor=view.domAtPos(selection.main.anchor),head=view.domAtPos(selection.main.head);
+      const native=view.root.getSelection?.() ?? view.dom.ownerDocument.getSelection();
+      if(native && (native.anchorNode!==anchor.node || native.anchorOffset!==anchor.offset || native.focusNode!==head.node || native.focusOffset!==head.offset))
+        native.setBaseAndExtent(anchor.node,anchor.offset,head.node,head.offset);
+    }
   }
   complete() {
     if(this.kind!=='code' || this.view.state.selection.ranges.length!==1) return false;
