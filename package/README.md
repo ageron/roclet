@@ -4,7 +4,7 @@
 rich output in Roclet and readable text when printed by ordinary Roc.
 
 ```roc
-app [main!] { roclet: "https://github.com/ageron/roclet/releases/download/0.1.0/DgxFw9gRQuHiBsKhkuG4RxHPAyjMXLK6sujcMfnHijc7.tar.zst" }
+app [main!] { roclet: "https://github.com/ageron/roclet/releases/download/0.2.0/C8vdeSE1ABoSei4Lepuy9Dy7t7GAJQt42WQkWw9bhcFc.tar.zst" }
 
 import roclet.Display
 
@@ -17,9 +17,9 @@ main! = |_args| {
 
 Roc fetches and caches the package on first use. Roclet embeds the matching
 implementation, so browser and native notebook execution work offline.
-The initial `0.1.0` URL becomes available when the first release is published.
+Version `0.2.0` includes HTML, SVG, sliders, and custom reactive widgets.
 
-## New markup constructors (not yet released)
+## New markup constructors
 
 The source package also provides `Display.html(plain_text, source)`,
 `Display.svg(plain_text, source)`, and `Display.widget(plain_text, source)`.
@@ -27,11 +27,7 @@ HTML and SVG are inert; widgets allow inline JavaScript inside an isolated frame
 Markup is limited to 16 KiB. Widgets can update their own controls but do not
 feed values into Roc definitions. Saved snapshots and reports disable scripts.
 
-These constructors need a new package release before exported notebooks using
-them can run against a public package URL. The updated demo is tested against the local package until that release is
-published and its URL pinned.
-
-## Reactive slider inputs (not yet released)
+## Reactive slider inputs
 
 ```roc
 import roclet.Display
@@ -60,7 +56,7 @@ This first version shares one input-state module, so changing a slider may also
 recompute other input-dependent results. Use `Input.custom` for a custom HTML control that sends a numeric value to Roc. Keep `import roclet.Display` alongside `Input`
 so Roclet can recognize rich output values.
 
-## Custom numeric inputs (not yet released)
+## Custom numeric inputs
 
 `Input.custom({ key, label, min, max, default, html })` returns the same
 `{ value, display }` pair as `Input.slider`. `value` is an F64. Controls using
