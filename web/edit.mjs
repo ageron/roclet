@@ -1,3 +1,4 @@
+import { localFiles } from './local-files.mjs';
 import { prepareOffline, offlineStatus, storageStatus } from './offline.mjs';
 import { captureExport, exportBundle, importBundle, exportReport, exportSite, download, downloadName } from './sharing.mjs';
 import { validDraft, independentCopy } from './edit-model.mjs';
@@ -128,6 +129,15 @@ async function downloadCopy(target) {
   notebook.markDownloaded();
   target.notice('Download requested for a separate copy. The original file is not updated.');
 }
+async function saveFile(target,as=false) {
+  if(!window.showSaveFilePicker)return downloadCopy(target);
+  const state=target.notebook.state,extension=state.format==='roc'?'.roc':'.md';
+  const name=await localFiles.save(target.notebook,()=>window.showSaveFilePicker({
+    suggestedName:`${downloadName(state.title)}${extension}`,
+    types:[{description:extension==='.roc'?'Roc notebook':'Markdown notebook',accept:{'text/plain':[extension]}}],
+  }),{as});
+  target.render('saved');target.notice(`Saved to ${name}. Browser autosave remains available for recovery.`);
+}
 function closePanel(slot) {
   const right = bench.right, target = bench.panel(slot);
   if (!right) return;
@@ -175,6 +185,19 @@ function bind() {
     const focused = document.activeElement;
     if (focused === document.body || focused === $('recent') || $('recent-dialog').contains(focused)) $('document-menu').querySelector('summary').focus({preventScroll:true});
   };
+  $('open-local').hidden=!window.showOpenFilePicker;
+  $('save-as').hidden=!window.showSaveFilePicker;
+  $('open-local').onclick=()=>{const target=active();return target.perform(async()=>{
+    const [handle]=await window.showOpenFilePicker({multiple:false,types:[{description:'Roclet notebook',accept:{'text/plain':['.roc','.md']}}]});
+    for(const panel of [bench.left,bench.right].filter(Boolean)) {
+      const attached=panel.notebook.state && localFiles.get(panel.notebook.state);
+      if(panel!==target && attached && await handle.isSameEntry(attached.handle))throw new Error('This file is already open in the other panel.');
+    }
+    await localFiles.open(target.notebook,handle);target.render('saved');closeMenus();target.focusSelection();
+    target.notice('Editing a local file. Use Save to write changes back; browser autosave keeps a recovery copy.');
+  });};
+  $('save').onclick=()=>{const target=active();return target.perform(()=>saveFile(target));};
+  $('save-as').onclick=()=>{const target=active();return target.perform(()=>saveFile(target,true));};
   $('open').onchange = () => perform(async () => { const target = active(), file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>20*1024*1024) throw new Error('Roclet bundles are limited to 20 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await target.notebook.replace(record);target.notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await target.notebook.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); target.focusSelection(); });
   $('preview').onclick = () => perform(async () => { const result = await notebook().inspect('export', 'roc'); $('generated').textContent = result.source; closeMenus(); $('generated-dialog').showModal(); });
   // Dialogs are shared by the page and bound to the panel active when opened.
@@ -251,7 +274,7 @@ function bind() {
     if (event.key === 'Escape' && menu) { event.preventDefault(); event.stopPropagation(); menu.open = false; menu.querySelector('summary').focus(); return; }
     if (!active().notebook.state) return;
     if (mod && key==='f') {event.preventDefault();event.stopPropagation();active().find();return;}
-    if (mod && key === 's') { event.preventDefault(); event.stopPropagation(); $('download').click(); return; }
+    if (mod && key === 's') { event.preventDefault(); event.stopPropagation(); $(event.shiftKey && window.showSaveFilePicker ? 'save-as' : 'save').click(); return; }
     if (target !== document.body) return;
     if (mod && key === 'z') { event.preventDefault(); event.stopPropagation(); active().notebook.undo(event.shiftKey, { editing: !!editorFor(target) }); }
     else if (event.key === '?' && !mod) { event.preventDefault(); event.stopPropagation(); showHelp(); }

@@ -85,6 +85,7 @@ pub fn main(init: std.process.Init) !void {
         "demos/02-coding-puzzle.roc",
         "web/edit.html",
         "web/edit.mjs",
+        "web/local-files.mjs",
         "web/notebook-panel.mjs",
         "web/workbench.mjs",
         "web/edit-model.mjs",

@@ -1,3 +1,4 @@
+import { localFiles } from './local-files.mjs';
 import { Notebook, makeCell, cellsFrom } from './edit-model.mjs';
 import { CellEditor, editorFor } from './cell-editor.mjs';
 import { symbolAt, completionOptions } from './compiler-tools.mjs';
@@ -546,7 +547,7 @@ export class NotebookPanel {
       // Engine details describe the panel's last completed response.
       if (notebook.result?.workerMs != null) panel.lastResponse = notebook.result;
       part('engine-status').hidden = !panel.preferences.engineDetails; part('engine-status').textContent = engineDetails(panel.lastResponse);
-      part('save-status').textContent = notebook.saveStatus; part('save-status').title = notebook.saveStatus; part('save-status').className = /^Not saved|unavailable/.test(notebook.saveStatus) ? 'error' : '';
+      part('save-status').textContent = [localFiles.status(s),notebook.saveStatus].filter(Boolean).join(' · '); part('save-status').title = part('save-status').textContent; part('save-status').className = /^Not saved|unavailable/.test(notebook.saveStatus) ? 'error' : '';
       part('notebook').hidden = s.mode !== 'notebook'; part('source-pane').hidden = s.mode !== 'source';
       part('app-header').hidden = s.mode !== 'notebook';
       const preamble=s.preamble ?? '';headerEditor.sync(preamble,'code',s.headerSelection);

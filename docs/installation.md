@@ -15,6 +15,23 @@ to start another. Change `width` and see its results update. Use the insertion b
 cells to add code or Markdown. Press Cmd+Enter on macOS or Ctrl+Enter elsewhere
 to run a cell. Auto-run updates results after edits.
 
+## Edit local files
+
+In Chrome, choose **File → Open file** to edit a `.roc` or `.md` file directly.
+**Save** (Cmd/Ctrl-S) writes back to that file after you grant write permission.
+**Save as** (Shift-Cmd/Ctrl-S) chooses another file; new notebooks ask for a
+location on their first save. Changing formats also asks for a new location.
+
+Browser autosave still keeps a recovery draft. The status bar distinguishes
+unsaved file changes from the browser draft's save status. If another editor
+changes the file, Roclet refuses to overwrite it: reopen it or save your version
+to another file. File connections last for the current page session; after a
+reload, use **Open file** to reconnect. **Import a copy** and **Download a copy**
+remain available, including in browsers without direct file access.
+
+Roc files are saved as runnable apps, so resolve compilation errors before
+saving them, or switch to Markdown to save unfinished work.
+
 ## Work offline
 
 1. While connected, choose **File → Offline & storage → Prepare for offline use**.

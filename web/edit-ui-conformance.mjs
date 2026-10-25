@@ -630,6 +630,33 @@ try {
     notebook.session=originalSession;store.save=originalSave;notebook.timeout=originalTimeout;notebook.cancelPending();
   }
 
+  // Exercise File commands with file handles; the native picker itself is owned by Chrome.
+  const oldOpen=window.showOpenFilePicker,oldSave=window.showSaveFilePicker;
+  const fileHandle=(name,source)=>({name,source,writes:0,
+    async getFile(){return new File([this.source],this.name);},
+    async isSameEntry(other){return this===other;},
+    async queryPermission(){return 'granted';},
+    async createWritable(){let pending;this.writes++;return {write:async text=>{pending=text;},close:async()=>{this.source=pending;},abort:async()=>{}};},
+  });
+  const local=fileHandle('local.roc','# %%\nanswer = 3\nout_answer = answer'),copy=fileHandle('copy.roc','');
+  let picks=0;
+  window.showOpenFilePicker=async()=>[local];window.showSaveFilePicker=async()=>{picks++;return copy;};
+  try {
+    $('open-local').click();await until(()=>$('save-status').textContent.includes('Saved to local.roc'));
+    notebook.setAuto(false);notebook.editCell(0,'answer = 4\nout_answer = answer');
+    assert.match($('save-status').textContent,/Unsaved changes to local.roc/);
+    inputs()[0].focus();key('s',{metaKey:true});await until(()=>local.source.includes('answer = 4'));
+    assert.match(local.source,/main! =/);assert.equal(picks,0);
+    await until(()=>$('save-status').textContent.includes('Saved to local.roc'));
+    local.source='# external edit';$('save').click();await until(()=>$('notice').textContent.includes('changed outside Roclet'));
+    assert.equal(local.source,'# external edit');
+    inputs()[0].focus();key('s',{metaKey:true,shiftKey:true});await until(()=>copy.source.includes('answer = 4'));
+    assert.equal(picks,1);await until(()=>$('save-status').textContent.includes('Saved to copy.roc'));
+    const before=notebook.state.id;window.showOpenFilePicker=async()=>{throw new DOMException('Cancelled','AbortError');};
+    await $('open-local').onclick();assert.equal(notebook.state.id,before);
+    report('Open file and Save edit the original, external changes block overwrite, Save as reconnects and cancellation keeps the draft');
+  } finally {window.showOpenFilePicker=oldOpen;window.showSaveFilePicker=oldSave;}
+
   await notebook.persist(); notebook.dispose(); store.close();
   await new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name); request.onsuccess=resolve;request.onerror=()=>reject(request.error);});
   parent.postMessage({rocletUiTest:true,status:`PASS — ${count} Roclet UI contracts`,log,result:'pass'},new URL(document.baseURI).origin);
