@@ -6,15 +6,17 @@ export function githubPackagePath(source) {
   return match.slice(1).join('/');
 }
 export async function configuredPackageFetch({fetch=globalThis.fetch.bind(globalThis),configUrl=new URL('./package-config.json',import.meta.url)}={}) {
-  const response=await fetch(configUrl,{credentials:'omit'});
+  const response=await fetch(configUrl,{credentials:'same-origin'});
   if(!response.ok)throw new Error(`Cannot load package download configuration: HTTP ${response.status}`);
   const config=await response.json();
   if(config.endpoint!==null && typeof config.endpoint!=='string')throw new Error('Package endpoint must be a URL or null');
   const local=await serverProjectReady;
   const endpoint=local?new URL('/api/packages/',configUrl):config.endpoint===null?null:new URL(config.endpoint,configUrl);
-  if(endpoint && (endpoint.username || endpoint.password || endpoint.search || endpoint.hash || !endpoint.pathname.endsWith('/') || !(endpoint.protocol==='https:' || (endpoint.protocol==='http:' && ['localhost','127.0.0.1','[::1]'].includes(endpoint.hostname)))))throw new Error('Package endpoint requires HTTPS (or localhost HTTP) and a trailing slash');
+  if(endpoint && (endpoint.username || endpoint.password || endpoint.search || endpoint.hash || !endpoint.pathname.endsWith('/') || !(endpoint.protocol==='https:' || (endpoint.protocol==='http:' && (local || ['localhost','127.0.0.1','[::1]'].includes(endpoint.hostname))))))throw new Error('Package endpoint requires HTTPS (or localhost HTTP) and a trailing slash');
   return (url,options)=>{
     const path=githubPackagePath(url);
-    return fetch(endpoint && path?new URL(path,endpoint).href:url,options);
+    // Only the authenticated local proxy receives the browser's session cookie.
+    // External package hosts and configured remote proxies never receive it.
+    return fetch(endpoint && path?new URL(path,endpoint).href:url,{...options,credentials:local && endpoint && path?'same-origin':'omit'});
   };
 }

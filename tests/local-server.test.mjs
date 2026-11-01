@@ -163,6 +163,10 @@ test('HTTPS proxy origin, secure login and forwarded-header rejection',{skip:!av
     for(const origin of ['http://notebooks.example','https://evil.example'])assert.equal((await httpResponse(server.base+'/api/local/config',{...headers,Origin:origin})).status,403);
     assert.equal((await httpResponse(server.base+'/api/local/config',{'X-Roclet-Token':server.config.token,'X-Forwarded-Host':'notebooks.example','X-Forwarded-Proto':'https'})).status,403);
     assert.equal((await httpResponse(server.base+'/',{Host:'notebooks.example'})).status,401);
+    const sandbox={'Sec-Fetch-Site':'cross-site',Origin:'null'};
+    const renderer=await httpResponse(server.base+'/web/vendor/plotly/plotly.min.js',sandbox);
+    assert.equal(renderer.status,200);assert.match(renderer.headers['content-type'],/javascript/);
+    for(const path of ['/web/edit.html','/api/local/config','/web/vendor/plotly/plotly.min.js?other'])assert.notEqual((await httpResponse(server.base+path,sandbox)).status,200);
     const login=await httpResponse(server.base+'/?token='+server.config.token,{Host:'notebooks.example'});
     assert.equal(login.status,303);assert.equal(login.headers.location,'/');
     const cookie=login.headers['set-cookie'][0];assert.match(cookie,/; Secure/);assert.match(cookie,/HttpOnly/);

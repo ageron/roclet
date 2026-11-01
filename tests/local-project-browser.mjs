@@ -65,5 +65,26 @@
   const requests=[];const fetchPackage=await configuredPackageFetch({configUrl:new URL('/web/package-config.json',location.href),fetch:async(url)=>{requests.push(String(url));return {ok:true,json:async()=>({endpoint:null})};}});
   await fetchPackage('https://github.com/test/test/releases/download/1/hash.tar.zst',{});
   assert(requests.at(-1).includes('/api/packages/test/test/1/hash.tar.zst'),'Local package route selected automatically');
+  const download=await configuredPackageFetch();
+  const packageUrl='https://github.com/test/test/releases/download/1/FPCEjLpsoY5fJ6nDBCeJQ1s6aMTQjMWUYAVQu6QdNuzr.tar.zst';
+  const {BrowserPackages}=await import('/web/packages.mjs');
+  const {BuildCache}=await import('/web/build-cache.mjs');
+  let prompted=false,downloaded=0;
+  const packages=new BrowserPackages(new BuildCache('authenticated-package-test',{indexedDB:null}),{
+    fetch:download,loadBundle:()=>{prompted=true;throw Error('Unexpected manual package prompt');}
+  });
+  const result=await packages.install({installPackage:(_url,bytes)=>{downloaded=bytes.length;return true;}},packageUrl);
+  assert(result==='downloaded' && downloaded>0 && !prompted,'Package fetched through the authenticated proxy without manual upload');
+  // Exercise renderer loading through the authenticated server from an opaque iframe.
+  const {renderPlotly}=await import('/web/plotly-view.mjs');
+  const chart=renderPlotly(JSON.stringify({data:[{x:[0,1],y:[0,1],type:'scatter'}],layout:{}}),'Test chart',document);
+  const chartReady=new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>{window.removeEventListener('message',receive);reject(Error('Authenticated chart timed out'));},20000);
+    function receive(event){if(event.source!==chart.contentWindow || !event.data?.localChart)return;clearTimeout(timer);window.removeEventListener('message',receive);resolve(event.data);}
+    window.addEventListener('message',receive);
+  });
+  chart.srcdoc=chart.srcdoc.replace('</body>',`<script>const timer=setInterval(()=>{const chart=document.getElementById('chart');if(chart.dataset.ready!=='true' && !chart.hidden)return;clearInterval(timer);let blocked=false;try{parent.document.body;}catch{blocked=true;}parent.postMessage({localChart:true,ready:chart.dataset.ready==='true',blocked},'*');},25);</script></body>`);
+  document.body.append(chart);const chartResult=await chartReady;chart.remove();
+  assert(chartResult.ready && chartResult.blocked,'Chart renders without granting access to its parent');
   n.dispose();return {result:'pass',checks:'local module loading and refresh, runnable disk save, persistent binding, unsaved recovery, external conflict, Save as, file picker, package transport, bundle modules, new notebook imports and clean external reload'};
 })()

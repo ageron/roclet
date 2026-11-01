@@ -116,9 +116,11 @@ test('configured downloader routes GitHub releases while retaining other package
   const requested=[],configUrl=new URL('https://app.example/web/package-config.json');
   const fetch=async(url,options)=>{requested.push({url:String(url),options});return String(url)===configUrl.href?Response.json({endpoint:'https://packages.example/api/packages/'}):new Response(new Uint8Array([1]));};
   const download=await configuredPackageFetch({fetch,configUrl});
-  await download(source,{credentials:'omit'});
+  assert.equal(requested[0].options.credentials,'same-origin');
+  await download(source,{credentials:'include'});
+  assert.equal(requested.at(-1).options.credentials,'omit');
   assert.equal(requested.at(-1).url,'https://packages.example/api/packages/lukewilliamboswell/roc-time/0.2.0/roc-time-7QH5VBiCwDLu3UkizpgB3FESJitahxR82Vgg2bWkJvHL.tar.zst');
-  await download('https://other.example/hash.tar.zst',{});assert.equal(requested.at(-1).url,'https://other.example/hash.tar.zst');
+  await download('https://other.example/hash.tar.zst',{credentials:'include'});assert.equal(requested.at(-1).options.credentials,'omit');assert.equal(requested.at(-1).url,'https://other.example/hash.tar.zst');
   for(const url of ['https://github.com.evil.invalid/a/b/releases/download/v/x.tar.zst','https://github.com/a/b/releases/download/v/x.tar.zst?url=evil','https://github.com/a/b/releases/download/../x.tar.zst'])assert.equal(githubPackagePath(url),null);
   await assert.rejects(configuredPackageFetch({configUrl,fetch:async()=>Response.json({endpoint:'http://remote.example/api/'})}),/HTTPS/);
   const direct=await configuredPackageFetch({configUrl,fetch:async url=>String(url)===configUrl.href?Response.json({endpoint:null}):(requested.push({url:String(url)}),new Response())});

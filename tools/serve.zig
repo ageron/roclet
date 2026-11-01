@@ -69,9 +69,14 @@ fn serveOne(io: std.Io, context: *Context, stream: std.Io.net.Stream) !void {
     var writer = stream.writer(io, &write_buffer);
     var server = std.http.Server.init(&reader.interface, &writer.interface);
     var request = try server.receiveHead();
+    // Opaque-origin chart frames cannot send the project's SameSite cookie.
+    // Expose only this bundled, non-project script, never notebooks or APIs.
+    const chart_renderer = request.head.method == .GET and std.mem.eql(u8, request.head.target, "/web/vendor/plotly/plotly.min.js");
     if (context.project) |*project| {
-        if (!try local.trusted(&request, project, gpa)) return request.respond("Forbidden", .{ .status = .forbidden, .keep_alive = false });
-        if (!try local.authorize(&request, project, gpa)) return;
+        if (!chart_renderer) {
+            if (!try local.trusted(&request, project, gpa)) return request.respond("Forbidden", .{ .status = .forbidden, .keep_alive = false });
+            if (!try local.authorize(&request, project, gpa)) return;
+        }
         if (std.mem.startsWith(u8, request.head.target, "/api/local/")) return local.handle(&request, project, io, gpa);
     }
     if (std.mem.startsWith(u8, request.head.target, proxy.prefix)) {
