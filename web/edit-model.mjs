@@ -2,6 +2,7 @@ import {inputValues, inputModule} from './input-values.mjs';
 import { DocumentSession } from './document-session.mjs';
 import { renameEdits } from './compiler-tools.mjs';
 import { projectFiles, projectPath } from './project-files.mjs';
+import { attachments } from './attachments.mjs';
 
 const clone = value => structuredClone(value);
 const key = () => crypto.randomUUID();
@@ -14,7 +15,7 @@ export function newDraft(title = 'Untitled', demo = false) {
     makeCell('code', 'area = width * height\nout_dimensions = {\n    dbg area\n    area\n}'),
   ] : [makeCell()];
   return { schema: 1, id: key(), title, format: 'roc', preamble: 'app [main!] {}', metadata: '', cells,
-    source: '', sourceCurrent: false, inputValues: {}, files: [], mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
+    source: '', sourceCurrent: false, inputValues: {}, files: [], attachments: [], mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
 }
 // A new draft with the same content as another: new id, fresh cell keys, so it
 // can be open and saved beside the original without sharing anything.
@@ -31,7 +32,7 @@ export function openedDraft(source, filename) {
   return record;
 }
 export function validDraft(record) {
-  try { projectFiles(record?.files); inputValues(record?.inputValues); } catch { return false; }
+  try { projectFiles(record?.files); inputValues(record?.inputValues); attachments(record?.attachments, record?.files); } catch { return false; }
   return record?.schema === 1 && typeof record.id === 'string' && typeof record.title === 'string'
     && ['roc', 'markdown'].includes(record.format) && typeof record.source === 'string'
     && Array.isArray(record.cells) && record.cells.every(c => typeof c.key === 'string' && typeof c.source === 'string' && ['code','markdown','generated'].includes(c.kind));
@@ -39,6 +40,7 @@ export function validDraft(record) {
 export function requestFor(state, action, target = state.format) {
   const request = { operation: 'document', action, format: state.format, target, source: state.sourceCurrent ? state.source : '', render: true };
   request.files = projectFiles(state.files).map(file => ({...file, path:`/workspace/${file.path}`}));
+  request.files.push(...attachments(state.attachments, state.files).map(file => ({...file, path:`/workspace/${file.path}`})));
   if (state.sourceCurrent) request.context = { preamble: state.preamble, metadata: state.metadata };
   else request.draft = { preamble: state.preamble, metadata: state.metadata, cells: state.cells.map(({ kind, source, attributes, outputs }) => ({ kind, source, attributes, outputs })) };
   if(['evaluate','analyze','check'].includes(action)) request.modules=[inputModule(state.inputValues)];
@@ -109,7 +111,11 @@ export class Notebook {
   }
   // A draft that cannot be saved (for example after another tab changed it)
   // is still kept when this exact revision was downloaded.
-  markDownloaded() { if (this.state) this.downloaded = { id: this.state.id, revision: this.state.revision }; }
+  markDownloaded({complete=false}={}) {
+    // A source download cannot recover attachment bytes if browser saving
+    // failed. Only a complete bundle/site can keep that revision safely.
+    if (this.state && (complete || !this.state.attachments?.length)) this.downloaded = { id: this.state.id, revision: this.state.revision };
+  }
   get downloadedCurrent() { return !!this.state && this.downloaded?.id === this.state.id && this.downloaded.revision === this.state.revision; }
   async keep() { return await this.persist() || this.downloadedCurrent; }
   cancelPending() {
@@ -143,6 +149,7 @@ export class Notebook {
   }
   setProjectFiles(files) {
     const checked = projectFiles(files);
+    attachments(this.state.attachments, checked);
     this.change(s => { s.files = checked; }, { source:this.state.sourceCurrent, reason:'project' });
   }
   setProjectFile(path, source) {
@@ -152,6 +159,13 @@ export class Notebook {
   }
   removeProjectFile(path) {
     this.setProjectFiles((this.state.files ?? []).filter(file => file.path !== path));
+  }
+  setAttachments(files) {
+    const checked = attachments(files, this.state.files);
+    this.change(s => { s.attachments = checked; }, {source:this.state.sourceCurrent, reason:'attachments'});
+  }
+  removeAttachment(path) {
+    this.setAttachments((this.state.attachments ?? []).filter(file => file.path !== path));
   }
   schedule() {
     clearTimeout(this.timer);
