@@ -28,6 +28,7 @@ import parser.CSV
 
 # %%
 import "data/cafe-sales.csv" as csv_text : Str
+
 out_source = Display.text(csv_text)
 
 # %%
@@ -37,13 +38,33 @@ out_source = Display.text(csv_text)
 # Invalid data produces an error value that we can show alongside the report.
 
 # %%
-Sale : { item : Str, units : U64, unit_price_cents : U64 }
-decode_sales : Str -> Try(List(Sale), [InvalidCsv(CSV.Error), MissingRequiredField(Str)])
+Sale : {
+    item : Str,
+    units : U64,
+    unit_price_cents : U64,
+}
+
+decode_sales : Str -> Try(
+    List(Sale),
+    [InvalidCsv(CSV.Error), MissingRequiredField(Str)],
+)
 decode_sales = |input| CSV.parse(input)
+
 sales = decode_sales(csv_text)
+
 out_rows = match sales {
-    Ok(rows) => Display.table(["Item", "Units", "Price (cents)"], rows.map(|row| [row.item, row.units.to_str(), row.unit_price_cents.to_str()]))
-    Err(error) => Display.text("Could not decode the CSV: ${Str.inspect(error)}")
+    Ok(rows) =>
+        Display.table(
+            ["Item", "Units", "Price (cents)"],
+            rows.map(|row| [
+                row.item,
+                row.units.to_str(),
+                row.unit_price_cents.to_str(),
+            ]),
+        )
+
+    Err(error) =>
+        Display.text("Could not decode the CSV: ${Str.inspect(error)}")
 }
 
 # %%
@@ -54,10 +75,16 @@ out_rows = match sales {
 # the previous attachment and its results.
 
 # %%
-revenue = sales.map_ok(|rows| rows.map(|row| row.units * row.unit_price_cents).sum())
+revenue = sales.map_ok(
+    |rows| rows.map(|row| row.units * row.unit_price_cents).sum(),
+)
+
 out_revenue = match revenue {
-    Ok(cents) => Display.markdown("Total sales revenue: **${cents.to_str()} cents**.")
-    Err(error) => Display.text("Revenue is unavailable: ${Str.inspect(error)}")
+    Ok(cents) =>
+        Display.markdown("Total sales revenue: **${cents.to_str()} cents**.")
+
+    Err(error) =>
+        Display.text("Revenue is unavailable: ${Str.inspect(error)}")
 }
 
 # %%
@@ -68,6 +95,7 @@ out_revenue = match revenue {
 
 # %%
 import "data/cafe-sales.csv" as csv_bytes : List(U8)
+
 out_byte_count = List.len(csv_bytes)
 
 # %%
