@@ -3,12 +3,10 @@ const std = @import("std");
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
     const args = try init.minimal.args.toSlice(a);
-    if (args.len > 1 and std.mem.eql(u8, args[1], "serve")) return @import("serve.zig").serveProject(init, args[2..]);
-    if (args.len == 1 or std.mem.eql(u8, args[1], "--help")) {
-        try std.Io.File.stdout().writeStreamingAll(init.io, "Usage: roclet serve [DIRECTORY|NOTEBOOK.roc|NOTEBOOK.md] [--port 4173] [--no-browser]\n" ++
-            "       roclet run|check|parse|convert FILE [OPTIONS]\n\n" ++
-            "serve opens the current directory by default. --assets DIR selects the web distribution.\n" ++
-            "Native commands are forwarded to roclet-native.\n");
+    if (args.len == 1 or (!std.mem.eql(u8, args[1], "run") and !std.mem.eql(u8, args[1], "check") and !std.mem.eql(u8, args[1], "parse") and !std.mem.eql(u8, args[1], "convert") and !std.mem.eql(u8, args[1], "--bridge"))) {
+        try @import("serve.zig").main(init);
+        if (args.len == 1 or std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "-h"))
+            try std.Io.File.stdout().writeStreamingAll(init.io, "\nAlso available in this build: roclet run|check|parse|convert FILE [OPTIONS]\n");
         return;
     }
     const dir = try std.process.executableDirPathAlloc(init.io, a);

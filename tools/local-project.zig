@@ -6,6 +6,7 @@ pub const Project = struct {
     root: []const u8,
     token: []const u8,
     host: []const u8,
+    any_address: bool = false,
     initial: ?[]const u8 = null,
     mutex: Io.Mutex = .init,
 };
@@ -25,9 +26,10 @@ fn header(r: *std.http.Server.Request, name: []const u8) ?[]const u8 {
     return null;
 }
 pub fn trusted(r: *std.http.Server.Request, p: *Project, a: A) !bool {
-    if (!std.mem.eql(u8, header(r, "Host") orelse "", p.host)) return false;
+    const host = header(r, "Host") orelse return false;
+    if (!allowedHost(p, host)) return false;
     if (header(r, "Sec-Fetch-Site")) |site| if (!std.mem.eql(u8, site, "same-origin") and !std.mem.eql(u8, site, "none")) return false;
-    if (header(r, "Origin")) |origin| if (!std.mem.eql(u8, origin, try std.fmt.allocPrint(a, "http://{s}", .{p.host}))) return false;
+    if (header(r, "Origin")) |origin| if (!std.mem.eql(u8, origin, try std.fmt.allocPrint(a, "http://{s}", .{host}))) return false;
     return true;
 }
 fn reply(r: *std.http.Server.Request, a: A, status: std.http.Status, value: anytype) !void {
@@ -192,4 +194,27 @@ pub fn handle(r: *std.http.Server.Request, p: *Project, io: Io, a: A) !void {
 test "project paths exclude hidden paths, traversal and absolute paths" {
     for ([_][]const u8{ "../a.roc", "/a.roc", "a//b.roc", "a/./b", ".git/config", "a\\b", "C:/x", "a\x00b" }) |path| try std.testing.expect(!validPath(path));
     try std.testing.expect(validPath("notes/My notebook.roc"));
+}
+
+fn allowedHost(p: *const Project, host: []const u8) bool {
+    if (std.mem.eql(u8, host, p.host)) return true;
+    if (!p.any_address) return false;
+    // Allow numeric interface addresses for wildcard binds, never arbitrary DNS
+    // names: accepting those would allow DNS rebinding to expose project files.
+    const address = Io.net.IpAddress.parseLiteral(host) catch return false;
+    const bound = Io.net.IpAddress.parseLiteral(p.host) catch return false;
+    return address.getPort() == bound.getPort();
+}
+
+test "wildcard project hosts require an IP and the bound port" {
+    var p: Project = .{ .root = ".", .token = "test", .host = "[::]:4173", .any_address = true };
+    try std.testing.expect(allowedHost(&p, "[::1]:4173"));
+    try std.testing.expect(allowedHost(&p, "[2001:db8::1]:4173"));
+    try std.testing.expect(!allowedHost(&p, "[::1]:4174"));
+    try std.testing.expect(!allowedHost(&p, "example.com:4173"));
+    try std.testing.expect(!allowedHost(&p, "127.0.0.1:4173@evil.example"));
+    p.any_address = false;
+    p.host = "127.0.0.1:4173";
+    try std.testing.expect(allowedHost(&p, "127.0.0.1:4173"));
+    try std.testing.expect(!allowedHost(&p, "192.0.2.10:4173"));
 }

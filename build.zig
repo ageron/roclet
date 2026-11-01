@@ -78,6 +78,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(server);
     local_server.dependOn(&b.addInstallArtifact(server, .{}).step);
     const serve = b.addRunArtifact(server);
+    serve.addArg("serve-static");
     serve.addArg(root);
     serve.addPassthruArgs();
     serve.step.dependOn(ready);

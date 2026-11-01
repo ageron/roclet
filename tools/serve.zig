@@ -115,21 +115,54 @@ fn serveOne(io: std.Io, context: *Context, stream: std.Io.net.Stream) !void {
         .{ .name = "X-Content-Type-Options", .value = "nosniff" },
     } });
 }
+pub fn printHelp(io: std.Io) !void {
+    try std.Io.File.stdout().writeStreamingAll(io,
+        \\Roclet — run notebooks in your browser
+        \\
+        \\Usage:
+        \\  roclet serve [DIRECTORY|NOTEBOOK] [OPTIONS]
+        \\    Open a project (default: current directory). Save writes to project files.
+        \\  roclet serve-static [ASSETS] [OPTIONS]
+        \\    Serve only the website (default: bundled assets). No project file access.
+        \\
+        \\Options for both commands:
+        \\  --bind ADDRESS   IP address to listen on (default: 127.0.0.1).
+        \\                   Use 0.0.0.0 for all IPv4 interfaces, or :: for IPv6.
+        \\  --port PORT      Port to listen on (default: 4173).
+        \\  -h, --help       Show this help.
+        \\
+        \\Project options:
+        \\  --no-browser     Print the URL without opening a browser.
+        \\  --assets DIR     Use website assets from DIR instead of the bundled copy.
+        \\Static options:
+        \\  --proxy-only     Serve only the package-download proxy.
+        \\
+        \\Examples:
+        \\  roclet serve demos
+        \\  roclet serve notes.roc --port 8080
+        \\  roclet serve demos --bind 0.0.0.0 --no-browser
+        \\  roclet serve-static ./website --port 8080
+        \\
+        \\Network project access uses a numeric server IP in the browser URL.
+        \\Anyone who can connect can read and edit the selected project; there is no login.
+        \\Keep the default localhost binding unless you intend to share access.
+        \\Keep bundled assets beside the executable. Press Ctrl-C to stop.
+        \\
+    );
+}
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len > 1 and std.mem.eql(u8, args[1], "serve")) return serveProject(init, args[2..]);
-    if (args.len == 2 and std.mem.eql(u8, args[1], "--help")) {
-        try std.Io.File.stdout().writeStreamingAll(init.io,
-            \\Usage: roclet serve [DIRECTORY|NOTEBOOK.roc|NOTEBOOK.md] [--port PORT] [--no-browser]
-            \\       roclet [ROOT] [PORT] [--port PORT] [--bind ADDRESS] [--proxy-only]
-            \\Serves the bundled Roclet site at http://127.0.0.1:4173/ by default.
-            \\ROOT defaults to the directory containing this executable.
-            \\Keep the executable with its web and artifacts folders. Stop with Ctrl-C.
-            \\
-        );
-        return;
+    if (args.len == 1) return printHelp(init.io);
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) return printHelp(init.io);
     }
-    var index: usize = 1;
+    if (std.mem.eql(u8, args[1], "serve")) return serveProject(init, args[2..]);
+    if (std.mem.eql(u8, args[1], "serve-static")) return serveStatic(init, args[2..]);
+    std.debug.print("Unknown command '{s}'. Use 'roclet serve {s}' to open a project, or 'roclet --help'.\n", .{ args[1], args[1] });
+    return error.UnknownCommand;
+}
+pub fn serveStatic(init: std.process.Init, args: []const []const u8) !void {
+    var index: usize = 0;
     const explicit_root = index < args.len and !std.mem.startsWith(u8, args[index], "--");
     const root_arg = if (explicit_root) args[index] else std.fs.path.dirname(try std.process.executablePathAlloc(init.io, init.arena.allocator())).?;
     if (explicit_root) index += 1;
@@ -162,7 +195,9 @@ fn listen(init: std.process.Init, context: *Context, bind: []const u8, port: u16
     defer server.deinit(init.io);
     var group: std.Io.Group = .init;
     defer group.cancel(init.io);
-    const url = try std.fmt.allocPrint(init.arena.allocator(), "http://{s}:{d}/", .{ bind, port });
+    const display_bind = if (std.mem.eql(u8, bind, "0.0.0.0")) "127.0.0.1" else if (std.mem.eql(u8, bind, "::")) "::1" else bind;
+    const url = try std.fmt.allocPrint(init.arena.allocator(), "http://{s}/", .{try hostPort(init.arena.allocator(), display_bind, port)});
+    if (!std.mem.eql(u8, display_bind, bind)) std.debug.print("Listening on {s}; use this computer's network IP from another device.\n", .{bind});
     std.debug.print("Roclet: {s}\n", .{url});
     if (context.project) |project| std.debug.print("Project: {s}\nPress Ctrl-C to stop.\n", .{project.root});
     if (browser) {
@@ -191,16 +226,17 @@ pub fn serveProject(init: std.process.Init, args: []const []const u8) !void {
     var selected = false;
     var port: u16 = 4173;
     var browser = true;
+    var bind: []const u8 = "127.0.0.1";
     var assets: ?[]const u8 = null;
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--no-browser")) {
             browser = false;
-        } else if (std.mem.eql(u8, args[i], "--port") or std.mem.eql(u8, args[i], "--assets")) {
+        } else if (std.mem.eql(u8, args[i], "--port") or std.mem.eql(u8, args[i], "--assets") or std.mem.eql(u8, args[i], "--bind")) {
             const option = args[i];
             i += 1;
             if (i == args.len) return error.MissingOptionValue;
-            if (std.mem.eql(u8, option, "--port")) port = try std.fmt.parseInt(u16, args[i], 10) else assets = args[i];
+            if (std.mem.eql(u8, option, "--port")) port = try std.fmt.parseInt(u16, args[i], 10) else if (std.mem.eql(u8, option, "--bind")) bind = args[i] else assets = args[i];
         } else if (!selected and !std.mem.startsWith(u8, args[i], "--")) {
             target = args[i];
             selected = true;
@@ -226,13 +262,14 @@ pub fn serveProject(init: std.process.Init, args: []const []const u8) !void {
     var context: Context = .{ .root = asset_root, .project = .{
         .root = project_root,
         .token = try a.dupe(u8, &std.fmt.bytesToHex(random, .lower)),
-        .host = try std.fmt.allocPrint(a, "127.0.0.1:{d}", .{port}),
+        .host = try hostPort(a, bind, port),
+        .any_address = std.mem.eql(u8, bind, "0.0.0.0") or std.mem.eql(u8, bind, "::"),
         .initial = if (stat.kind == .file) std.fs.path.basename(actual) else null,
     } };
     // Separate from the project and web assets; survives server/browser restarts.
     if (init.environ_map.get("HOME")) |home| context.disk_cache = try std.fs.path.join(a, &.{ home, ".cache", "roclet", "packages" });
     defer context.cache.deinit();
-    try listen(init, &context, "127.0.0.1", port, browser);
+    try listen(init, &context, bind, port, browser);
 }
 
 test "static asset paths reject traversal, hidden files, and malformed escapes" {
@@ -247,4 +284,11 @@ test "static asset paths reject traversal, hidden files, and malformed escapes" 
     const display = try assetPath(gpa, "/package/Display.roc");
     defer gpa.free(display);
     try std.testing.expectEqualStrings("package/Display.roc", display);
+}
+
+fn hostPort(a: std.mem.Allocator, bind: []const u8, port: u16) ![]const u8 {
+    return if (std.mem.findScalar(u8, bind, ':') != null)
+        std.fmt.allocPrint(a, "[{s}]:{d}", .{ bind, port })
+    else
+        std.fmt.allocPrint(a, "{s}:{d}", .{ bind, port });
 }

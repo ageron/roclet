@@ -67,3 +67,47 @@ test('local project files, conflict protection, confinement, package cache and r
     assert.match((await server.client.call('read','note.roc')).source,/winner/);
   }finally{if(server && server.child.exitCode===null)await stop(server);await rm(temp,{recursive:true,force:true});}
 });
+
+test('wildcard binding accepts IP hosts but rejects foreign origins and DNS hosts',{skip:!available},async()=>{
+  const temp=await mkdtemp(join(tmpdir(),'roclet-bind-'));let server;
+  const status=(host,origin)=>new Promise((resolve,reject)=>{
+    const req=request(server.base+'/api/local/config',{headers:{Host:host,...(origin?{Origin:origin}:{})}},res=>{res.resume();resolve(res.statusCode);});
+    req.on('error',reject);req.end();
+  });
+  try {
+    server=await launch(temp,temp,['--bind','0.0.0.0']);
+    const p=new URL(server.base).port,host=`192.0.2.10:${p}`;
+    assert.equal(await status(host,`http://${host}`),200);
+    assert.equal(await status(host,'http://evil.example'),403);
+    assert.equal(await status(`evil.example:${p}`),403);
+    assert.equal(await status('192.0.2.10:1'),403);
+    assert.equal(await status('127.0.0.1'),403);
+  } finally {if(server)await stop(server);await rm(temp,{recursive:true,force:true});}
+});
+
+test('both executables offer explicit commands and useful help',{skip:!available},async()=>{
+  const {spawnSync}=await import('node:child_process');
+  for(const executable of [binary,join(root,'zig-out/bin/roclet-serve')]) {
+    for(const args of [[],['--help'],['serve','--help'],['serve-static','-h']]) {
+      const result=spawnSync(executable,args,{encoding:'utf8',timeout:5000});
+      assert.equal(result.status,0,result.stderr);
+      assert.match(result.stdout,/roclet serve-static/);
+      assert.match(result.stdout,/--bind ADDRESS/);
+      assert.match(result.stdout,/127\.0\.0\.1/);
+    }
+    const result=spawnSync(executable,['demos'],{encoding:'utf8',timeout:5000});
+    assert.notEqual(result.status,0);assert.match(result.stderr,/roclet serve demos/);
+  }
+});
+
+test('serve-static serves the selected assets without the local file API',{skip:!available},async()=>{
+  const p=await port(),base=`http://127.0.0.1:${p}`;
+  const child=spawn(binary,['serve-static',root,'--port',String(p),'--bind','127.0.0.1'],{stdio:'ignore'});
+  try {
+    let response;
+    for(let i=0;i<100;i++) {response=await fetch(base).catch(()=>null);if(response)break;await pause(30);}
+    assert.equal(response?.status,200);
+    assert.match(await response.text(),/Roclet/);
+    assert.equal((await fetch(base+'/api/local/config')).status,404);
+  } finally {await stop({child});}
+});

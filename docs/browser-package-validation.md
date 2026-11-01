@@ -55,7 +55,7 @@ invalid input, editing, and worker restart.
 
 ```sh
 zig build
-./zig-out/bin/roclet-serve . 4179
+./zig-out/bin/roclet-serve serve-static . 4179
 ```
 
 In another terminal:
@@ -117,7 +117,7 @@ mode and actual WASM digest. Repeat with `--viewport 390x960` for compact layout
 To exercise the separate-host deployment pattern:
 
 ```sh
-./zig-out/bin/roclet-serve . 4180 --proxy-only
+./zig-out/bin/roclet-serve serve-static . 4180 --proxy-only
 node tools/browser-check.mjs \
   --package-endpoint http://127.0.0.1:4180/api/packages/ \
   --page 'web/edit.html?example=meeting-windows' \

@@ -45,7 +45,7 @@ Build Roclet with `zig build`, then run:
 In a downloaded server distribution, use `./roclet` instead. Keep the
 executable and web assets together. No Node.js or Python is needed.
 
-The command opens your browser and serves only on `127.0.0.1`. The home page
+The command opens your browser and listens on `127.0.0.1` by default. The home page
 lists project notebooks; **File → Open file** selects another. **Save** writes
 to the original file, and **Save as** chooses a relative path within the project.
 New notebooks ask for a filename on their first save. Parent directories must
@@ -68,6 +68,16 @@ are verified against their Roc hashes. With `HOME` set, they are cached in
 `~/.cache/roclet/packages` for reuse across server restarts and offline sessions.
 Compilation and execution still happen in browser WASM. The static website
 continues to work independently without a server.
+
+To allow access from another computer, use `--bind 0.0.0.0` (all IPv4 interfaces)
+or bind a specific local IP address. For IPv6 use `--bind ::`. In the browser,
+use the server's numeric IP and port, such as `http://192.168.1.10:4173/`.
+Anyone who can connect can read and edit the selected project; there is no login.
+The default `127.0.0.1` keeps access on your computer.
+
+`roclet serve-static /path/to/website --port 8080` serves website assets without
+project file access. It also supports `--bind`; a bare `roclet demos` is no longer
+a valid command. Run `roclet --help` for examples and options.
 
 Use `--port 4174` to choose a different port or `--no-browser` to print the URL
 without opening it. `--assets /path/to/roclet` selects a web distribution when
@@ -359,7 +369,7 @@ The bundled server already exposes `/api/packages/`; for local use, set
 service, run the same server behind HTTPS:
 
 ```sh
-./roclet-serve . 4173 --proxy-only --bind 0.0.0.0
+./roclet-serve serve-static . 4173 --proxy-only --bind 0.0.0.0
 ```
 
 Put an HTTPS reverse proxy in front of that port and set `endpoint` to its public
