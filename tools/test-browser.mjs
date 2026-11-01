@@ -22,6 +22,8 @@ const suites=[
   ['Demos','demos-conformance'],
   ['Desktop assertions','edit','browser-expect-probe.mjs'],
   ['Compact assertions','edit','browser-expect-probe.mjs','390x960'],
+  ['Desktop attachments','edit?new=1','browser-attachments-probe.mjs'],
+  ['Compact attachments','edit?new=1','browser-attachments-probe.mjs','390x960'],
 ];
 // Each worker owns a complete driver process, including Chrome/profile/server.
 // Buffer its log so parallel suites still produce readable GitHub log groups.
