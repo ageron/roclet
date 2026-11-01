@@ -1,2 +1,4 @@
 # Patch context contains significant single-space lines.
 compiler-adapter/embedding.patch -whitespace
+# Preserve the checksummed upstream Plotly distribution byte for byte.
+web/vendor/plotly/plotly.min.js -whitespace
