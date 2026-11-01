@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the application update after publishing a Display package release (CI only)."""
+"""Update Roclet’s package pin after publishing a standalone Display release."""
 import argparse
 from pathlib import Path
 import re
@@ -21,7 +21,7 @@ def update(version, archive):
     if not re.fullmatch(r'[1-9A-HJ-NP-Za-km-z]+\.tar\.zst', archive):
         raise ValueError('Expected a content-addressed Roc archive filename')
     old = (ROOT / PATHS[0]).read_text().strip()
-    new = f'https://github.com/ageron/roclet/releases/download/{version}/{archive}'
+    new = f'https://github.com/ageron/roclet-display/releases/download/{version}/{archive}'
     replacements = {}
     for name in PATHS:
         source = (ROOT / name).read_text()

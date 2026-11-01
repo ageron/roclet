@@ -1,0 +1,87 @@
+name: Update Display package
+
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published Display version; leave empty for latest stable release'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-display-package
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Resolve the published release
+        id: release
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoint=latest
+          if [[ -n "$REQUESTED_VERSION" ]]; then
+            [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+            endpoint="tags/$REQUESTED_VERSION"
+          fi
+          gh api "repos/ageron/roclet-display/releases/$endpoint" > "$RUNNER_TEMP/display-release.json"
+          jq -e '.draft == false and .prerelease == false' "$RUNNER_TEMP/display-release.json"
+          version=$(jq -er .tag_name "$RUNNER_TEMP/display-release.json")
+          archive=$(jq -er '[.assets[] | select(.name | endswith(".tar.zst"))] | if length == 1 then .[0].name else error("Expected one package archive") end' "$RUNNER_TEMP/display-release.json")
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$archive" =~ ^[1-9A-HJ-NP-Za-km-z]+\.tar\.zst$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          url="https://github.com/ageron/roclet-display/releases/download/$version/$archive"
+          if [[ "$(cat package/display-package-url.txt)" == "$url" ]]; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: roc-lang/setup-roc@f5a74bf90aa694b43ab4a7cbfdb19273bc6aa697
+        if: steps.release.outputs.changed == 'true'
+        with:
+          version: nightly-new-compiler
+          nightly-tag: nightly-2026-10-06-c34079d
+      - name: Import the released sources and update pins
+        if: steps.release.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          ARCHIVE: ${{ steps.release.outputs.archive }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          directory="$RUNNER_TEMP/display-update"
+          mkdir -p "$directory"
+          gh release download "$VERSION" --repo ageron/roclet-display --pattern "$ARCHIVE" --dir "$directory"
+          (cd "$directory" && roc unbundle "$ARCHIVE")
+          python3 tools/sync-display-package.py "$directory/${ARCHIVE%.tar.zst}"
+          python3 tools/update-package-pin.py --version "$VERSION" --archive "$ARCHIVE"
+          python3 tests/test-package-pin.py
+      - uses: roc-lang/release-package/actions/create-followup-pr@af2f0cd8662874b825ff3917f4286e793ba18c55
+        if: steps.release.outputs.changed == 'true'
+        with:
+          release_version: ${{ steps.release.outputs.version }}
+          paths: package demos tests/documents.json
+          branch_prefix: release/display
+          base_branch: main
+          commit_message: 'Update embedded Display package to ${{ steps.release.outputs.version }}'
+          pr_body: 'Import the published Display package sources and update the runtime, demo, and test pins together. Review the source changes and run Roclet CI before merging.'
+          github_token: ${{ github.token }}

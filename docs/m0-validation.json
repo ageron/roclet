@@ -16,7 +16,7 @@
     "cellPermutations": 21
   },
   "browser": {
-    "name": "Codex In-app Browser",
+    "name": "Embedded Chromium browser",
     "unitTests": 5,
     "nativeWasmParityCases": 36,
     "cellPermutations": 21,

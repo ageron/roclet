@@ -22,6 +22,7 @@ class PinUpdateTests(unittest.TestCase):
 
     def test_updates_every_consumer(self):
         expected = pin.update('0.2.0', 'Def.tar.zst')
+        self.assertEqual(expected, 'https://github.com/ageron/roclet-display/releases/download/0.2.0/Def.tar.zst')
         for name in pin.PATHS:
             self.assertEqual((pin.ROOT / name).read_text(), expected + '\n')
         self.assertEqual(pin.update('0.2.0', 'Def.tar.zst'), expected)

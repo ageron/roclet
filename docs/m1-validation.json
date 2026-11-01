@@ -53,7 +53,7 @@
     "documentParityRequests": 73
   },
   "browser": {
-    "engine": "Codex in-app browser",
+    "engine": "Embedded Chromium browser",
     "m0": {
       "unitTests": 5,
       "parityCases": 36,

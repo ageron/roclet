@@ -98,6 +98,8 @@ jobs:
         run: |
           zig build local-server
           node --test tests/*.test.mjs
+      - name: Test Display package pin updates
+        run: python3 tests/test-package-pin.py
       - name: Package the verified site
         run: zig build package $ROCLET_BUILD_FLAGS -Dcached-engines=.engine-cache --summary all
       - name: Smoke-test the server distribution
