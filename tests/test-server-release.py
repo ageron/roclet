@@ -1,6 +1,7 @@
 """Smoke-test the actual extracted release, from an unrelated working directory."""
 from pathlib import Path
 import socket
+import re
 import subprocess
 import sys
 import tempfile
@@ -25,7 +26,13 @@ def check(archive):
                 deadline = time.monotonic() + 20
                 while True:
                     try:
-                        with urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=1) as response:
+                        log.seek(0)
+                        match = re.search(rb'\?token=([a-f0-9]{64})', log.read())
+                        if not match:
+                            raise OSError('Waiting for startup URL')
+                        headers = {'X-Roclet-Token': match[1].decode()}
+                        request = urllib.request.Request(f'http://127.0.0.1:{port}/', headers=headers)
+                        with urllib.request.urlopen(request, timeout=1) as response:
                             assert response.read() == (root / 'index.html').read_bytes()
                         break
                     except OSError:
@@ -34,7 +41,8 @@ def check(archive):
                             raise RuntimeError(log.read().decode(errors='replace'))
                         time.sleep(.1)
                 for path in ('web/install.html', 'web/edit.html', 'web/open-notebook.mjs', 'artifacts/manifest.json', 'artifacts/roclet.wasm'):
-                    with urllib.request.urlopen(f'http://127.0.0.1:{port}/{path}', timeout=10) as response:
+                    request = urllib.request.Request(f'http://127.0.0.1:{port}/{path}', headers=headers)
+                    with urllib.request.urlopen(request, timeout=10) as response:
                         assert response.read() == (root / path).read_bytes(), path
                 print('Extracted server release serves all required assets.')
             finally:

@@ -11,14 +11,17 @@ try {
   const project=join(temp,'project');await mkdir(project);
   await writeFile(join(project,'Notebook.roc'),'app [main!] {}\n\n# %%\nimport Helper\nout_1 = Helper.answer\n');
   await writeFile(join(project,'Helper.roc'),'module [answer]\nanswer = 42\n');
-  server=spawn(join(root,'zig-out/bin/roclet'),['serve',project,'--assets',root,'--port',String(port),'--no-browser'],{stdio:['ignore','ignore','inherit']});
+  server=spawn(join(root,'zig-out/bin/roclet'),['serve',project,'--assets',root,'--port',String(port),'--no-browser'],{stdio:['ignore','ignore','pipe']});
+  let startup='';server.stderr.on('data',chunk=>{startup+=chunk;});
+  let token;
   const base=`http://127.0.0.1:${port}`;
   for(let i=0;i<100;i++){
-    if((await fetch(base+'/api/local/config').catch(()=>null))?.ok)break;
+    token=startup.match(/\?token=([a-f0-9]{64})/)?.[1];
+    if(token && (await fetch(base+'/api/local/config',{headers:{'X-Roclet-Token':token}}).catch(()=>null))?.ok)break;
     if(server.exitCode!==null)throw new Error('Local server exited');
     await new Promise(r=>setTimeout(r,30));
   }
-  const browser=spawn(process.execPath,[join(root,'tools/browser-check.mjs'),'--page',base+'/?home=1','--script',join(root,'tests/local-project-browser.mjs'),'--timeout','90000'],{stdio:'inherit'});
+  const browser=spawn(process.execPath,[join(root,'tools/browser-check.mjs'),'--page',base+'/?token='+token,'--script',join(root,'tests/local-project-browser.mjs'),'--timeout','90000'],{stdio:'inherit'});
   const code=await new Promise((r,reject)=>{browser.once('error',reject);browser.once('exit',r);});
   if(code!==0)throw new Error('Local project browser checks failed');
 } finally {

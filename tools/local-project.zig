@@ -7,6 +7,7 @@ pub const Project = struct {
     token: []const u8,
     host: []const u8,
     any_address: bool = false,
+    cookie_name: []const u8 = "roclet_session",
     initial: ?[]const u8 = null,
     mutex: Io.Mutex = .init,
 };
@@ -31,6 +32,39 @@ pub fn trusted(r: *std.http.Server.Request, p: *Project, a: A) !bool {
     if (header(r, "Sec-Fetch-Site")) |site| if (!std.mem.eql(u8, site, "same-origin") and !std.mem.eql(u8, site, "none")) return false;
     if (header(r, "Origin")) |origin| if (!std.mem.eql(u8, origin, try std.fmt.allocPrint(a, "http://{s}", .{host}))) return false;
     return true;
+}
+fn tokenMatches(expected: []const u8, actual: []const u8) bool {
+    if (expected.len != 64 or actual.len != 64) return false;
+    return std.crypto.timing_safe.eql([64]u8, expected[0..64].*, actual[0..64].*);
+}
+// Exchange the startup URL for an HttpOnly session cookie, then remove the
+// secret from the address bar before loading any page assets or external links.
+pub fn authorize(r: *std.http.Server.Request, p: *Project, a: A) !bool {
+    if (r.head.method == .GET and std.mem.startsWith(u8, r.head.target, "/?token=")) {
+        if (tokenMatches(p.token, r.head.target[8..])) {
+            try r.respond("", .{ .status = .see_other, .keep_alive = false, .extra_headers = &.{
+                .{ .name = "Location", .value = "/" },
+                .{ .name = "Set-Cookie", .value = try std.fmt.allocPrint(a, "{s}={s}; Path=/; HttpOnly; SameSite=Strict", .{ p.cookie_name, p.token }) },
+                .{ .name = "Cache-Control", .value = "no-store" },
+                .{ .name = "Referrer-Policy", .value = "no-referrer" },
+            } });
+            return false;
+        }
+    } else {
+        if (tokenMatches(p.token, header(r, "X-Roclet-Token") orelse "")) return true;
+        var cookies = std.mem.splitScalar(u8, header(r, "Cookie") orelse "", ';');
+        while (cookies.next()) |raw| {
+            const cookie = std.mem.trim(u8, raw, " ");
+            const eq = std.mem.findScalar(u8, cookie, '=') orelse continue;
+            if (std.mem.eql(u8, cookie[0..eq], p.cookie_name) and tokenMatches(p.token, cookie[eq + 1 ..])) return true;
+        }
+    }
+    try r.respond("Roclet requires the private URL printed in your terminal. Open that URL to connect.", .{
+        .status = .unauthorized,
+        .keep_alive = false,
+        .extra_headers = &.{ .{ .name = "Cache-Control", .value = "no-store" }, .{ .name = "Referrer-Policy", .value = "no-referrer" } },
+    });
+    return false;
 }
 fn reply(r: *std.http.Server.Request, a: A, status: std.http.Status, value: anytype) !void {
     var w: Io.Writer.Allocating = .init(a);

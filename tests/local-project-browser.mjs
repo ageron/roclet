@@ -4,6 +4,8 @@
   const until=async(fn,label)=>{for(let i=0;i<800;i++){if(await fn())return;await pause(25);}throw new Error('Timed out: '+label);};
   const {serverProjectReady}=await import('/web/server-project.mjs'),project=await serverProjectReady;
   assert(project,'Local server detected');
+  assert(!new URL(location.href).searchParams.has('token'),'Login removes the token from the URL');
+  assert(!document.cookie.includes(project.config.token),'Session cookie is HttpOnly');
   const frame=document.createElement('iframe');frame.style.cssText='width:100%;height:800px';document.body.replaceChildren(frame);
   let win,n,files;
   const load=async(url)=>{

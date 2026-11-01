@@ -28,7 +28,7 @@ def package(site, binary, platform, version, output):
         os.chmod(root / executable, 0o755)
         (root / 'README.txt').write_text(
             f'Roclet server {version} ({platform})\n\n'
-            'Run roclet serve (roclet.exe serve on Windows), then open http://127.0.0.1:4173/.\n'
+            'Run roclet serve (roclet.exe serve on Windows), then open the private token URL printed in the terminal.\n'
             'Keep the executable and all extracted folders together. Stop with Ctrl-C.\n'
             'Use --port 4174 to choose another port. No Zig or Roc installation is needed.\n'
             'This archive serves the browser app; it does not include the headless notebook runner.\n'

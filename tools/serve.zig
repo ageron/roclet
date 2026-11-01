@@ -71,6 +71,7 @@ fn serveOne(io: std.Io, context: *Context, stream: std.Io.net.Stream) !void {
     var request = try server.receiveHead();
     if (context.project) |*project| {
         if (!try local.trusted(&request, project, gpa)) return request.respond("Forbidden", .{ .status = .forbidden, .keep_alive = false });
+        if (!try local.authorize(&request, project, gpa)) return;
         if (std.mem.startsWith(u8, request.head.target, "/api/local/")) return local.handle(&request, project, io, gpa);
     }
     if (std.mem.startsWith(u8, request.head.target, proxy.prefix)) {
@@ -144,8 +145,8 @@ pub fn printHelp(io: std.Io) !void {
         \\  roclet serve-static ./website --port 8080
         \\
         \\Network project access uses a numeric server IP in the browser URL.
-        \\Anyone who can connect can read and edit the selected project; there is no login.
-        \\Keep the default localhost binding unless you intend to share access.
+        \\Project access requires the private token URL printed at startup.
+        \\Anyone with that URL can read and edit the project. A restart changes the token.
         \\Keep bundled assets beside the executable. Press Ctrl-C to stop.
         \\
     );
@@ -196,7 +197,7 @@ fn listen(init: std.process.Init, context: *Context, bind: []const u8, port: u16
     var group: std.Io.Group = .init;
     defer group.cancel(init.io);
     const display_bind = if (std.mem.eql(u8, bind, "0.0.0.0")) "127.0.0.1" else if (std.mem.eql(u8, bind, "::")) "::1" else bind;
-    const url = try std.fmt.allocPrint(init.arena.allocator(), "http://{s}/", .{try hostPort(init.arena.allocator(), display_bind, port)});
+    const url = try std.fmt.allocPrint(init.arena.allocator(), "http://{s}/{s}{s}", .{ try hostPort(init.arena.allocator(), display_bind, port), if (context.project != null) "?token=" else "", if (context.project) |p| p.token else "" });
     if (!std.mem.eql(u8, display_bind, bind)) std.debug.print("Listening on {s}; use this computer's network IP from another device.\n", .{bind});
     std.debug.print("Roclet: {s}\n", .{url});
     if (context.project) |project| std.debug.print("Project: {s}\nPress Ctrl-C to stop.\n", .{project.root});
@@ -263,6 +264,7 @@ pub fn serveProject(init: std.process.Init, args: []const []const u8) !void {
         .root = project_root,
         .token = try a.dupe(u8, &std.fmt.bytesToHex(random, .lower)),
         .host = try hostPort(a, bind, port),
+        .cookie_name = try std.fmt.allocPrint(a, "roclet_session_{d}", .{port}),
         .any_address = std.mem.eql(u8, bind, "0.0.0.0") or std.mem.eql(u8, bind, "::"),
         .initial = if (stat.kind == .file) std.fs.path.basename(actual) else null,
     } };

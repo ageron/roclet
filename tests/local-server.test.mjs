@@ -16,7 +16,8 @@ async function launch(project,home,args=[]){
   const child=spawn(binary,['serve',project,'--assets',root,'--port',String(p),'--no-browser',...args],{env:{...process.env,HOME:home},stdio:['ignore','pipe','pipe']});
   let log='';child.stderr.on('data',b=>log+=b);
   for(let i=0;i<100;i++){
-    const response=await fetch(`${base}/api/local/config`).catch(()=>null);
+    const token=log.match(/\?token=([a-f0-9]{64})/)?.[1];
+    const response=token?await fetch(`${base}/api/local/config`,{headers:{'X-Roclet-Token':token}}).catch(()=>null):null;
     if(response?.ok){const config=await response.json();return {base,child,config,client:new ServerProject(config,{fetch:(path,options)=>fetch(base+path,options)})};}
     if(child.exitCode!==null)throw new Error(log);await pause(30);
   }
@@ -32,6 +33,7 @@ test('local project files, conflict protection, confinement, package cache and r
     await writeFile(join(project,'.git/config'),'secret');await writeFile(join(temp,'outside.roc'),'secret');
     await symlink(join(temp,'outside.roc'),join(project,'linked.roc'));await symlink(temp,join(project,'escape'));
     server=await launch(project,home);let {client,base,config}=server;
+    const fetch=(url,options={})=>globalThis.fetch(url,{...options,headers:{'X-Roclet-Token':server.config.token,...options.headers}});
     assert.equal(config.root,await realpath(project));assert.equal(config.initial,null);
     assert.deepEqual((await client.call('list')).paths.sort(),['nested/other.md','note.roc']);
     assert.equal((await client.call('read','note.roc')).source,'a = 1');
@@ -40,7 +42,7 @@ test('local project files, conflict protection, confinement, package cache and r
     assert.equal(files.find(f=>f.path==='nested/data.txt').source,'hello');
     assert(!files.some(f=>f.path==='note.roc'));
     for(const path of ['../outside.roc','/etc/passwd','.git/config','escape/outside.roc','linked.roc','nested/../note.roc'])await assert.rejects(client.call('read',path));
-    assert.equal((await fetch(base+'/api/local/files',{method:'POST',body:'{}'})).status,403);
+    assert.equal((await globalThis.fetch(base+'/api/local/files',{method:'POST',headers:{Cookie:`roclet_session_${new URL(base).port}=${config.token}`},body:'{}'})).status,403);
     assert.equal((await fetch(base+'/api/local/config',{headers:{Origin:'https://evil.example'}})).status,403);
     assert.equal(await new Promise((resolve,reject)=>{const req=request(base+'/api/local/config',{headers:{Host:'evil.example'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);req.end();}),403);
     const handle=client.handle('note.roc');await handle.getFile();const stream=await handle.createWritable();await stream.write('a = 2');await stream.close();
@@ -71,7 +73,7 @@ test('local project files, conflict protection, confinement, package cache and r
 test('wildcard binding accepts IP hosts but rejects foreign origins and DNS hosts',{skip:!available},async()=>{
   const temp=await mkdtemp(join(tmpdir(),'roclet-bind-'));let server;
   const status=(host,origin)=>new Promise((resolve,reject)=>{
-    const req=request(server.base+'/api/local/config',{headers:{Host:host,...(origin?{Origin:origin}:{})}},res=>{res.resume();resolve(res.statusCode);});
+    const req=request(server.base+'/api/local/config',{headers:{'X-Roclet-Token':server.config.token,Host:host,...(origin?{Origin:origin}:{})}},res=>{res.resume();resolve(res.statusCode);});
     req.on('error',reject);req.end();
   });
   try {
@@ -110,4 +112,36 @@ test('serve-static serves the selected assets without the local file API',{skip:
     assert.match(await response.text(),/Roclet/);
     assert.equal((await fetch(base+'/api/local/config')).status,404);
   } finally {await stop({child});}
+});
+
+test('private startup URL protects pages, APIs and proxy; cookie login and token rotation',{skip:!available},async()=>{
+  const temp=await mkdtemp(join(tmpdir(),'roclet-auth-'));let server;
+  try {
+    server=await launch(temp,temp);
+    const oldToken=server.config.token;
+    assert.match(oldToken,/^[a-f0-9]{64}$/);
+    for(const path of ['/','/web/edit.html','/artifacts/manifest.json','/api/local/config','/api/local/files','/api/packages/test']) {
+      const response=await fetch(server.base+path);
+      assert.equal(response.status,401,path);
+      assert.equal(response.headers.get('Cache-Control'),'no-store');
+      assert.ok(!(await response.text()).includes(oldToken));
+    }
+    assert.equal((await fetch(server.base+'/?token=bad')).status,401);
+    const login=await fetch(server.base+'/?token='+oldToken,{redirect:'manual'});
+    assert.equal(login.status,303);
+    assert.equal(login.headers.get('Location'),'/');
+    assert.equal(login.headers.get('Referrer-Policy'),'no-referrer');
+    const cookie=login.headers.get('Set-Cookie');
+    assert.match(cookie,/HttpOnly/);assert.match(cookie,/SameSite=Strict/);
+    const headers={Cookie:cookie.split(';')[0]};
+    assert.equal((await fetch(server.base+'/web/edit.html',{headers})).status,200);
+    assert.equal((await fetch(server.base+'/api/local/config',{headers})).status,200);
+    assert.equal((await fetch(server.base+'/api/local/files',{method:'POST',headers,body:'{}'})).status,403);
+    await stop(server);server=await launch(temp,temp);
+    assert.notEqual(server.config.token,oldToken);
+    assert.equal((await fetch(server.base+'/?token='+oldToken)).status,401);
+    assert.equal((await fetch(server.base+'/api/local/config',{headers:{'X-Roclet-Token':oldToken}})).status,401);
+    // Even a cookie with this server's name cannot reuse the old secret.
+    assert.equal((await fetch(server.base+'/api/local/config',{headers:{Cookie:`roclet_session_${new URL(server.base).port}=${oldToken}`}})).status,401);
+  } finally {if(server && server.child.exitCode===null)await stop(server);await rm(temp,{recursive:true,force:true});}
 });

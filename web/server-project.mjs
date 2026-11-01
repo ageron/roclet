@@ -63,7 +63,7 @@ export class ServerProject {
 }
 export let serverProject=null;
 export const serverProjectReady=(async()=>{
-  if(!globalThis.location || !['127.0.0.1','localhost','[::1]'].includes(location.hostname))return null;
+  if(!globalThis.location)return null;
   try {
     const response=await fetch('/api/local/config',{cache:'no-store'});
     if(!response.ok)return null;

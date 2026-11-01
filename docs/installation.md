@@ -72,7 +72,12 @@ continues to work independently without a server.
 To allow access from another computer, use `--bind 0.0.0.0` (all IPv4 interfaces)
 or bind a specific local IP address. For IPv6 use `--bind ::`. In the browser,
 use the server's numeric IP and port, such as `http://192.168.1.10:4173/`.
-Anyone who can connect can read and edit the selected project; there is no login.
+Project access requires the private URL printed in the terminal, which includes
+a fresh random token on each server start. The browser exchanges it for an HttpOnly
+session cookie and removes the token from the address bar. Keep that URL private:
+anyone with it can read and edit the project. After a restart, open the new URL.
+HTTP does not encrypt the token or notebook traffic; use a trusted network or an
+SSH tunnel when connecting remotely.
 The default `127.0.0.1` keeps access on your computer.
 
 `roclet serve-static /path/to/website --port 8080` serves website assets without
@@ -158,7 +163,7 @@ reopen to activate it.
 See the [server installation page](https://ageron.github.io/roclet/web/install.html)
 for macOS, Windows, and Linux downloads and PATH setup. Extract the archive for
 your computer, keep its files together, and run `./roclet serve` (`.\roclet.exe serve` in
-PowerShell). Open <http://127.0.0.1:4173/>; press Ctrl+C to stop the server.
+PowerShell). Open the private token URL printed in the terminal; press Ctrl+C to stop the server.
 No Roc or Zig installation is needed. This server distribution is separate from
 the source-built headless runner described below.
 
