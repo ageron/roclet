@@ -62,13 +62,31 @@
   assert(value('out_text')===textValue(original),'Roc did not receive exact UTF-8');
   assert(value('out_bytes')==='[0, 255, 254, 128, 13, 10]','Roc did not receive exact binary bytes');
   await notebook.run();assert(notebook.result.transportMetrics.fileBytes===0,'Unchanged attachments were retransmitted');
-  notebook.editCell(2,'value : Try(U64, [Bad])\nvalue = Ok(7)\n\nout_constant = match value {\n    Ok(n) => n\n    Err(_) => 0\n}');
-  await notebook.run();
-  assert(notebook.result.model.diagnostics.some(d=>d.message.startsWith('**Unused Branch**')),'Fixture did not produce the empirical compiler warning');
-  assert(![...document.querySelectorAll('.diagnostic')].some(node=>node.textContent.includes('Unused Branch')),'Empirical warning is visible in the editor');
-  const report=await exportReport(await captureExport(notebook,manifest,{results:true}));
-  assert(!(await report.text()).includes('Unused Branch'),'Empirical warning is visible in the exported report');
-  reports.push('empirical branch warnings stay in compiler data and are hidden from the editor and report');
+  // Empirical warnings depend on the compiler's compile-time evaluation and
+  // cache decisions. Test their presentation with fixed diagnostics rather
+  // than requiring a particular Roc expression to emit an optional warning.
+  const empirical='This match alternative was not taken during compile-time evaluation.\nNote: This warning is empirical; it only describes the compile-time evaluation that ran for this definition.';
+  const mappedWarning={severity:'warning',code:'roc-check',cell:2,message:`**Unused Branch**\n${empirical}`};
+  const rawWarning={severity:'warning',title:'Unused Branch',message:empirical};
+  const visibleWarning={severity:'warning',code:'roc-check',cell:2,message:'Attachment probe: ordinary warning'};
+  const visibleRawWarning={severity:'warning',title:'Unused Variable',message:'Attachment probe: raw warning'};
+  const compiled=notebook.result,displayFixture=structuredClone(compiled);
+  displayFixture.model.diagnostics.push(mappedWarning,visibleWarning);
+  displayFixture.evaluation.diagnostics.push(rawWarning,visibleRawWarning);
+  try {
+    notebook.result=displayFixture;notebook.emit('result');
+    const diagnostics=[...document.querySelectorAll('.diagnostic')].map(node=>node.textContent).join('\n');
+    assert(!diagnostics.includes('Unused Branch'),'Empirical warning is visible in the editor');
+    assert(diagnostics.includes(visibleWarning.message) && diagnostics.includes(visibleRawWarning.message),'Ordinary warnings were hidden in the editor');
+    assert(notebook.result.model.diagnostics.includes(mappedWarning) && notebook.result.evaluation.diagnostics.includes(rawWarning),'Rendering mutated the diagnostic data');
+    const capture=await captureExport(notebook,manifest,{results:true});
+    capture.model.diagnostics.push(mappedWarning,visibleWarning);
+    const report=await (await exportReport(capture)).text();
+    assert(!report.includes('Unused Branch'),'Empirical warning is visible in the exported report');
+    assert(report.includes(visibleWarning.message),'Ordinary warning was hidden in the exported report');
+    assert(capture.model.diagnostics.includes(mappedWarning),'Report rendering mutated the diagnostic data');
+  } finally {notebook.result=compiled;notebook.emit('result');}
+  reports.push('fixed empirical diagnostics remain in data but are hidden in the editor and report; ordinary warnings remain visible');
   reports.push('file picker and drop handlers, bounded previews, import snippets, exact UTF-8 and raw bytes in Roc');
 
   await open();await select('data/values.csv');
