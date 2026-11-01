@@ -44,9 +44,11 @@ try {
   const session = new DocumentSession(bytes);
   const timings = {};
   const timed = async (name, request) => {
+    status.textContent = `Checking editing workflow: ${name}`;
     const start = performance.now();
     const result = await session.request(request);
     timings[name] = Math.round(performance.now() - start);
+    log.textContent += `Completed editing request: ${name} (${timings[name]}ms)\n`;
     return result;
   };
   try {
@@ -68,14 +70,15 @@ try {
     assert.doesNotMatch(draft.source, /rocPreamble|roclet_observe|display!|main! =/);
     const edited = await timed('editedRunMs', draft.request('run'));
     assert.deepEqual(edited.evaluation.events.map(e => e.message), ['18.0\n']);
-    const deleted = await session.request({ ...draft.request('run'), source: '# %%\nout_1 = area' });
+    const deleted = await timed('deletedRunMs', { ...draft.request('run'), source: '# %%\nout_1 = area' });
     assert.notEqual(deleted.status, 'ok');
     assert.deepEqual(deleted.evaluation.events, []);
+    status.textContent = 'Checking editing workflow: cancellation';
     const cancelled = session.request(draft.request('run'));
     const rejection = assert.rejects(cancelled, { name: 'AbortError' });
     session.stop();
     await rejection;
-    const restarted = await session.request(draft.request('run'));
+    const restarted = await timed('restartedRunMs', draft.request('run'));
     assert.deepEqual(restarted.evaluation.events.map(e => e.message), ['18.0\n']);
     log.textContent += `PASS editing views, exact switch-back, edits, deletion, Stop, restart\nTIMINGS ${JSON.stringify(timings)}\n`;
   } finally { session.stop(); }
