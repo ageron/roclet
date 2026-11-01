@@ -6,6 +6,7 @@
 const std = @import("std");
 const base = @import("base");
 const can = @import("can");
+const collections = @import("collections");
 const engine = @import("engine.zig");
 const frontend = @import("document_frontend.zig");
 const syntax = @import("syntax.zig");
@@ -78,7 +79,7 @@ fn inside(region: base.Region, start: u32, end: u32) bool {
 }
 
 /// Record what checked node `i` refers to.
-fn collect(a: A, env: *can.ModuleEnv, tag: can.CIR.Node.Tag, i: usize, patterns: *const std.AutoHashMapUnmanaged(CIR.Pattern.Idx, CIR.Def.Idx), facts: *Facts) !void {
+fn collect(a: A, env: *can.ModuleEnv, tag: can.CIR.Node.Tag, i: usize, patterns: *const collections.DenseMap(CIR.Pattern.Idx, CIR.Def.Idx), facts: *Facts) !void {
     switch (tag) {
         .expr_var, .expr_external_lookup, .expr_nominal, .expr_nominal_external, .expr_associated_lookup_local, .expr_associated_lookup, .expr_associated_lookup_resolved, .expr_type_method_call, .expr_type_dispatch_call, .expr_type_dispatch_call_dispatcher, .expr_derived_method, .expr_deferred_import_ref, .expr_deferred_nominal_external, .expr_method_call, .expr_dispatch_call, .expr_method_eq, .expr_interpolation => {
             switch (env.store.getExpr(@fromBackingInt(@intCast(i)))) {
@@ -187,13 +188,13 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
     var result_binders: std.ArrayList([]const u8) = .empty;
     var definitions: std.ArrayList(Definition) = .empty;
     const defs = env.store.sliceDefs(env.all_defs);
-    var patterns: std.AutoHashMapUnmanaged(CIR.Pattern.Idx, CIR.Def.Idx) = .{};
+    var patterns = collections.DenseMap(CIR.Pattern.Idx, CIR.Def.Idx).init(arena);
     var binders: std.ArrayList(CIR.Pattern.Idx) = .empty;
     var binder_stack: std.ArrayList(CIR.Pattern.Idx) = .empty;
     for (defs) |idx| {
         binders.clearRetainingCapacity();
         try can.DependencyGraph.appendPatternBinders(env, env.store.getDef(idx).pattern, &binders, &binder_stack, arena);
-        for (binders.items) |binder| try patterns.put(arena, binder, idx);
+        for (binders.items) |binder| try patterns.put(binder, idx);
     }
     const tags = env.store.nodes.items.items(.tag);
     for (tags, 0..) |tag, i| {
@@ -319,15 +320,14 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
     const module_nodes = try arena.alloc(frontend.Node, sorted_modules.len);
     for (module_nodes, sorted_modules) |*out, name| out.* = .{ .name = name, .fingerprint = modules.get(name).?.items };
 
-    var refs: std.AutoHashMapUnmanaged(CIR.Def.Idx, void) = .{};
+    var refs = collections.DenseMap(CIR.Def.Idx, void).init(arena);
     var stack: std.ArrayList(CIR.Expr.Idx) = .empty;
-    var defaults: std.AutoHashMapUnmanaged(CIR.Expr.Idx, void) = .{};
+    var defaults = collections.DenseMap(CIR.Expr.Idx, void).init(arena);
 
     // Value edges: the compiler's strict-demand relation (finalized after
     // checking; it includes associated items and resolved local dispatch
-    // targets) united with name references. Strict demand alone is not
-    // enough: a lambda passed to a builtin (`List.map(xs, f)`) is demanded,
-    // but not what its body reads. `demand_union_fallbacks` counts, for each
+    // targets and callback captures) united with name references as a
+    // conservative dependency graph. `demand_union_fallbacks` counts, for each
     // non-function definition, the definitions its united closure reaches
     // and its strict-demand closure does not.
     var demand: std.AutoHashMapUnmanaged(CIR.Def.Idx, std.ArrayList(CIR.Def.Idx)) = .empty;
@@ -342,7 +342,7 @@ pub fn analyze(arena: A, env: *can.ModuleEnv, prefix: u32, user_bytes: u32, expe
     for (node_defs.keys(), node_defs.values()) |idx, slot| {
         refs.clearRetainingCapacity();
         try can.DependencyGraph.collectNameReferences(env, &patterns, env.store.getDef(idx).expr, &refs, &stack, &defaults, arena);
-        if (demand.get(idx)) |dependencies| for (dependencies.items) |dependency| try refs.put(arena, dependency, {});
+        if (demand.get(idx)) |dependencies| for (dependencies.items) |dependency| try refs.put(dependency, {});
         var edges: std.ArrayList(CIR.Def.Idx) = .empty;
         var it = refs.keyIterator();
         while (it.next()) |dependency| try edges.append(arena, dependency.*);
@@ -503,7 +503,7 @@ fn appendNew(a: A, list: *std.ArrayList([]const u8), name: []const u8) !void {
 fn setDependencies(
     a: A,
     node: *frontend.Node,
-    refs: std.AutoHashMapUnmanaged(CIR.Def.Idx, void),
+    refs: collections.DenseMap(CIR.Def.Idx, void),
     defs: []const CIR.Def.Idx,
     node_defs: *const std.AutoArrayHashMapUnmanaged(CIR.Def.Idx, usize),
     nodes: []const frontend.Node,
