@@ -33,3 +33,26 @@ more.onclick = () => { expanded = !expanded; void refresh(); };
 addEventListener('pageshow', () => void refresh());
 addEventListener('focus', () => void refresh());
 void refresh();
+
+const openButton = document.getElementById('open-notebook');
+const fileInput = document.getElementById('open-notebook-file');
+const openStatus = document.getElementById('open-status');
+openButton.onclick = () => fileInput.click();
+fileInput.onchange = async () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  openButton.disabled = true; openStatus.hidden = false; openStatus.textContent = 'Opening notebook…';
+  try {
+    const {openNotebookFile} = await import('./open-notebook.mjs');
+    const url = await openNotebookFile(file, store, async () => {
+      const response = await fetch('artifacts/manifest.json');
+      if (!response.ok) throw new Error('Could not load Roclet’s compiler information. Please try again.');
+      return response.json();
+    });
+    location.assign(url);
+  } catch (error) {
+    openStatus.textContent = error.message || 'Could not open this notebook.';
+  } finally {
+    openButton.disabled = false; fileInput.value = '';
+  }
+};

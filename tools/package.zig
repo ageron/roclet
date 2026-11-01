@@ -75,6 +75,8 @@ pub fn main(init: std.process.Init) !void {
     for ([_][]const u8{
         "index.html",
         "web/home.mjs",
+        "web/open-notebook.mjs",
+        "web/install.html",
         "web/notebook-search-worker.mjs",
         "web/home.css",
         "web/assets/roclet-logo-large.png",

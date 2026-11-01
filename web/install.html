@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Install the optional Roclet server on macOS, Windows, or Linux.">
+<title>Install the Roclet server</title>
+<script>
+(()=>{const system=matchMedia('(prefers-color-scheme: dark)');let preference='system';try{preference=localStorage.getItem('roclet.theme')||'system';}catch{}const apply=()=>document.documentElement.dataset.theme=preference==='dark'||(preference==='system'&&system.matches)?'dark':'light';apply();system.addEventListener('change',apply);addEventListener('storage',e=>{if(e.key==='roclet.theme'||e.key===null){preference=e.newValue||'system';apply();}});})();
+</script>
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="stylesheet" href="home.css">
+</head>
+<body>
+<div class="page install-page">
+<header><a class="wordmark" href="../" aria-label="Roclet home">Roclet</a><a class="repo" href="https://github.com/ageron/roclet">GitHub <span aria-hidden="true">↗</span></a></header>
+<main>
+<h1>Install the Roclet server</h1>
+<p>Most people can <a href="../">use Roclet in their browser</a> without installing anything. The optional server runs a local copy of the same app. No Roc or Zig installation is needed.</p>
+<h2>1. Download and extract</h2>
+<p>Open <a href="https://github.com/ageron/roclet/releases">GitHub releases</a> and choose a <strong>Roclet server</strong> release, then download the archive for your computer.</p>
+<table><thead><tr><th>Computer</th><th>Archive</th></tr></thead><tbody>
+<tr><td>Mac · Apple Silicon</td><td><code>roclet-macos-arm64.tar.gz</code></td></tr>
+<tr><td>Mac · Intel</td><td><code>roclet-macos-x64.tar.gz</code></td></tr>
+<tr><td>Windows · x64</td><td><code>roclet-windows-x64.zip</code></td></tr>
+<tr><td>Linux · x64</td><td><code>roclet-linux-x64.tar.gz</code></td></tr>
+<tr><td>Linux · ARM64</td><td><code>roclet-linux-arm64.tar.gz</code></td></tr>
+</tbody></table>
+<p>Extract the archive and keep the resulting <code>roclet</code> folder somewhere permanent. Keep the executable and its folders together.</p>
+<h2>2. Start Roclet</h2>
+<p>Open a terminal in the extracted folder. On macOS or Linux:</p>
+<pre><code>./roclet</code></pre>
+<p>On Windows, in PowerShell:</p>
+<pre><code>.\roclet.exe</code></pre>
+<p>Open <a href="http://127.0.0.1:4173/">http://127.0.0.1:4173/</a>. Keep the terminal running; press Ctrl+C to stop the server. If the port is busy, use <code>--port 4174</code>.</p>
+<h2>Optional: use the roclet command anywhere</h2>
+<p>Add the extracted folder to your PATH. On macOS or Linux, add this line to your shell configuration (such as <code>~/.zshrc</code> or <code>~/.bashrc</code>), replacing the path:</p>
+<pre><code>export PATH="/absolute/path/to/roclet:$PATH"</code></pre>
+<p>On Windows, search for <strong>Edit environment variables for your account</strong>, edit your user <strong>Path</strong>, and add the extracted folder. Open a new terminal, then run <code>roclet</code>.</p>
+<p>The server serves the browser app; it does not run notebooks headlessly. For development and the separate headless runner, see the <a href="https://github.com/ageron/roclet/blob/main/docs/installation.md#build-from-source">source build instructions</a>.</p>
+</main>
+<footer><a href="../">← Back to Roclet</a><span>Built with <a href="https://www.roc-lang.org/">Roc</a>.</span></footer>
+</div>
+</body>
+</html>

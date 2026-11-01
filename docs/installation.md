@@ -103,20 +103,12 @@ reopen to activate it.
 
 ## Run a downloaded release locally
 
-When a release provides `roclet.zip`, extract it and open a terminal in the
-extracted directory. The included server must match your operating system and
-architecture; native builds have been tested on Linux x86_64 and macOS Apple Silicon.
-
-```sh
-./roclet-serve . 4173
-```
-
-Open <http://127.0.0.1:4173/web/edit.html>. Leave the terminal running while
-using the app, or prepare offline use before stopping it. Don't double-click
-`edit.html`: the interactive app needs HTTPS or a localhost server.
-
-The browser files can also be served by another static web server. The bundled
-native executable is platform-specific; the browser app is WebAssembly.
+See the [server installation page](https://ageron.github.io/roclet/web/install.html)
+for macOS, Windows, and Linux downloads and PATH setup. Extract the archive for
+your computer, keep its files together, and run `./roclet` (`.\roclet.exe` in
+PowerShell). Open <http://127.0.0.1:4173/>; press Ctrl+C to stop the server.
+No Roc or Zig installation is needed. This server distribution is separate from
+the source-built headless runner described below.
 
 ## Build from source
 
@@ -345,3 +337,12 @@ service. Browser cache identities retain the original package URLs.
 
 Existing offline users can prepare the updated version through
 **File → Offline & storage**, then close all Roclet tabs and reopen.
+
+## Publish a server release
+
+Run **Release Roclet server** from GitHub Actions on `main`, specifying a version
+such as `0.1.0` and the run ID of a successful **Roclet CI** run for that exact
+commit. The workflow reuses that run's tested browser site, builds and smoke-tests
+the server on macOS (Apple Silicon and Intel), Linux (ARM64 and x64), and Windows
+(x64), then publishes all archives and `SHA256SUMS` together under `server-vVERSION`.
+It refuses a site from another commit or an unsuccessful CI run.

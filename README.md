@@ -16,6 +16,7 @@ Roclet runs Roc locally through WebAssembly—and keeps working offline.
 ## Try it
 
 **[Open Roclet](https://ageron.github.io/roclet/)** — no installation needed.
+Prefer a local copy? [Install the optional server](https://ageron.github.io/roclet/web/install.html).
 
 [Try the Rich Outputs and Widgets demo](https://ageron.github.io/roclet/web/edit.html?example=rich-outputs),
 change `width`, and see what happens. The [installation guide](docs/installation.md)

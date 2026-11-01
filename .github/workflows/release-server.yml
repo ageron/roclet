@@ -1,0 +1,147 @@
+name: Release Roclet server
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Server version (for example 0.1.0)'
+        required: true
+        type: string
+      run_id:
+        description: 'Successful Roclet CI run for the selected main commit'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roclet-server-release
+  cancel-in-progress: false
+
+jobs:
+  site:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      version: ${{ steps.source.outputs.version }}
+    steps:
+      - name: Validate version and verified site
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_RUN: ${{ inputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > source.json
+          jq -e --arg repo "$GITHUB_REPOSITORY" --arg sha "$GITHUB_SHA" '
+            .status == "completed" and .conclusion == "success" and
+            .path == ".github/workflows/ci.yml" and .head_branch == "main" and
+            .head_repository.full_name == $repo and .head_sha == $sha and
+            (.event == "push" or .event == "workflow_dispatch")
+          ' source.json
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: roclet-site
+          path: verified-site
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-server-site
+          path: verified-site/roclet-pages.zip
+          if-no-files-found: error
+          compression-level: 0
+
+  build:
+    needs: site
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x64
+            target: x86_64-linux-musl
+            executable: roclet
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+            target: aarch64-linux-musl
+            executable: roclet
+          - runner: macos-15-intel
+            platform: macos-x64
+            target: x86_64-macos
+            executable: roclet
+          - runner: macos-15
+            platform: macos-arm64
+            target: aarch64-macos
+            executable: roclet
+          - runner: windows-2025
+            platform: windows-x64
+            target: x86_64-windows
+            executable: roclet.exe
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Read pinned Zig version
+        id: zig-version
+        shell: bash
+        run: echo "version=$(python -c 'import json; print(json.load(open("compiler.lock.json"))["zigVersion"])')" >> "$GITHUB_OUTPUT"
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ steps.zig-version.outputs.version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-server-site
+          path: verified-site
+      - name: Build portable server
+        shell: bash
+        run: |
+          mkdir -p server-bin
+          zig build-exe tools/serve.zig -O ReleaseSmall -target ${{ matrix.target }} -mcpu=baseline -femit-bin=server-bin/${{ matrix.executable }}
+      - name: Package and smoke-test extracted release
+        shell: bash
+        env:
+          VERSION: ${{ needs.site.outputs.version }}
+        run: |
+          python tools/release-server.py --site verified-site/roclet-pages.zip --binary server-bin/${{ matrix.executable }} --platform ${{ matrix.platform }} --version "$VERSION" --output release
+          python tests/test-server-release.py release/roclet-${{ matrix.platform }}.*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.platform }}
+          path: release/*
+          if-no-files-found: error
+          compression-level: 0
+
+  publish:
+    needs: [site, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: server-*
+          path: release
+          merge-multiple: true
+      - name: Publish all platforms together
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.site.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd release && sha256sum *.tar.gz *.zip > SHA256SUMS)
+          printf 'Roclet server %s\n\nDownload the archive for your OS and architecture, extract it, and run roclet (roclet.exe on Windows). Keep the web assets beside the executable.\n\nInstallation: https://ageron.github.io/roclet/web/install.html\n\nBuilt from %s. The browser site passed Roclet CI; each server archive was smoke-tested on its platform.\n' "$VERSION" "$GITHUB_SHA" > notes.txt
+          gh release create "server-v$VERSION" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Roclet server $VERSION" --notes-file notes.txt --latest=false
