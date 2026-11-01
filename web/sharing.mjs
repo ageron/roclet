@@ -8,6 +8,7 @@ import {renderMarkdown} from './markdown-view.mjs';
 import {renderDisplay,normalizeDisplay} from './display-view.mjs';
 import {projectFiles,projectPath} from './project-files.mjs';
 import {attachments,attachment,bundleLimit} from './attachments.mjs';
+import {isVisibleDiagnostic} from './compiler-tools.mjs';
 export const downloadName = title => (title||'notebook').replace(/[^a-z0-9._ -]/gi,'_').slice(0,120);
 export function download(blob,name) {
   const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),5000);
@@ -110,7 +111,8 @@ export async function exportReport(capture,{source=true}={}) {
     for(const event of capture.events.filter(e=>e.cell===index)) add(section,`Debug snapshot · ${event.kind}`,event.message);
     if(section.childNodes.length) doc.body.append(section);
   }
-  if(capture.model.diagnostics?.length) {const section=doc.createElement('section');for(const d of capture.model.diagnostics) add(section,d.code,d.message);doc.body.append(section);}
+  const diagnostics=(capture.model.diagnostics??[]).filter(isVisibleDiagnostic);
+  if(diagnostics.length) {const section=doc.createElement('section');for(const d of diagnostics) add(section,d.code,d.message);doc.body.append(section);}
   await embedMathStyles(doc);
   return new Blob(['<!doctype html>\n',doc.documentElement.outerHTML],{type:'text/html;charset=utf-8'});
 }

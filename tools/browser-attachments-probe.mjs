@@ -7,7 +7,7 @@
   const until=async(predicate,label)=>{for(let i=0;i<900;i++){if(predicate())return;await pause(50);}throw Error(`Timed out: ${label}; ${$('status').textContent}; ${$('attachment-status').textContent}`);};
   await until(()=>document.documentElement.dataset.ready==='true','editor startup');
   const {workbench}=await import('/web/edit.mjs'),bench=workbench(),notebook=bench.active.notebook;
-  const {captureExport,exportBundle,importBundle}=await import('/web/sharing.mjs');
+  const {captureExport,exportBundle,importBundle,exportReport}=await import('/web/sharing.mjs');
   const manifest=await fetch('/artifacts/manifest.json').then(response=>response.json());
   const reports=[];
   const textValue=text=>'['+[...new TextEncoder().encode(text)].join(', ')+']';
@@ -62,6 +62,13 @@
   assert(value('out_text')===textValue(original),'Roc did not receive exact UTF-8');
   assert(value('out_bytes')==='[0, 255, 254, 128, 13, 10]','Roc did not receive exact binary bytes');
   await notebook.run();assert(notebook.result.transportMetrics.fileBytes===0,'Unchanged attachments were retransmitted');
+  notebook.editCell(2,'value : Try(U64, [Bad])\nvalue = Ok(7)\n\nout_constant = match value {\n    Ok(n) => n\n    Err(_) => 0\n}');
+  await notebook.run();
+  assert(notebook.result.model.diagnostics.some(d=>d.message.startsWith('**Unused Branch**')),'Fixture did not produce the empirical compiler warning');
+  assert(![...document.querySelectorAll('.diagnostic')].some(node=>node.textContent.includes('Unused Branch')),'Empirical warning is visible in the editor');
+  const report=await exportReport(await captureExport(notebook,manifest,{results:true}));
+  assert(!(await report.text()).includes('Unused Branch'),'Empirical warning is visible in the exported report');
+  reports.push('empirical branch warnings stay in compiler data and are hidden from the editor and report');
   reports.push('file picker and drop handlers, bounded previews, import snippets, exact UTF-8 and raw bytes in Roc');
 
   await open();await select('data/values.csv');
