@@ -195,3 +195,29 @@ formatted notebook now also passes with the native Debug engine (see
 The optional historical isolation probe remains available with
 `?package-test=local-mirror`. It requires manually downloaded unchanged archives
 in `artifacts/browser-packages/` and is not the production download path.
+
+## CSV attachments in the editor
+
+The attachment probe runs the file-picker/drop handlers, previews, text/byte
+imports, automatic replacement updates, duplicate protection, removal diagnostics,
+path changes, undo, IndexedDB persistence, bundle import, and compiler restart.
+Both desktop and compact versions are part of `node tools/test-browser.mjs` and
+use local data without external packages.
+
+For the café report with the real roc-parser release, place the unchanged
+`7CLzCK6qUz7zmj6nvBxMEFu11HPwQTnCovKiyWzDSLTW.tar.zst` parser archive and
+`4W8SHzvwet9hH9qZewJ1J1CVQoH7YKA6zyijWFTB3y1w.tar.zst` Unicode archive in
+`artifacts/browser-packages/`, then run:
+
+```sh
+node tools/browser-check.mjs \
+  --page 'web/edit.html?new=1&parser-demo=1' \
+  --script tools/browser-attachments-probe.mjs \
+  --viewport 390x960 --timeout 180000
+```
+
+The probe verifies the release archives through Roc's normal package path,
+opens the published CSV demo with its attachment, checks typed rows and the
+15420-cent total, and replaces the CSV through the editor to produce a
+1000-cent total. This isolates compiler, attachment and package behavior using
+local mirrors; it does not claim that public GitHub downloads pass browser CORS.

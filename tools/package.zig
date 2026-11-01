@@ -114,6 +114,8 @@ pub fn main(init: std.process.Init) !void {
         "web/package-download.mjs",
         "web/package-config.json",
         "demos/04-meeting-windows.roc",
+        "demos/05-csv-attachments.roc",
+        "demos/data/cafe-sales.csv",
         "web/formats.mjs",
         "compiler-adapter/wasm.mjs",
         "artifacts/roclet.wasm",

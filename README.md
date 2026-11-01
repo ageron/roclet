@@ -10,6 +10,7 @@ Roclet runs Roc locally through WebAssembly—and keeps working offline.
 - **Files you can read.** Save notebooks as Roc or Markdown. Export runnable Roc scripts.
 - **Room to think.** A quiet editor with keyboard navigation, multiple cursors, and collapsible source.
 - **More than plain text.** Markdown, math, tables, images, and inline `dbg` output.
+- **Bring your data.** Attach local files as exact copies, import UTF-8 text or raw bytes, and keep them in portable bundles.
 - **Take your work with you.** Download a notebook, share a portable bundle, or export a self-contained report.
 
 ## Try it
@@ -22,6 +23,9 @@ covers offline use and running locally.
 
 Or explore the [little demos](demos/README.md): a simple reactive calculation, a coding
 puzzle with checks and hints, and a meeting scheduler using roc-time.
+The [CSV attachments demo](https://ageron.github.io/roclet/web/edit.html?example=csv-attachments)
+uses roc-parser to turn an attached sales file into a report. Replace the CSV
+through **File → Attachments** to try your own data.
 
 In a code cell, definitions are shared across the notebook. The last expression
 is the result to display:
@@ -88,6 +92,13 @@ again. If a package host blocks browser downloads, Roclet offers a download link
 and lets you load the bundle from your computer, verifying its hash before use.
 This works on a completely static host. Portable Roclet bundles include your
 attached project sources.
+
+Choose **File → Attachments** to copy data files into a notebook. Each attachment
+has a stable relative path; **Replace file** keeps that path, and **Remove** can
+be undone. Import UTF-8 text with `import "data/sales.csv" as csv : Str`, or use
+`List(U8)` for exact binary bytes. Browser drafts retain the files. Download a
+**Roclet bundle** to include them; a `.roc` or `.md` source download contains only
+code and prose. See [attachments](docs/installation.md#attach-data-files).
 
 ## License
 

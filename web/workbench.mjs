@@ -3,6 +3,7 @@
 // at most one panel. Everything here is plain logic over the DOM or the panel
 // objects it is given, so Node tests can import it.
 import { newDraft, validDraft, independentCopy, openedDraft } from './edit-model.mjs';
+import {attachment} from './attachments.mjs';
 
 // Bundled examples only, never arbitrary URLs supplied by a query parameter.
 export const examples = new Map([
@@ -10,6 +11,7 @@ export const examples = new Map([
   ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
   ['meeting-windows', ['../demos/04-meeting-windows.roc', 'Finding room for a design review.roc']],
   ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich Outputs and Widgets.roc']],
+  ['csv-attachments', ['../demos/05-csv-attachments.roc', 'A café sales report from a CSV attachment.roc', [{path:'data/cafe-sales.csv',url:'../demos/data/cafe-sales.csv'}]]],
 ]);
 export const exampleTitle = name => examples.get(name)?.[1].replace(/\.roc$/, '');
 
@@ -188,6 +190,17 @@ export class Workbench {
       const response = await this.fetch(entry[0]);
       if (!response.ok) throw new Error('Example is unavailable.');
       const source = await response.text();
+      if(entry[2]) {
+        const record=openedDraft(source,entry[1]);
+        record.attachments=await Promise.all(entry[2].map(async file=>{
+          const response=await this.fetch(file.url);if(!response.ok)throw new Error('Example attachment is unavailable.');
+          return attachment(file.path,await response.blob());
+        }));
+        if(current)await notebook.replace(record);else await notebook.initialize({record});
+        await notebook.mode('notebook');
+        panel.notice('Opened an editable notebook with its CSV attachment. Use File → Attachments to inspect or replace the data.');
+        return;
+      }
       if (current) await notebook.open(source, entry[1]);
       else { await notebook.initialize({ record: openedDraft(source, entry[1]) }); await notebook.mode('notebook'); }
       panel.notice('Opened your own editable copy. Download a copy to keep your changes.');
