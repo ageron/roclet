@@ -4,7 +4,7 @@
 rich output in Roclet and readable text when printed by ordinary Roc.
 
 ```roc
-app [main!] { roclet: "https://github.com/ageron/roclet/releases/download/0.2.0/C8vdeSE1ABoSei4Lepuy9Dy7t7GAJQt42WQkWw9bhcFc.tar.zst" }
+app [main!] { roclet: "https://github.com/ageron/roclet/releases/download/0.3.0/Gv78dUSQfYRU2yvV9HuS5oHYdMfik84S4sgsej6mbjLd.tar.zst" }
 
 import roclet.Display
 
