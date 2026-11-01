@@ -6,8 +6,8 @@ import {newDraft,makeCell,validDraft} from './edit-model.mjs';
 import {embedMathStyles} from './math-view.mjs';
 import {renderMarkdown} from './markdown-view.mjs';
 import {renderDisplay,normalizeDisplay} from './display-view.mjs';
-import {projectFiles,projectPath} from './project-files.mjs';
-import {attachments,attachment,bundleLimit} from './attachments.mjs';
+import {projectFiles,projectPath,projectLimit} from './project-files.mjs';
+import {attachments,attachmentMetadata,bundleLimit} from './attachments.mjs';
 import {isVisibleDiagnostic} from './compiler-tools.mjs';
 export const downloadName = title => (title||'notebook').replace(/[^a-z0-9._ -]/gi,'_').slice(0,120);
 export function download(blob,name) {
@@ -47,7 +47,7 @@ export async function importBundle(bytes,compiler) {
   const manifest=JSON.parse(text(raw));
   if(manifest.schema!==1 || manifest.type!=='roclet-notebook' || !Array.isArray(manifest.files) || !['notebook.roc','notebook.md'].includes(manifest.source)) throw new Error('Unsupported Roclet bundle version.');
   if(manifest.compiler?.wasmSha256!==compiler.artifacts['roclet.wasm'].sha256 || manifest.compiler?.commit!==compiler.compilerCommit) throw new Error('This bundle requires another compiler version. Open it with the matching Roclet distribution.');
-  const paths=new Set();
+  const paths=new Set(),hashes=new Map();
   for(const entry of manifest.files) {
     const project=typeof entry.path==='string' && entry.path.startsWith('project/');
     const data=typeof entry.path==='string' && entry.path.startsWith('attachments/');
@@ -57,6 +57,7 @@ export async function importBundle(bytes,compiler) {
     if(entry.path==='Display.roc' && entry.sha256!==compiler.inputs?.['package/Display.roc']) throw new Error('Bundled Display module does not match this compiler distribution.');
     paths.add(entry.path);const file=files.get(entry.path);
     if(!file || file.length!==entry.bytes || await sha256(file)!==entry.sha256) throw new Error(`Bundle integrity check failed: ${entry.path}`);
+    hashes.set(entry.path,entry.sha256);
   }
   if(files.size!==paths.size+1 || !paths.has('document.json') || !paths.has(manifest.source)) throw new Error('Incomplete bundle manifest.');
   const doc=JSON.parse(text(files.get('document.json')));
@@ -64,23 +65,26 @@ export async function importBundle(bytes,compiler) {
   const record=newDraft(doc.title);
   record.inputValues=inputValues(doc.inputValues);
   record.format=doc.format;record.source=doc.source;record.sourceCurrent=doc.sourceCurrent;record.preamble=doc.preamble;record.metadata=doc.metadata;record.mode=doc.mode;record.autoRun=false;
-  if(doc.files!=null && !Array.isArray(doc.files)) throw new Error('Malformed project file list.');
-  record.files=projectFiles((doc.files??[]).map(file=>{
+  if(doc.files!=null && (!Array.isArray(doc.files) || doc.files.length>256)) throw new Error('Malformed project file list.');
+  const sources=projectFiles((doc.files??[]).map(file=>({path:file?.path,source:''})));
+  let sourceBytes=0;
+  for(const file of sources) {
     const path=projectPath(file?.path),member=`project/${path}`;
     if(!paths.has(member)) throw new Error(`Project file is missing: ${path}`);
-    return {path,source:text(files.get(member))};
-  }));
-  if([...paths].filter(path=>path.startsWith('project/')).length!==record.files.length) throw new Error('Unexpected project files in bundle.');
+    sourceBytes+=files.get(member).length;
+    if(sourceBytes>projectLimit)throw new Error('Project sources exceed the 16 MiB limit.');
+  }
+  if([...paths].filter(path=>path.startsWith('project/')).length!==sources.length) throw new Error('Unexpected project files in bundle.');
   if(doc.attachments!=null && (!Array.isArray(doc.attachments) || doc.attachments.length>128)) throw new Error('Malformed attachment list.');
-  record.attachments=await Promise.all((doc.attachments??[]).map(async file=>{
+  const data=attachmentMetadata((doc.attachments??[]).map(file=>{
     const path=projectPath(file?.path),member=`attachments/${path}`;
-    if(!paths.has(member) || typeof file.mime!=='string' || file.mime.length>256) throw new Error(`Attachment is missing or malformed: ${path}`);
-    const restored=await attachment(path,new Blob([files.get(member)],{type:file.mime}));
-    if(restored.sha256!==file.sha256) throw new Error(`Attachment integrity check failed: ${path}`);
-    return restored;
-  }));
-  attachments(record.attachments,record.files);
-  if([...paths].filter(path=>path.startsWith('attachments/')).length!==record.attachments.length) throw new Error('Unexpected attachments in bundle.');
+    if(!paths.has(member)) throw new Error(`Attachment is missing: ${path}`);
+    if(hashes.get(member)!==file.sha256) throw new Error(`Attachment integrity check failed: ${path}`);
+    return {path,size:files.get(member).length,mime:file.mime,sha256:file.sha256};
+  }),sources);
+  if([...paths].filter(path=>path.startsWith('attachments/')).length!==data.length) throw new Error('Unexpected attachments in bundle.');
+  record.files=projectFiles(sources.map(({path})=>({path,source:text(files.get(`project/${path}`))})));
+  record.attachments=data.map(({path,mime,sha256})=>({path,sha256,blob:new Blob([files.get(`attachments/${path}`)],{type:mime})}));
   record.cells=doc.cells.map(c=>{
     if(!['code','markdown','generated'].includes(c.kind) || typeof c.source!=='string' || typeof c.attributes!=='string' || !Array.isArray(c.outputs) || c.outputs.some(o=>!o || typeof o.source!=='string' || typeof o.kind!=='string')) throw new Error('Malformed cell in bundle.');
     return {...makeCell(c.kind,c.source),attributes:c.attributes,outputs:c.outputs};

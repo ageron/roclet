@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {attachment,attachments,attachmentPreview,attachmentLimit} from '../web/attachments.mjs';
+import {attachment,attachments,attachmentPreview,attachmentLimit,trimAttachmentHistory} from '../web/attachments.mjs';
 import {Notebook,newDraft,requestFor,validDraft,independentCopy} from '../web/edit-model.mjs';
 import {fileChanges,mountChanges} from '../web/workspace.mjs';
 import {bundleFiles,importBundle} from '../web/sharing.mjs';
@@ -51,6 +51,24 @@ test('a source-only download cannot stand in for unsaved attachment data',async(
   model.markDownloaded({complete:true});assert.equal(await model.keep(),true);
   model.dispose();
 });
+test('attachment undo retains recent replacements within a byte budget and shares repeated contents',async()=>{
+  const a=await attachment('data/file',new Blob(['aaaaaaaa'])),b=await attachment('data/file',new Blob(['bbbbbbbb'])),c=await attachment('data/file',new Blob(['cccccccc']));
+  const model=notebook();model.setAttachments([a]);const original=model.state.attachments[0].blob;
+  model.setAttachments([await attachment(a.path,new Blob(['aaaaaaaa']))]);
+  assert.equal(model.state.attachments[0].blob,original,'Importing identical data must reuse its immutable backing');
+  model.setAttachments([b]);model.undo();
+  assert.equal(await model.state.attachments[0].blob.text(),'aaaaaaaa');
+  model.setAttachments([await attachment(b.path,new Blob(['bbbbbbbb'],{type:'text/plain'}))]);
+  assert.equal(model.state.attachments[0].blob.type,'text/plain');
+  assert.equal(await model.state.attachments[0].blob.text(),'bbbbbbbb');
+  const history=[{attachments:[a]},{attachments:[b]}];
+  trimAttachmentHistory(history,{attachments:[c]},20);
+  assert.equal(history.length,1);assert.equal(await history[0].attachments[0].blob.text(),'bbbbbbbb');
+  const repeated=[{attachments:[a]},{attachments:[a]}];
+  trimAttachmentHistory(repeated,{attachments:[b]},20);
+  assert.equal(repeated.length,2,'Editing prose must not charge the same attachment again');
+  model.dispose();
+});
 test('unchanged attachment content is not retransmitted; replacement and removal update the workspace',async()=>{
   const a=await csv(),path=`/workspace/${a.path}`;
   const first=fileChanges(new Map(),[{...a,path}]);assert.equal(first.patch.put.length,1);
@@ -99,4 +117,22 @@ test('bundle import rejects duplicate paths and unlisted, missing or overlapping
   await assert.rejects(importBundle(await changed(doc=>doc.attachments=[]),compiler),/Unexpected attachments/);
   await assert.rejects(importBundle(await changed((doc,files)=>files.delete('attachments/data/measurements.csv')),compiler),/missing/);
   await assert.rejects(importBundle(await changed(doc=>doc.attachments[0].sha256='0'.repeat(64)),compiler),/integrity/);
+});
+test('malformed bundle attachment metadata is rejected before allocating file copies',async()=>{
+  const {sha256}=await import('../web/offline-cache.mjs');
+  const compiler={compilerCommit:'test',artifacts:{'roclet.wasm':{sha256:'wasm'}}};
+  const capture={document:{...newDraft(),attachments:[await csv()]},source:'app [main!] {}',snapshots:[],events:[],compiler:{commit:'test',wasmSha256:'wasm'},createdAt:'test'};
+  const files=await bundleFiles(capture),doc=JSON.parse(text(files.get('document.json')));
+  doc.attachments=Array.from({length:128},()=>doc.attachments[0]);
+  files.set('document.json',utf8(JSON.stringify(doc)));
+  const manifest=JSON.parse(text(files.get('roclet.json'))),entry=manifest.files.find(file=>file.path==='document.json');
+  Object.assign(entry,{bytes:files.get('document.json').length,sha256:await sha256(files.get('document.json'))});
+  files.set('roclet.json',utf8(JSON.stringify(manifest)));
+  const bytes=await zip(files).arrayBuffer(),NativeBlob=globalThis.Blob;
+  let copies=0;
+  globalThis.Blob=class extends NativeBlob {constructor(...args){super(...args);copies++;}};
+  try {
+    await assert.rejects(importBundle(bytes,compiler),/already used/);
+    assert.equal(copies,0,'Repeated manifest entries must not multiply the file allocation');
+  } finally {globalThis.Blob=NativeBlob;}
 });

@@ -66,6 +66,13 @@ relative path; update the corresponding import in your code as well. Paths may
 contain folders, spaces, and Unicode; absolute paths, `..`, duplicate paths,
 and paths already used by project sources are rejected.
 
+Undo history retains at most 64 MiB of distinct attachment contents, including
+the current files; older undo entries are discarded when necessary. Reimporting
+identical data shares its saved contents rather than retaining another copy.
+Closing the attachment dialog cancels a pending disk read without changing the
+notebook. The dialog can be reopened immediately, even if that read
+has not finished.
+
 Browser drafts retain attachments, including after reload. Each notebook supports
 up to 128 attachments totaling 16 MiB. These are Roclet's current limits, not
 general browser file-size limits. Previews show only the first 4 KiB of text or

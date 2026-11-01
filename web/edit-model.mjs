@@ -2,7 +2,7 @@ import {inputValues, inputModule} from './input-values.mjs';
 import { DocumentSession } from './document-session.mjs';
 import { renameEdits } from './compiler-tools.mjs';
 import { projectFiles, projectPath } from './project-files.mjs';
-import { attachments } from './attachments.mjs';
+import { attachments, shareAttachmentBlobs, trimAttachmentHistory } from './attachments.mjs';
 
 const clone = value => structuredClone(value);
 const key = () => crypto.randomUUID();
@@ -88,6 +88,7 @@ export class Notebook {
     }
     if (id && !validDraft(record)) throw new Error('This notebook is unavailable in this browser. Return home to choose another.');
     this.state = record ? clone(record) : fresh ? newDraft() : newDraft('Wall area', true);
+    if(this.state.attachments) this.state.attachments=shareAttachmentBlobs(this.state.attachments,[]);
     this.status = record && !given ? 'Recovered draft · results must be recomputed' : 'Ready';
     this.emit('document');
     await this.persist();
@@ -132,6 +133,7 @@ export class Notebook {
     while (this.history.length > 100 || (this.history.length > 1 && JSON.stringify(this.history).length > 4 * 1024 * 1024)) this.history.shift();
     this.group = group; this.groupAt = now; this.future = []; this.views.clear();
     this.invalidate(); update(this.state); delete this.state.savedResults; this.state.revision++; this.state.sourceCurrent = source;
+    trimAttachmentHistory(this.history,this.state);
     this.emit(reason); void this.persist();
     if (!composing) this.schedule();
   }
@@ -161,7 +163,7 @@ export class Notebook {
     this.setProjectFiles((this.state.files ?? []).filter(file => file.path !== path));
   }
   setAttachments(files) {
-    const checked = attachments(files, this.state.files);
+    const checked = shareAttachmentBlobs(attachments(files, this.state.files),[this.state,...this.history,...this.future]);
     this.change(s => { s.attachments = checked; }, {source:this.state.sourceCurrent, reason:'attachments'});
   }
   removeAttachment(path) {

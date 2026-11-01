@@ -5,8 +5,12 @@ import {download} from './sharing.mjs';
 export class AttachmentDialog {
   constructor(doc = document) {
     this.doc=doc;
+    this.epoch=0;this.renderId=0;
     this.$=id=>doc.getElementById(id);
     this.dialog=this.$('attachments-dialog');
+    // A close event can be queued until after another notebook has reopened
+    // the dialog. Only a currently closed dialog cancels that operation.
+    this.dialog.addEventListener('close',()=>{if(!this.dialog.open)this.cancel();});
     this.$('attachment-add').onclick=()=>this.$('attachment-upload').click();
     this.$('attachment-upload').onchange=event=>{
       const files=[...event.target.files];event.target.value='';void this.importFiles(files);
@@ -15,34 +19,41 @@ export class AttachmentDialog {
     this.$('attachment-replacement').onchange=event=>{
       const file=event.target.files[0];event.target.value='';if(file) void this.importFiles([file],this.selected);
     };
-    this.$('attachment-rename').onclick=()=>this.run(async()=>{
+    this.$('attachment-rename').onclick=()=>this.run(async current=>{
       const old=this.current(),path=this.$('attachment-path').value.trim();
       if(path===old.path)return;
       this.notebook.setAttachments(attachments((this.notebook.state.attachments??[]).map(file=>file===old?{...file,path}:file),this.notebook.state.files));
-      await this.render(path);this.message('Path updated. Update the import in your code to match.');this.offerUndo();
+      await this.render(path);if(current()){this.message('Path updated. Update the import in your code to match.');this.offerUndo();}
     });
-    this.$('attachment-remove').onclick=()=>this.run(async()=>{
+    this.$('attachment-remove').onclick=()=>this.run(async current=>{
       const path=this.current().path;this.notebook.removeAttachment(path);
-      await this.render();this.message(`Removed “${path}”.`);this.offerUndo();
+      await this.render();if(current()){this.message(`Removed “${path}”.`);this.offerUndo();}
     });
-    this.$('attachment-undo').onclick=()=>this.run(async()=>{
+    this.$('attachment-undo').onclick=()=>this.run(async current=>{
       if(this.notebook.state.revision!==this.undoRevision) {this.$('attachment-undo').hidden=true;return;}
-      this.notebook.undo();await this.render();this.message('Attachment change undone.');this.$('attachment-undo').hidden=true;
+      this.notebook.undo();await this.render();if(current()){this.message('Attachment change undone.');this.$('attachment-undo').hidden=true;}
     });
     this.$('attachment-download').onclick=()=>{
       const file=this.current();download(file.blob,file.path.split('/').at(-1));
       this.message('Download requested for the original file bytes.');
     };
     this.$('attachment-kind').onchange=()=>this.snippet();
-    this.$('attachment-copy').onclick=()=>this.run(async()=>{
+    this.$('attachment-copy').onclick=()=>this.run(async current=>{
       const text=this.$('attachment-import').value;
-      try {await navigator.clipboard.writeText(text);this.message('Import copied. Paste it into a Roc code cell.');}
-      catch {this.$('attachment-import').focus();this.$('attachment-import').select();this.message('Select and copy the import above.');}
+      try {await navigator.clipboard.writeText(text);if(current())this.message('Import copied. Paste it into a Roc code cell.');}
+      catch {if(current()){this.$('attachment-controls').inert=false;this.$('attachment-import').focus();this.$('attachment-import').select();this.message('Select and copy the import above.');}}
     });
     const drop=this.$('attachment-drop');
     drop.ondragover=event=>{event.preventDefault();drop.dataset.dragging='true';};
     drop.ondragleave=()=>{delete drop.dataset.dragging;};
-    drop.ondrop=event=>{event.preventDefault();delete drop.dataset.dragging;void this.importFiles([...event.dataTransfer.files]);};
+    // Inert controls can retarget a drop to the dialog while a read is in
+    // progress. Always consume file drops so the browser cannot navigate away.
+    this.dialog.addEventListener('dragover',event=>{if(event.dataTransfer?.types.includes('Files'))event.preventDefault();});
+    this.dialog.addEventListener('drop',event=>{
+      if(!event.dataTransfer?.files.length)return;
+      event.preventDefault();delete drop.dataset.dragging;
+      void this.importFiles([...event.dataTransfer.files]);
+    });
   }
   current() {return this.notebook.state.attachments?.find(file=>file.path===this.selected);}
   message(text,error=false) {
@@ -50,17 +61,22 @@ export class AttachmentDialog {
     status.setAttribute('role',error?'alert':'status');
   }
   offerUndo() {this.undoRevision=this.notebook.state.revision;this.$('attachment-undo').hidden=false;}
+  cancel() {
+    this.epoch++;this.renderId++;this.busy=false;
+    this.$('attachment-controls').inert=false;
+  }
   async run(work) {
-    if(this.busy)return;
+    if(this.busy){this.message('Wait for the current file operation to finish, then try again.',true);return;}
+    const epoch=this.epoch,current=()=>this.epoch===epoch && this.dialog.open;
     this.busy=true;this.$('attachment-controls').inert=true;
-    try {await work();}
-    catch(error) {this.message(error.message,true);}
-    finally {this.busy=false;this.$('attachment-controls').inert=false;}
+    try {await work(current);}
+    catch(error) {if(current())this.message(error.message,true);}
+    finally {if(this.epoch===epoch){this.busy=false;this.$('attachment-controls').inert=false;}}
   }
   async importFiles(files,replace=null) {
     if(!files.length)return;
-    const notebook=this.notebook,id=notebook.state.id,epoch=this.epoch;
-    await this.run(async()=>{
+    const notebook=this.notebook,id=notebook.state.id;
+    await this.run(async current=>{
       this.message(files.length===1?'Copying file…':'Copying files…');
       // Validate all paths and sizes before reading; a batch either succeeds
       // completely or leaves the notebook unchanged.
@@ -70,17 +86,18 @@ export class AttachmentDialog {
       if(collision)throw new Error(`“${collision.path}” is already attached. Select it and choose Replace file… to update its contents.`);
       attachments([...existing,...planned],notebook.state.files);
       const imported=await Promise.all(planned.map(file=>attachment(file.path,file.blob)));
-      if(!this.dialog.open || notebook.state.id!==id || this.epoch!==epoch)return;
+      if(!current() || notebook.state.id!==id)return;
       // Re-read state after asynchronous file reads; never overwrite unrelated
       // changes made while the file picker or disk read was pending.
       notebook.setAttachments([...(notebook.state.attachments??[]).filter(file=>file.path!==replace),...imported]);
       await this.render(imported[0].path);
+      if(!current())return;
       this.message(replace?`Replaced the copy at “${replace}”. Its import path stays the same.`:`${files.length===1?'File copied':`${files.length} files copied`} into this notebook. Nothing was uploaded.`);
       this.offerUndo();
     });
   }
   async open(target) {
-    this.epoch=(this.epoch??0)+1;
+    this.cancel();
     this.notebook=target.notebook;this.selected=null;
     this.$('attachment-undo').hidden=true;
     this.$('attachments-title').textContent=`Attachments · ${target.title}`;
@@ -93,6 +110,7 @@ export class AttachmentDialog {
     this.$('attachment-import').value=`import ${JSON.stringify(file.path)} as file_data : ${this.$('attachment-kind').value==='bytes'?'List(U8)':'Str'}`;
   }
   async render(selected=this.selected) {
+    const epoch=this.epoch,renderId=++this.renderId;
     const files=this.notebook.state.attachments??[];
     const focusedPath=this.doc.activeElement?.closest('.attachment-entry')?.dataset.path;
     this.selected=files.some(file=>file.path===selected)?selected:files[0]?.path;
@@ -114,7 +132,7 @@ export class AttachmentDialog {
     this.snippet();
     this.$('attachment-preview').textContent='Loading preview…';
     const preview=await attachmentPreview(file);
-    if(this.current()!==file || !this.dialog.open)return;
+    if(this.current()!==file || !this.dialog.open || this.epoch!==epoch || this.renderId!==renderId)return;
     this.$('attachment-kind').value=preview.kind;
     this.$('attachment-preview-label').textContent=preview.kind==='text'?'UTF-8 text preview':'Raw bytes · hexadecimal preview';
     this.$('attachment-preview').textContent=preview.text||'(empty file)';
