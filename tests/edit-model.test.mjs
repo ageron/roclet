@@ -55,7 +55,7 @@ test('portable bundles retain project sources once and reject modified members',
   const display=utf8('module []'),displayHash=await sha256(display),originalFetch=globalThis.fetch;
   globalThis.fetch=async()=>new Response(display);
   try {
-    const compiler={compilerCommit:'test-compiler',artifacts:{'roclet.wasm':{sha256:'test-wasm'}},inputs:{'package/Display.roc':displayHash}};
+    const compiler={compilerCommit:'test-compiler',artifacts:{'roclet.wasm':{sha256:'test-wasm'}},inputs:{'vendor/roclet-display/Display.roc':displayHash}};
     const capture={document:{schema:1,title:'Project',format:'roc',preamble:'app [main!] {}',metadata:'',source:'',sourceCurrent:false,mode:'notebook',cells:[{kind:'code',source:'Geometry.area',attributes:'',outputs:[]}],files:[{path:'Geometry.roc',source:'module [area]\narea = 15'}]},source:'Geometry.area',snapshots:[],events:[],compiler:{commit:'test-compiler',wasmSha256:'test-wasm',displaySha256:displayHash},createdAt:'test'};
     const files=await bundleFiles(capture);
     assert.equal(text(files.get('project/Geometry.roc')),'module [area]\narea = 15');

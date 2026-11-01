@@ -160,8 +160,8 @@ pub const ProgramModules = struct { extras: []const ExtraFile, rich_support: boo
 /// supplies one, and decide rich output support once per request: only the
 /// checked, unaliased `import Display` of the byte-identical bundled module
 /// opts in. A local type called Display or a different module stays ordinary.
-pub fn programModules(arena: Allocator, workspace_io: Io, extras_prefix: []const u8, supplied: []const ExtraFile, user_source: []const u8) !ProgramModules {
-    const bundled = @embedFile("Display.roc");
+pub fn programModules(assets: @import("display.zig").Assets, arena: Allocator, workspace_io: Io, extras_prefix: []const u8, supplied: []const ExtraFile, user_source: []const u8) !ProgramModules {
+    const bundled = assets.display;
     var extras: std.ArrayList(ExtraFile) = .empty;
     try extras.appendSlice(arena, supplied);
     var trusted_display = true;
@@ -185,7 +185,7 @@ pub fn programModules(arena: Allocator, workspace_io: Io, extras_prefix: []const
         };
         if (!found) {
             const path = try std.mem.concat(arena, u8, &.{ extras_prefix, name, ".roc" });
-            const content = workspace_io.readFile(path, arena) catch @embedFile(name ++ ".roc");
+            const content = workspace_io.readFile(path, arena) catch (if (comptime std.mem.eql(u8, name, "Input")) assets.input else assets.input_values);
             try extras.append(arena, .{ .name = name, .content = content });
         }
     }
@@ -238,8 +238,7 @@ pub const Paths = struct {
 };
 
 /// The pinned first-party Display package, served offline as a module.
-pub const display_package_url = std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n");
-pub fn isEmbeddedDisplayPackage(shorthand: []const u8, spec: []const u8) bool {
+pub fn isEmbeddedDisplayPackage(display_package_url: []const u8, shorthand: []const u8, spec: []const u8) bool {
     return std.mem.eql(u8, shorthand, "roclet") and std.mem.eql(u8, spec, display_package_url);
 }
 /// Receives the checked application module of a script run, so the caller can
@@ -272,6 +271,7 @@ pub const RunOptions = struct {
     /// Fallback Io that handles everything not served by EchoCtx (i.e. paths
     /// not in `Paths` and not in `extras`).
     fallback_io: Io,
+    display_package_url: []const u8,
     /// `std.Io` instance used for any real OS I/O on native targets—passed
     /// to `BuildEnv.init`, the WasmFilesystem fallback, and stored in
     /// `EchoEnv` so `echoHostedFn` can call `writeStreamingAll`. On WASM
@@ -311,7 +311,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
 
     // A script whose header does not parse still runs on the echo platform alone.
     const packages = if (opts.app_header.len > 0) parseHeaderPackages(allocator, opts.fallback_io, opts.app_header) catch &.{} else &.{};
-    const header_str = try synthesizeAppHeader(allocator, &.{}, packages);
+    const header_str = try synthesizeAppHeader(allocator, &.{}, packages, opts.display_package_url);
     const footer_str =
         "\n\necho! = |msg| Echo.line!(msg)\n";
 
@@ -731,18 +731,18 @@ pub fn persistentBuiltins() !*eval.BuiltinModules {
 /// `app [main!<, exposes...>] { pf: <the echo platform><, shorthand: "spec"...> }`
 /// then `import pf.Echo`. The embedded Display package is served as a module,
 /// never as a package dependency.
-pub fn synthesizeAppHeader(a: Allocator, exposes: []const []const u8, packages: []const compile.app_header.PackageEntry) Allocator.Error![]const u8 {
+pub fn synthesizeAppHeader(a: Allocator, exposes: []const []const u8, packages: []const compile.app_header.PackageEntry, display_package_url: []const u8) Allocator.Error![]const u8 {
     var header: std.Io.Writer.Allocating = .init(a);
     errdefer header.deinit();
-    synthesizeInto(&header.writer, exposes, packages) catch return error.OutOfMemory;
+    synthesizeInto(&header.writer, exposes, packages, display_package_url) catch return error.OutOfMemory;
     return header.toOwnedSlice();
 }
-fn synthesizeInto(w: *std.Io.Writer, exposes: []const []const u8, packages: []const compile.app_header.PackageEntry) std.Io.Writer.Error!void {
+fn synthesizeInto(w: *std.Io.Writer, exposes: []const []const u8, packages: []const compile.app_header.PackageEntry, display_package_url: []const u8) std.Io.Writer.Error!void {
     try w.writeAll("app [main!");
     for (exposes) |name| try w.print(", {s}", .{name});
     try w.writeAll("] { pf: platform \"./.roc_echo_platform/main.roc\"");
     for (packages) |package| {
-        if (isEmbeddedDisplayPackage(package.shorthand, package.spec)) continue;
+        if (isEmbeddedDisplayPackage(display_package_url, package.shorthand, package.spec)) continue;
         try w.print(", {s}: ", .{package.shorthand});
         try std.json.Stringify.value(package.spec, .{}, w);
     }

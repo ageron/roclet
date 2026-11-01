@@ -40,7 +40,7 @@ def check(archive):
                             log.seek(0)
                             raise RuntimeError(log.read().decode(errors='replace'))
                         time.sleep(.1)
-                for path in ('web/install.html', 'web/edit.html', 'web/open-notebook.mjs', 'artifacts/manifest.json', 'artifacts/roclet.wasm'):
+                for path in ('web/install.html', 'web/edit.html', 'web/open-notebook.mjs', 'artifacts/manifest.json', 'artifacts/roclet.wasm', 'artifacts/display.json'):
                     request = urllib.request.Request(f'http://127.0.0.1:{port}/{path}', headers=headers)
                     with urllib.request.urlopen(request, timeout=10) as response:
                         assert response.read() == (root / path).read_bytes(), path

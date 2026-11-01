@@ -30,6 +30,13 @@ pub fn main(init: std.process.Init) !void {
         if (args.len == 1) std.process.exit(2);
         return;
     }
+    const dir = try std.process.executableDirPathAlloc(init.io, a);
+    const asset_path = try std.fs.path.join(a, &.{ dir, "display.json" });
+    const assets = std.Io.Dir.cwd().readFileAlloc(init.io, asset_path, a, .limited(4 * 1024 * 1024)) catch |err| switch (err) {
+        error.FileNotFound => try std.Io.Dir.cwd().readFileAlloc(init.io, "artifacts/display.json", a, .limited(4 * 1024 * 1024)),
+        else => return err,
+    };
+    try engine.configureDisplay(assets);
     const raw = std.mem.eql(u8, args[1], "--bridge");
     const convert = std.mem.eql(u8, args[1], "convert");
     const action = if (raw) "bridge" else if (convert) "convert" else if (std.mem.eql(u8, args[1], "parse")) "parse" else if (std.mem.eql(u8, args[1], "check")) "check" else "run";

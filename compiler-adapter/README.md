@@ -308,11 +308,27 @@ response per line; `tests/m4.zig` records before/selective/full sequences so the
 browser replay sees the same engine state. Changes to workspace files
 participate in reactive invalidation through the graph's context.
 
+## Display runtime assets
+
+`zig build adapter` generates `artifacts/display.json` from the vendored Display
+modules and `dependencies/roclet-display-url.txt`. Its schema, release URL, and
+module sources are loaded once into each engine, separately from the executable.
+The manifest hashes both the engine inputs and runtime assets. Display updates
+regenerate the assets without recompiling the engines; the runtime wire format
+must still be compatible with the engine's rich-output decoder.
+
+Browser transports fetch this file relative to the adapter module; offline site
+packages cache it with the rest of the distribution. Native distributions keep
+`display.json` beside the executable. Source-checkout runs may fall back to
+`artifacts/display.json` in the working directory. Engine configuration is owned
+by each instance and cannot change after initialization.
+
 ## WASM byte operations
 
 Requests are synchronous within an instance and must not overlap.
 
 - `roclet_alloc(n)` / `roclet_free(ptr,n)` own input memory.
+- `roclet_configure_display(ptr,n)` loads the runtime assets before any requests; returns 1 on success.
 - `roclet_process(ptr,n)` returns a JSON response. The request is parsed once
   and the response serialised once; no nested JSON requests are issued.
 - `roclet_file_put(pathPtr,pathLen,ptr,len)` mounts raw UTF-8 bytes;

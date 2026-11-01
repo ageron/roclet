@@ -106,6 +106,30 @@ be undone. Import UTF-8 text with `import "data/sales.csv" as csv : Str`, or use
 **Roclet bundle** to include them; a `.roc` or `.md` source download contains only
 code and prose. See [attachments](docs/installation.md#attach-data-files).
 
+## Architecture
+
+- [Runtime overview](docs/architecture/runtime.svg): browser execution, storage,
+  local server, packages, and the optional native runner.
+- [Inside the engine](docs/architecture/engine.svg): document preparation,
+  reactive evaluation, the Roc compiler, and the interpreter.
+- [Build and distribution](docs/architecture/build.svg): engine caches, independent
+  Display assets, CI, website deployment, and server releases.
+
+The local server serves files and downloads packages; notebooks still execute
+in the browser's WASM engine. The native runner uses the same Zig core in a
+separate executable. Display modules and their release URL are runtime assets,
+so their updates do not require recompiling either engine.
+
+Editable Graphviz sources and PNG copies are alongside the SVG diagrams in
+[`docs/architecture/`](docs/architecture/). To regenerate with Graphviz installed:
+
+```sh
+for name in runtime engine build; do
+  dot -Tsvg "docs/architecture/$name.dot" -o "docs/architecture/$name.svg"
+  dot -Tpng "docs/architecture/$name.dot" -o "docs/architecture/$name.png"
+done
+```
+
 ## License
 
 [Universal Permissive License 1.0](LICENSE), the same license as Roc.

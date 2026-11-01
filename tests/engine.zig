@@ -51,9 +51,9 @@ fn expectOnlyDebug(response: Response, message: []const u8) !void {
 }
 
 test "two engines in one process keep revisions, counters and events apart" {
-    var a = Engine.init(std.testing.allocator, .failing);
+    var a = try testEngine();
     defer a.deinit();
-    var b = Engine.init(std.testing.allocator, .failing);
+    var b = try testEngine();
     defer b.deinit();
     const source_a = "# %%\nshared = {\n    dbg \"from-a\"\n    1\n}\n# %%\nshared";
     const source_b = "# %%\nshared = {\n    dbg \"from-b\"\n    2\n}\n# %%\nshared";
@@ -87,7 +87,7 @@ test "two engines in one process keep revisions, counters and events apart" {
 }
 
 test "a fresh engine restores compiler artifacts through the virtual filesystem" {
-    var cold = Engine.init(std.testing.allocator, .failing);
+    var cold = try testEngine();
     defer cold.deinit();
     const module = "Fresh := [].{ value : U64\nvalue = 7 }";
     const source = "# %%\nimport Fresh\nout_value = Fresh.value";
@@ -100,7 +100,7 @@ test "a fresh engine restores compiler artifacts through the virtual filesystem"
     const artifacts = try cold.workspace.takeUpdates();
     defer response_allocator.free(artifacts);
 
-    var restored = Engine.init(std.testing.allocator, .failing);
+    var restored = try testEngine();
     defer restored.deinit();
     try restored.workspace.importCache(artifacts);
     try restored.workspace.put("/workspace/Fresh.roc", module, false);
@@ -119,7 +119,7 @@ test "a fresh engine restores compiler artifacts through the virtual filesystem"
 }
 
 test "observations carry the root of the execution that produced them" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     var response = try evaluate(&engine, "# %%\nshared = {\n    dbg \"s\"\n    1\n}\n# %%\nshared\n# %%\nshared + 1");
     defer response.deinit();
@@ -135,7 +135,7 @@ test "observations carry the root of the execution that produced them" {
 }
 
 test "header parsing leaves the workspace untouched and requests reset per-request state" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     const gpa = std.testing.allocator;
     const before = try engine.workspace.contentIdentity(gpa);
@@ -163,7 +163,7 @@ test "header parsing leaves the workspace untouched and requests reset per-reque
 }
 
 test "a revision's image is reported and grows its buffer only when it must" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     const source = "# %%\nwidth = 8\nheight = 3\n# %%\nwidth * height";
     var first = try evaluate(&engine, source);
@@ -212,7 +212,7 @@ fn typedRequest(a: std.mem.Allocator, program: []const u8, roots: []const []cons
 }
 
 test "typed evaluation checks, analyses and lowers once for every root" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -256,7 +256,7 @@ test "typed evaluation checks, analyses and lowers once for every root" {
 }
 
 test "typed requests with invalid roots, modules or size are rejected before compilation" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -276,7 +276,7 @@ test "typed requests with invalid roots, modules or size are rejected before com
 }
 
 test "typed evaluation isolates a crashing root or fails the revision" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -348,27 +348,27 @@ test "event buffer keeps protocol-1 observation bounds" {
 
 test "one app header synthesiser serves scripts and revisions" {
     const runner = bridge.runner;
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
     try std.testing.expectEqualStrings(
         "app [main!] { pf: platform \"./.roc_echo_platform/main.roc\" }\n\nimport pf.Echo\n\n",
-        try runner.synthesizeAppHeader(a, &.{}, &.{}),
+        try runner.synthesizeAppHeader(a, &.{}, &.{}, ""),
     );
-    const header = try std.fmt.allocPrint(a, "app [] {{ time: \"https://example.com/time.tar.zst\", roclet: \"{s}\", geo: \"./geo/main.roc\" }}", .{runner.display_package_url});
+    const header = try std.fmt.allocPrint(a, "app [] {{ time: \"https://example.com/time.tar.zst\", roclet: \"{s}\", geo: \"./geo/main.roc\" }}", .{(try engine.display()).url});
     const packages = try runner.parseHeaderPackages(a, engine.workspace.io(a), header);
     try std.testing.expectEqual(@as(usize, 3), packages.len);
     // The embedded Display package is a module, never a package dependency.
     try std.testing.expectEqualStrings(
         "app [main!, out_text, out_value] { pf: platform \"./.roc_echo_platform/main.roc\", time: \"https://example.com/time.tar.zst\", geo: \"./geo/main.roc\" }\n\nimport pf.Echo\n\n",
-        try runner.synthesizeAppHeader(a, &.{ "out_text", "out_value" }, packages),
+        try runner.synthesizeAppHeader(a, &.{ "out_text", "out_value" }, packages, (try engine.display()).url),
     );
 }
 
 test "a script run reports its program response without the notebook revision" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -398,7 +398,7 @@ test "a script run reports its program response without the notebook revision" {
 }
 
 test "requests without a known operation are protocol errors" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     // The retired M0 `cells` snapshot, the retired raw program shape, an
     // unknown operation and malformed JSON are all rejected without compiling.
@@ -449,7 +449,7 @@ const two_cells_edited = "# %%\na = 4\nout_left = a + 1\n# %%\nb = 7\nout_right 
 const Participation = struct { reset: bool = false };
 
 test "the engine baseline answers for every root and reuses only unchanged ones" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     var first = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells, .isolateErrors = true, .reactivity = Participation{ .reset = true } });
     defer first.deinit();
@@ -484,7 +484,7 @@ test "the engine baseline answers for every root and reuses only unchanged ones"
 }
 
 test "stateless requests neither read nor change the engine baseline" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     var first = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells, .reactivity = Participation{} });
     defer first.deinit();
@@ -506,7 +506,7 @@ test "stateless requests neither read nor change the engine baseline" {
 }
 
 test "a failed root is retried and reset forgets the baseline" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     const source = "# %%\nout_good = 42\n# %%\nout_bad = {\n    crash \"boom\"\n    0\n}\n";
     var first = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = source, .isolateErrors = true, .reactivity = Participation{} });
@@ -526,7 +526,7 @@ test "a failed root is retried and reset forgets the baseline" {
 }
 
 test "a caller-held baseline is rejected and leaves the engine baseline alone" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     var first = try send(&engine, .{ .operation = "document", .action = "evaluate", .format = "roc", .source = two_cells, .reactivity = Participation{} });
     defer first.deinit();
@@ -558,7 +558,7 @@ fn expectDependencies(response: Response, kind: []const u8, name: []const u8, ex
 }
 
 test "the checked graph has type, associated item and module nodes" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     const source = "# %%\nimport Fresh\nMeters : Dec\nPoint := { x : Meters, y : Meters }.{ origin = Point.{ x: 0, y: 0 } }\nwidth : Meters\nwidth = 5\nout_point = Point.{ x: width, y: Fresh.value }\n# %%\nout_origin = Point.origin\n";
     var response = try send(&engine, .{ .operation = "document", .action = "analyze", .format = "roc", .source = source, .modules = &[_]Module{.{ .name = "Fresh", .content = "Fresh := [].{ value = 7 }" }} });
@@ -589,7 +589,7 @@ fn fingerprints(engine: *Engine, source: []const u8) ![2][]const u8 {
 }
 
 test "fingerprints follow parser tokens and types, not comments or whitespace" {
-    var engine = Engine.init(std.testing.allocator, .failing);
+    var engine = try testEngine();
     defer engine.deinit();
     const sources = [_][]const u8{
         "# %%\na = 1 # c\nout_a = a\n",
@@ -608,4 +608,45 @@ test "fingerprints follow parser tokens and types, not comments or whitespace" {
     }
     // An annotation belongs to its definition, not to the context.
     try std.testing.expectEqualStrings(seen[3][1], seen[4][1]);
+}
+
+fn testEngine() !Engine {
+    var engine = Engine.init(std.testing.allocator, std.testing.io);
+    errdefer engine.deinit();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "artifacts/display.json", std.testing.allocator, .limited(4 * 1024 * 1024));
+    defer std.testing.allocator.free(bytes);
+    try engine.configureDisplay(bytes);
+    return engine;
+}
+
+test "Display assets and export URLs belong to the engine, not the binary" {
+    var first = try testEngine();
+    defer first.deinit();
+    var second = Engine.init(std.testing.allocator, std.testing.io);
+    defer second.deinit();
+    try std.testing.expectError(error.MissingDisplayAssets, second.display());
+    try std.testing.expectError(error.InvalidDisplayAssets, second.configureDisplay(
+        "{\"schema\":2,\"url\":\"https://example.com/new.tar.zst\",\"display\":\"x\",\"input\":\"x\",\"input_values\":\"x\"}",
+    ));
+    var assets = try first.display();
+    assets.url = "https://example.com/new.tar.zst";
+    const alternate_source = try std.mem.concat(std.testing.allocator, u8, &.{ "# A separately loaded release\n", assets.display });
+    defer std.testing.allocator.free(alternate_source);
+    assets.display = alternate_source;
+    var out: std.Io.Writer.Allocating = .init(std.testing.allocator);
+    defer out.deinit();
+    try std.json.Stringify.value(assets, .{}, &out.writer);
+    try second.configureDisplay(out.written());
+    try std.testing.expectError(error.DisplayAlreadyConfigured, second.configureDisplay(out.written()));
+    // The engine owns a copy; callers may release or reuse the input buffer.
+    @memset(out.written(), 0);
+    try std.testing.expectEqualStrings("https://example.com/new.tar.zst", (try second.display()).url);
+    try std.testing.expect(!std.mem.eql(u8, (try first.display()).url, (try second.display()).url));
+    var result = try evaluate(&second, "# %%\nimport Display\nout_1 = Display.text(\"runtime module\")");
+    defer result.deinit();
+    try std.testing.expectEqualStrings("ok", result.field("status").string);
+    const request = "{\"operation\":\"document\",\"action\":\"export\",\"format\":\"roc\",\"target\":\"roc\",\"source\":\"# %%\\nimport Display\\n\"}";
+    const response = try bridge.process(&second, request);
+    defer response_allocator.free(response);
+    try std.testing.expect(std.mem.find(u8, response, assets.url) != null);
 }

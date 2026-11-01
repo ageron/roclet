@@ -25,7 +25,7 @@ fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
     var segments = std.mem.splitScalar(u8, relative, '/');
     while (segments.next()) |segment| if (segment.len == 0 or segment[0] == '.') return error.InvalidPath;
     if (std.mem.eql(u8, relative, "index.html") or std.mem.eql(u8, relative, "LICENSE") or std.mem.eql(u8, relative, "THIRD_PARTY_NOTICES.md")) return gpa.dupe(u8, relative);
-    for ([_][]const u8{ "demos/", "web/", "compiler-adapter/", "package/", "fixtures/", "tests/", "artifacts/" }) |prefix| {
+    for ([_][]const u8{ "demos/", "web/", "compiler-adapter/", "vendor/roclet-display/", "dependencies/", "fixtures/", "tests/", "artifacts/" }) |prefix| {
         if (std.mem.startsWith(u8, relative, prefix)) return gpa.dupe(u8, relative);
     }
     return error.InvalidPath;
@@ -297,9 +297,9 @@ test "static asset paths reject traversal, hidden files, and malformed escapes" 
     defer gpa.free(result);
     try std.testing.expectEqualStrings("web/edit.mjs", result);
     try std.testing.expectEqualStrings("application/wasm", mime("artifacts/roclet.wasm"));
-    const display = try assetPath(gpa, "/package/Display.roc");
+    const display = try assetPath(gpa, "/vendor/roclet-display/Display.roc");
     defer gpa.free(display);
-    try std.testing.expectEqualStrings("package/Display.roc", display);
+    try std.testing.expectEqualStrings("vendor/roclet-display/Display.roc", display);
 }
 
 fn hostPort(a: std.mem.Allocator, bind: []const u8, port: u16) ![]const u8 {

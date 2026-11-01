@@ -220,6 +220,12 @@ command when the compiler pin or embedding API patch changes. The default compil
 build mode is ReleaseFast. Browser compiler artifacts are cached separately in
 IndexedDB and reused after worker restarts.
 
+Display modules and their release URL are runtime assets, so updating them does
+not rebuild either engine. `zig build adapter` regenerates `artifacts/display.json`
+and its manifest using the cached engines. For a quick source-checkout preview,
+`zig build display-assets` regenerates only that JSON file; run `zig build` before
+packaging to refresh the manifest and offline assets as well.
+
 To test and package a release:
 
 ```sh
@@ -323,7 +329,7 @@ Final cell expressions become named outputs, and a generated `main!` prints them
 in notebook order. Downloads are checked first; fix reported errors before
 exporting. Browser autosave still keeps unfinished drafts.
 
-Rich-output notebooks import the content-addressed [Display package](../package/README.md).
+Rich-output notebooks import the content-addressed [Display package](../vendor/roclet-display/README.md).
 Ordinary Roc downloads and caches it on first use; no adjacent `Display.roc` is
 needed. Roclet includes this exact package's implementation in its native and
 browser runtimes, so running notebooks in Roclet still works offline.
@@ -346,7 +352,7 @@ PR artifacts are never deployed. No execution server is needed.
 CI installs the Zig version in `compiler.lock.json` and prepares the pinned Roc
 compiler. Native and WASM engines have a separate cache keyed by their source,
 dependencies, compiler build tools and `ci/engine-build.env` settings. A UI or
-demo edit reuses these binaries; an engine input change builds a new pair. Native CI builds use
+demo edit, Display release URL update, or Display module change reuses these binaries; an engine input change builds a new pair. Native CI builds use
 an explicit baseline x86-64 target so binaries work across hosted runner CPUs.
 
 Zig's build cache is also restored for test executables and other tools, with

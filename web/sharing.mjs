@@ -24,7 +24,7 @@ export async function captureExport(notebook,compiler,{results=false,debug=false
     cells:(state.sourceCurrent?(parsed.draft?.cells??parsed.model.cells):state.cells).map(({kind,source,attributes,outputs})=>({kind,source,attributes:attributes??'',outputs:outputs??[]}))};
   const snapshots=results && ['ok','partial'].includes(current?.status) ? (current.evaluation?.values??[]).map(v=>({cell:current.model.cells.findIndex(c=>c.output===v.root),root:v.root,text:v.text,...(v.display?{display:normalizeDisplay(v.display)}:{})})) : [];
   const events=debug ? (current?.evaluation?.events??[]).map(({cell,root,kind,message})=>({cell,root,kind,message})) : [];
-  return {document,source:parsed.source,model:parsed.model,rendering:parsed.rendering??[],snapshots,events,compiler:{commit:compiler.compilerCommit,wasmSha256:compiler.artifacts['roclet.wasm'].sha256,displaySha256:compiler.inputs['package/Display.roc']},createdAt:new Date().toISOString()};
+  return {document,source:parsed.source,model:parsed.model,rendering:parsed.rendering??[],snapshots,events,compiler:{commit:compiler.compilerCommit,wasmSha256:compiler.artifacts['roclet.wasm'].sha256,displaySha256:compiler.inputs['vendor/roclet-display/Display.roc']??compiler.inputs['package/Display.roc']},createdAt:new Date().toISOString()};
 }
 export async function bundleFiles(capture) {
   const sourcePath=capture.document.format==='roc'?'notebook.roc':'notebook.md';
@@ -56,7 +56,7 @@ export async function importBundle(bytes,compiler) {
     if(project) projectPath(entry.path.slice(8));
     if(data) projectPath(entry.path.slice(12));
     if((!project && !data && !['notebook.roc','notebook.md','document.json','results.json','Display.roc'].includes(entry.path)) || paths.has(entry.path)) throw new Error('Unsupported or duplicate bundle entry.');
-    if(entry.path==='Display.roc' && entry.sha256!==compiler.inputs?.['package/Display.roc']) throw new Error('Bundled Display module does not match this compiler distribution.');
+    if(entry.path==='Display.roc' && entry.sha256!==(compiler.inputs?.['vendor/roclet-display/Display.roc']??compiler.inputs?.['package/Display.roc'])) throw new Error('Bundled Display module does not match this compiler distribution.');
     paths.add(entry.path);const file=files.get(entry.path);
     if(!file || file.length!==entry.bytes || await sha256(file)!==entry.sha256) throw new Error(`Bundle integrity check failed: ${entry.path}`);
     hashes.set(entry.path,entry.sha256);

@@ -16,7 +16,7 @@ def sync(source):
     if not contents['main.roc'].startswith(b'package [Display, Input]'):
         raise ValueError('Expected the Roclet Display package')
     for name, content in contents.items():
-        (ROOT / 'package' / name).write_bytes(content)
+        (ROOT / 'vendor' / 'roclet-display' / name).write_bytes(content)
     print('Imported Display sources; update the published pin separately after release.')
 
 

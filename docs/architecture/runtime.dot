@@ -1,0 +1,42 @@
+digraph Runtime {
+  graph [rankdir=TB, bgcolor="#f8fafc", pad=0.45, nodesep=0.38, ranksep=0.65, fontname="Helvetica", fontsize=25, fontcolor="#172554", label="Roclet · Runtime architecture\n", labelloc=t, compound=true];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=13, margin="0.18,0.13", color="#94a3b8", fillcolor="white", fontcolor="#0f172a"];
+  edge [fontname="Helvetica", fontsize=10, color="#64748b", fontcolor="#475569", arrowsize=0.7];
+
+  subgraph cluster_browser {
+    label="BROWSER · static website or locally served website"; fontsize=16; color="#93c5fd"; style="rounded,filled"; fillcolor="#eff6ff";
+    ui [label="Notebook UI\nEdit Roc / Markdown · reactive controls\nRich outputs · Plotly sandbox · math\nImport / export / share", fillcolor="#dbeafe", color="#60a5fa"];
+    sessions [label="DocumentSession\nOne worker per open notebook\nCancel / restart · file changes"];
+    worker [label="Worker + WASM transport\nRequests / results · raw file bytes\nPackage download / retry coordinator"];
+    wasm [label="WASM engine\nPinned Roc compiler + interpreter\nRoc executes HERE", fillcolor="#ede9fe", color="#a78bfa", penwidth=1.5];
+    db [shape=cylinder, label="IndexedDB\nDrafts + attachments\nCompiler artifacts + verified packages", fillcolor="#dcfce7", color="#86b99a"];
+    offline [label="Service worker + Cache Storage\nVerified, coherent offline site release", fillcolor="#dcfce7", color="#86b99a"];
+    ui -> sessions [label="document actions"];
+    sessions -> worker [label="postMessage", dir=both];
+    worker -> wasm [label="JSON + byte ABI", dir=both];
+    ui -> db [label="autosave / restore", dir=both];
+    worker -> db [label="cache / restore", dir=both];
+    offline -> ui [label="site assets", style=dashed];
+  }
+
+  site [label="Site distribution\nUI + WASM + display.json + renderers\nGitHub Pages / any static host\nor local static server", fillcolor="#fef3c7", color="#d6ad4c"];
+  display [label="Display runtime assets\nRelease URL + Display / Input / InputValues\nLoaded at startup; not in engine binaries", fillcolor="#fef3c7", color="#d6ad4c"];
+  files [shape=folder, label="Local project files\nNotebooks · modules · data", fillcolor="#dcfce7", color="#86b99a"];
+  server [label="Optional local server · roclet serve\nServes website + project file API\nGitHub package proxy + disk cache\nToken authentication · loopback by default\nDoes NOT execute notebook code", fillcolor="#ccfbf1", color="#5eaaa1", penwidth=1.5];
+  packages [label="External Roc packages\nGitHub Releases / other hosts\nCompiler verifies archive hashes", fillcolor="#fce7f3", color="#d391b2"];
+  caddy [label="Optional Caddy\nHTTPS reverse proxy", fillcolor="#ccfbf1", color="#5eaaa1"];
+  native [label="Native engine · run / check / convert\nSource-built CLI or headless archive\nSame Zig core + native package resolution\nRoc executes HERE", fillcolor="#ede9fe", color="#a78bfa", penwidth=1.5];
+
+  site -> offline [label="prepare offline release", style=dashed];
+  site -> ui [label="load website", style=dashed];
+  site -> display [label="includes", style=dashed];
+  display -> wasm [label="configure once", style=dashed];
+  display -> native [label="companion display.json", style=dashed];
+  ui -> server [label="open / save / read project", dir=both];
+  server -> files [label="filesystem", dir=both];
+  worker -> server [label="local package downloads", dir=both];
+  worker -> packages [label="static mode: direct fetch\nor manual bundle fallback", dir=both];
+  server -> packages [label="proxy allowed downloads", dir=both];
+  caddy -> server [label="optional HTTPS access"];
+  native -> files [label="read / convert / run", dir=both];
+}

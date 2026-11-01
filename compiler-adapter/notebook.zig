@@ -132,7 +132,7 @@ pub const State = struct {
         for (self.labels) |label| try exposes.appendSlice(a, &.{ label.text, label.value });
         if (self.wire_name) |wire| try exposes.append(a, wire);
         const packages: []const compile.app_header.PackageEntry = if (opts.app_header.len != 0) try engine.parseHeaderPackages(a, eng.workspace.io(a), opts.app_header) else &.{};
-        const header = try engine.synthesizeAppHeader(a, exposes.items, packages);
+        const header = try engine.synthesizeAppHeader(a, exposes.items, packages, (try eng.display()).url);
         self.prefix = @intCast(header.len);
         self.user_bytes = @intCast(opts.program.len);
         var source: std.Io.Writer.Allocating = .init(a);
@@ -581,7 +581,7 @@ pub fn checkDocument(eng: *Engine, arena: A, request: Request) !Checked {
     } };
     const result = &checked.evaluation;
     try engine.prepareBuiltins();
-    const modules = try engine.programModules(arena, eng.workspace.io(arena), eng.paths.extras_prefix, request.modules, request.program);
+    const modules = try engine.programModules(try eng.display(), arena, eng.workspace.io(arena), eng.paths.extras_prefix, request.modules, request.program);
     checked.rich_support = modules.rich_support;
     var diagnostics: engine.DiagnosticList = .{ .arena = arena };
     const inputs: Inputs = .{

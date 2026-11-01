@@ -6,7 +6,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 PATHS = (
-    'package/display-package-url.txt', 'package/README.md',
+    'dependencies/roclet-display-url.txt', 'vendor/roclet-display/README.md',
     'demos/03-rich-outputs.roc',
     'demos/04-plume-charts.roc',
     'demos/05-csv-attachments.roc',

@@ -49,7 +49,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
           url="https://github.com/ageron/roclet-display/releases/download/$version/$archive"
-          if [[ "$(cat package/display-package-url.txt)" == "$url" ]]; then
+          if [[ "$(cat dependencies/roclet-display-url.txt)" == "$url" ]]; then
             echo 'changed=false' >> "$GITHUB_OUTPUT"
           else
             echo 'changed=true' >> "$GITHUB_OUTPUT"
@@ -79,7 +79,7 @@ jobs:
         if: steps.release.outputs.changed == 'true'
         with:
           release_version: ${{ steps.release.outputs.version }}
-          paths: package demos tests/documents.json
+          paths: vendor/roclet-display dependencies/roclet-display-url.txt demos tests/documents.json
           branch_prefix: release/display
           base_branch: main
           commit_message: 'Update embedded Display package to ${{ steps.release.outputs.version }}'

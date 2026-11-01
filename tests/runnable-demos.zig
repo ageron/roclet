@@ -5,8 +5,8 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(a);
     const root = args[1];
     const roc = args[2];
-    const url = std.mem.trim(u8, try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, "package/display-package-url.txt" }), a, .limited(1024)), "\r\n");
-    const package = try std.fs.path.join(a, &.{ root, "package/main.roc" });
+    const url = std.mem.trim(u8, try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, "dependencies/roclet-display-url.txt" }), a, .limited(1024)), "\r\n");
+    const package = try std.fs.path.join(a, &.{ root, "vendor/roclet-display/main.roc" });
     const bundle_dir = try std.fs.path.join(a, &.{ root, "artifacts/display-package-test" });
     try std.Io.Dir.cwd().createDirPath(init.io, bundle_dir);
     const bundled = try std.process.run(a, init.io, .{ .argv = &.{ roc, "bundle", package, "--output-dir", bundle_dir }, .stdout_limit = .limited(1024 * 1024), .stderr_limit = .limited(1024 * 1024) });
@@ -27,7 +27,7 @@ pub fn main(init: std.process.Init) !void {
     const bundled_package = try std.fs.path.join(a, &.{ extracted, "main.roc" });
     inline for (.{ "Display.roc", "Input.roc", "InputValues.roc", "main.roc" }) |name| {
         const from_archive = try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ extracted, name }), a, .limited(1024 * 1024));
-        const from_source = try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, "package", name }), a, .limited(1024 * 1024));
+        const from_source = try std.Io.Dir.cwd().readFileAlloc(init.io, try std.fs.path.join(a, &.{ root, "vendor/roclet-display", name }), a, .limited(1024 * 1024));
         if (!std.mem.eql(u8, from_archive, from_source)) return error.StaleDisplayPackage;
     }
     // CI publishes precisely this archive, not a glob which might include old builds.

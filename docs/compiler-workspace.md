@@ -279,7 +279,8 @@ probe waits 16 seconds to check that user interaction does not time out executio
 An optional bounded, hash-verifying GitHub archive proxy is included in
 `roclet-serve`. Configure its endpoint for automatic downloads from GitHub Releases;
 otherwise users load bundles through the default static workflow. The pinned
-Display implementation is embedded and works offline without prompting.
+Display implementation ships as a runtime asset and works offline without prompting;
+its sources and release URL can be updated without recompiling the engines.
 
 See the [real-package validation report](browser-package-validation.md) for
 reproduction and [hosting instructions](installation.md#package-downloads-on-a-static-host)

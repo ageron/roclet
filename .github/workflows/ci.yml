@@ -44,7 +44,7 @@ jobs:
         with:
           path: .engine-cache
           # Exact matches only: never run engines from different source/build inputs.
-          key: roclet-engines-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'package/**/*', 'vendor/**/*', 'tools/build-tool.zig', 'tools/compress-builtins.zig', 'tools/prepare-compiler.sh', 'ci/engine-build.env') }}
+          key: roclet-engines-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'vendor/md4c/*.c', 'vendor/md4c/*.h', 'tools/build-tool.zig', 'tools/compress-builtins.zig', 'tools/prepare-compiler.sh', 'ci/engine-build.env') }}
       - name: Restore Zig build cache
         uses: actions/cache/restore@v4
         id: compiler-cache
@@ -53,7 +53,7 @@ jobs:
             .toolchain
             .zig-cache
             ~/.cache/zig
-          key: roclet-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-${{ hashFiles('build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'package/**/*', 'vendor/**/*', 'tools/**/*', 'tests/**/*', 'ci/**/*', '.github/workflows/ci.yml') }}
+          key: roclet-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-${{ hashFiles('build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'vendor/md4c/*.c', 'vendor/md4c/*.h', 'tools/**/*', 'tests/**/*', 'ci/**/*', '.github/workflows/ci.yml') }}
           restore-keys: |
             roclet-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-
       - name: Prepare pinned compiler dependency

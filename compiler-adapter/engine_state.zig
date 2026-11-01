@@ -16,6 +16,7 @@ pub const Engine = struct {
     /// Synthetic app/platform paths; native sets a real source directory.
     paths: runner.Paths = .{},
     owns_paths: bool = false,
+    display_assets: ?std.json.Parsed(@import("display.zig").Assets) = null,
     /// Retained checked and lowered notebook revision.
     revision: ?*notebook.State = null,
     /// Counters reported as `workspaceCache`; zeroed by `beginRequest`.
@@ -30,9 +31,23 @@ pub const Engine = struct {
     pub fn deinit(self: *Engine) void {
         if (self.revision) |state| state.destroy();
         self.baseline.deinit();
+        if (self.display_assets) |assets| assets.deinit();
         if (self.owns_paths) inline for (@typeInfo(runner.Paths).@"struct".field_names) |name| self.gpa.free(@field(self.paths, name));
         self.workspace.deinit();
         self.* = undefined;
+    }
+
+    /// Configure once, before any requests; each engine owns its asset bytes.
+    pub fn configureDisplay(self: *Engine, bytes: []const u8) !void {
+        if (self.display_assets != null) return error.DisplayAlreadyConfigured;
+        const parsed = try std.json.parseFromSlice(@import("display.zig").Assets, self.gpa, bytes, .{ .allocate = .alloc_always });
+        errdefer parsed.deinit();
+        try parsed.value.validate();
+        self.display_assets = parsed;
+    }
+
+    pub fn display(self: *const Engine) !@import("display.zig").Assets {
+        return if (self.display_assets) |assets| assets.value else error.MissingDisplayAssets;
     }
 
     /// Native only: serve a real directory under the synthetic paths.

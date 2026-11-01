@@ -84,6 +84,13 @@ fn encode(value: anytype) ![]u8 {
 /// The worker's single engine. Native hosts construct their own instances.
 var wasm_engine: Engine = .init(gpa, .failing);
 
+export fn roclet_configure_display(ptr: u32, len: u32) u32 {
+    if (ptr == 0) return 0;
+    const bytes: [*]const u8 = @ptrFromInt(ptr);
+    wasm_engine.configureDisplay(bytes[0..len]) catch return 0;
+    return 1;
+}
+
 export fn roclet_alloc(len: u32) u32 {
     const bytes = gpa.alloc(u8, len) catch return 0;
     return @intCast(@intFromPtr(bytes.ptr));

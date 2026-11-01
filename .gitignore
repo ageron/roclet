@@ -12,7 +12,7 @@ artifacts/
 
 # Package release artifacts
 .release/
-/package/*.tar.zst
+/vendor/roclet-display/*.tar.zst
 /tools/__pycache__/
 
 # CI compiled engine cache

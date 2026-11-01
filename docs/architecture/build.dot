@@ -1,0 +1,33 @@
+digraph Build {
+  graph [rankdir=TB, bgcolor="#f8fafc", pad=0.4, nodesep=0.45, ranksep=0.65, fontname="Helvetica", fontsize=25, fontcolor="#172554", label="Roclet · Build, updates and distribution\n", labelloc=t];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=13, margin="0.19,0.14", color="#94a3b8", fillcolor="white", fontcolor="#0f172a"];
+  edge [fontname="Helvetica", fontsize=10, color="#64748b", fontcolor="#475569", arrowsize=0.7];
+  roc [label="roc-lang/roc\nPinned commit in compiler.lock.json\nprepare-compiler.sh + embedding.patch"];
+  source [label="Roclet Zig core + platform + md4c\nbuild.zig / compiler build settings"];
+  build [label="Compile engines\nNative + WASM", fillcolor="#ede9fe", color="#a78bfa"];
+  cache [shape=cylinder, label="CI compiled-engine cache\nExact engine source / compiler / target key\nExcludes Display sources and release URL", fillcolor="#dcfce7", color="#86b99a"];
+  engines [label="Engine artifacts\nroclet-native · roclet.wasm\nroclet-profile.wasm", fillcolor="#ede9fe", color="#a78bfa"];
+  release [label="ageron/roclet-display\nSeparate package development and releases", fillcolor="#fce7f3", color="#d391b2"];
+  update [label="Scheduled / manual update workflow\nDownload release · sync modules\nUpdate URL + demos · open reviewable PR"];
+  vendor [label="Vendored modules + release metadata\nvendor/roclet-display/*.roc\ndependencies/roclet-display-url.txt"];
+  assets [label="Generate runtime assets\nartifacts/display.json\nNo engine compilation", fillcolor="#fef3c7", color="#d6ad4c"];
+  web [label="Browser UI + bundled renderers\nDemos · documentation · server sources"];
+  ci [label="Verify + package\nNative / browser conformance\nManifest hashes + offline asset manifest\nVerified roclet-site artifact", fillcolor="#dbeafe", color="#60a5fa"];
+  pages [label="GitHub Pages deployment\nPublish successful main CI artifact\nNo compiler rebuild", fillcolor="#ccfbf1", color="#5eaaa1"];
+  servers [label="Server release workflow\nBuild lightweight server: macOS / Linux / Windows\nBundle the verified site\nServer releases do not include native evaluation", fillcolor="#ccfbf1", color="#5eaaa1"];
+  headless [label="Local build distributions\nHeadless native runner + display.json\nCombined offline archive", fillcolor="#ccfbf1", color="#5eaaa1"];
+  roc -> build;
+  source -> build;
+  build -> cache [label="save on miss"];
+  build -> engines [label="cache miss"];
+  cache -> engines [label="cache hit: reuse"];
+  release -> update;
+  update -> vendor [label="after PR is merged"];
+  vendor -> assets;
+  assets -> ci [label="package + hash"];
+  engines -> ci;
+  web -> ci;
+  ci -> pages [label="successful main CI"];
+  ci -> servers [label="manual versioned release"];
+  ci -> headless [label="zig build package"];
+}

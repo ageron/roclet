@@ -24,7 +24,12 @@ pub fn build(b: *std.Build) void {
     const native = adapter(b, roc, options, host, optimize, "roclet-native", "compiler-adapter/native.zig");
     native.use_llvm = use_llvm;
     native.step.max_rss = compiler_max_rss;
-    b.step("native-adapter", "Build only the native engine").dependOn(&native.step);
+    const runtime_assets = b.addSystemCommand(&.{ b.graph.zig_exe, "run", "tools/build-tool.zig", "--", "assets", root });
+    runtime_assets.has_side_effects = true;
+    b.step("display-assets", "Regenerate Display runtime assets without compiling engines").dependOn(&runtime_assets.step);
+    const native_step = b.step("native-adapter", "Build only the native engine");
+    native_step.dependOn(&native.step);
+    native_step.dependOn(&runtime_assets.step);
     const wasm_target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .freestanding });
     const wasm = adapter(b, roc, options, wasm_target, optimize, "roclet", "compiler-adapter/bridge.zig");
     wasm.use_llvm = use_llvm;
@@ -60,6 +65,9 @@ pub fn build(b: *std.Build) void {
         &b.addInstallBinFile(native_bin, "roclet-native").step
     else
         &b.addInstallArtifact(native, .{}).step;
+    const display_install = b.addInstallFile(b.path("artifacts/display.json"), "bin/display.json");
+    display_install.step.dependOn(ready);
+    cli.dependOn(&display_install.step);
     cli.dependOn(&launcher_install.step);
     b.getInstallStep().dependOn(cli);
     const run = if (cached_engines != null) blk: {
@@ -67,6 +75,7 @@ pub fn build(b: *std.Build) void {
         cached_run.addFileArg(native_bin);
         break :blk cached_run;
     } else b.addRunArtifact(native);
+    run.step.dependOn(&runtime_assets.step);
     run.addPassthruArgs();
     b.step("run", "Run the native CLI; arguments follow --").dependOn(&run.step);
 
@@ -191,6 +200,8 @@ pub fn build(b: *std.Build) void {
     }) });
     engine_tests.step.max_rss = test_max_rss;
     const engine_run = b.addRunArtifact(engine_tests);
+    engine_run.setCwd(b.path("."));
+    engine_run.step.dependOn(&runtime_assets.step);
     b.step("test-engine", "Run in-process engine tests (several engines, attribution, request state)").dependOn(&engine_run.step);
     test_step.dependOn(&engine_run.step);
 
@@ -236,7 +247,7 @@ fn adapter(b: *std.Build, roc: *std.Build.Dependency, options: *std.Build.Module
 }
 
 /// A module rooted in compiler-adapter/ with the compiler modules, builtins,
-/// md4c, embedded package files and Roclet build options the adapter imports.
+/// md4c and Roclet build options the adapter imports.
 fn adapterModule(b: *std.Build, roc: *std.Build.Dependency, options: *std.Build.Module, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, root: []const u8) *std.Build.Module {
     const module = b.createModule(.{
         .root_source_file = b.path(root),
@@ -250,10 +261,6 @@ fn adapterModule(b: *std.Build, roc: *std.Build.Dependency, options: *std.Build.
     if (target.result.cpu.arch == .wasm32) module.addImport("compressed_builtins", compressedBuiltins(b, roc, compiled_builtins));
     module.addCSourceFile(.{ .file = b.path("vendor/md4c/md4c.c"), .flags = &.{ "-std=c99", "-O2" } });
     module.addIncludePath(b.path("vendor/md4c"));
-    module.addAnonymousImport("Input.roc", .{ .root_source_file = b.path("package/Input.roc") });
-    module.addAnonymousImport("InputValues.roc", .{ .root_source_file = b.path("package/InputValues.roc") });
-    module.addAnonymousImport("Display.roc", .{ .root_source_file = b.path("package/Display.roc") });
-    module.addAnonymousImport("display-package-url.txt", .{ .root_source_file = b.path("package/display-package-url.txt") });
     module.addImport("roclet_options", options);
     return module;
 }

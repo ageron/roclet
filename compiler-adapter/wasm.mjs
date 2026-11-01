@@ -1,7 +1,7 @@
 const encoder = new TextEncoder();
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
-export async function createWasmTransport(bytes) {
+export async function createWasmTransport(bytes, {loadDisplay = loadDisplayAssets} = {}) {
   // js_echo is an upstream ABI import, but the embedding observer must capture it.
   const instantiated = await WebAssembly.instantiate(bytes, { env: { js_echo() { throw new Error('Uncaptured output'); } } });
   const instance = instantiated.instance ?? instantiated;
@@ -64,5 +64,15 @@ export async function createWasmTransport(bytes) {
     transport.installPackage = (url, bytes) => withBytes(encoder.encode(url), (urlPtr, urlLen) =>
       withBytes(bytes, (ptr, len) => wasm.roclet_package_install(urlPtr, urlLen, ptr, len) === 1));
   }
+  const assets = await loadDisplay();
+  withBytes(encoder.encode(JSON.stringify(assets)), (ptr, len) => {
+    if (wasm.roclet_configure_display(ptr, len) !== 1) throw new Error('Invalid Display runtime assets');
+  });
   return transport;
+}
+
+async function loadDisplayAssets() {
+  const response = await fetch(new URL('../artifacts/display.json', import.meta.url));
+  if (!response.ok) throw new Error('Display runtime assets are missing. Rebuild the site.');
+  return response.json();
 }

@@ -124,6 +124,7 @@ pub fn main(init: std.process.Init) !void {
         "web/formats.mjs",
         "compiler-adapter/wasm.mjs",
         "artifacts/roclet.wasm",
+        "artifacts/display.json",
         "artifacts/manifest.json",
         "compiler-adapter/ROC-LICENSE",
         "web/vendor/md4c.LICENSE.md",
@@ -143,15 +144,16 @@ pub fn main(init: std.process.Init) !void {
         "web/vendor/plotly/lock.json",
         "web/input-values.mjs",
         "web/widget-bridge.mjs",
-        "package/Display.roc",
-        "package/Input.roc",
-        "package/InputValues.roc",
+        "vendor/roclet-display/Display.roc",
+        "vendor/roclet-display/Input.roc",
+        "vendor/roclet-display/InputValues.roc",
         "demos/03-rich-outputs.roc",
         "web/studio.html",
         "web/assets/roclet-logo.png",
-        "package/README.md",
-        "package/main.roc",
-        "package/display-package-url.txt",
+        "vendor/roclet-display/README.md",
+        "vendor/roclet-display/LICENSE",
+        "vendor/roclet-display/main.roc",
+        "dependencies/roclet-display-url.txt",
         "web/assets/roclet-dark.png",
         "web/assets/roclet-light.png",
     }) |path| try paths.append(a, path);
@@ -182,12 +184,14 @@ pub fn main(init: std.process.Init) !void {
         try site.append(a, .{ .path = ".nojekyll", .data = "" });
         try write(a, io, root, "zig-out/roclet-pages.zip", try archive(a, site.items));
         try files.append(a, .{ .path = "roclet", .data = try read(a, io, root, "zig-out/bin/roclet") });
+        try files.append(a, .{ .path = "display.json", .data = try read(a, io, root, "artifacts/display.json") });
         try files.append(a, .{ .path = "roclet-native", .data = try read(a, io, root, "artifacts/roclet-native") });
         const distribution = try archive(a, files.items);
         try write(a, io, root, "zig-out/roclet.zip", distribution);
         var runner: std.ArrayList(File) = .empty;
+        try runner.append(a, .{ .path = "display.json", .data = try read(a, io, root, "artifacts/display.json") });
         try runner.append(a, .{ .path = "roclet", .data = try read(a, io, root, "artifacts/roclet-native") });
-        try runner.append(a, .{ .path = "README.txt", .data = "Roclet native runner\n\nRun: ./roclet run notebook.roc (or notebook.md).\nThis executable must match your operating system and architecture; see artifacts/manifest.json. The current native build is tested on macOS Apple Silicon.\nJSON stdout reports named values and diagnostics. Exit 0 is success; 1 is a notebook failure.\nLicensed under UPL-1.0; see LICENSE and THIRD_PARTY_NOTICES.md.\n" });
+        try runner.append(a, .{ .path = "README.txt", .data = "Roclet native runner\n\nRun: ./roclet run notebook.roc (or notebook.md).\nKeep display.json beside the executable.\nThis executable must match your operating system and architecture; see artifacts/manifest.json. The current native build is tested on macOS Apple Silicon.\nJSON stdout reports named values and diagnostics. Exit 0 is success; 1 is a notebook failure.\nLicensed under UPL-1.0; see LICENSE and THIRD_PARTY_NOTICES.md.\n" });
         for ([_][]const u8{ "LICENSE", "THIRD_PARTY_NOTICES.md", "artifacts/manifest.json", "compiler-adapter/ROC-LICENSE", "vendor/md4c/LICENSE.md" }) |path| try runner.append(a, .{ .path = path, .data = try read(a, io, root, path) });
         try write(a, io, root, "zig-out/roclet-headless.zip", try archive(a, runner.items));
         std.debug.print("Packaged zig-out/roclet.zip, roclet-headless.zip and roclet-pages.zip\n", .{});

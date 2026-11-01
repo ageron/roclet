@@ -322,7 +322,7 @@ const Value = struct {
 };
 
 // Only the pinned first-party package is supplied by the offline runtime.
-const display_package_url = std.mem.trim(u8, @embedFile("display-package-url.txt"), "\r\n");
+
 fn displayDependency(a: A, source: []const u8) !?[]const u8 {
     const facts = try syntax.roc(a, source);
     for (facts.tokens, 0..) |token, i| {
@@ -362,7 +362,7 @@ fn displayImports(a: A, source: []const u8, packaged: bool) ![]const u8 {
     try edits.appendSlice(a, source[cursor..]);
     return edits.toOwnedSlice(a);
 }
-fn packageRocExport(a: A, source: []const u8) ![]const u8 {
+fn packageRocExport(a: A, source: []const u8, display_package_url: []const u8) ![]const u8 {
     const rewritten = try displayImports(a, source, true);
     if (std.mem.eql(u8, source, rewritten)) return source;
     if (try displayDependency(a, source)) |url| {
@@ -470,7 +470,7 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
     for (document.diagnostics, result.model.diagnostics) |*out, d| out.* = .{ .code = d.code, .message = d.message, .severity = d.severity, .start = d.start, .end = d.end, .cell = d.cell };
     try document.put(a, .protocol);
     if (try displayDependency(a, model.preamble)) |url| {
-        if (eql(url, display_package_url)) {
+        if (eql(url, (try engine.display()).url)) {
             result.program = try displayImports(a, result.program, false);
             result.execution = try displayImports(a, result.execution, false);
             try document.put(a, .program);
@@ -478,7 +478,7 @@ pub fn process(engine: *Engine, a: A, request: Request) !Response {
         }
     }
     if (eql(result.status, "ok") and eql(target, "roc") and (eql(action, "export") or eql(action, "normalize") or (eql(action, "convert") and !eql(format, target)))) {
-        result.source = try packageRocExport(a, result.source);
+        result.source = try packageRocExport(a, result.source, (try engine.display()).url);
         try document.put(a, .source);
     }
 

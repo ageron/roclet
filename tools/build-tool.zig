@@ -2,7 +2,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cwd = std.Io.Dir.cwd();
-const inputs = [_][]const u8{ "build.zig", "build.zig.zon", "tools/prepare-compiler.sh", "tools/compress-builtins.zig", "compiler-adapter/embedding.patch", "compiler-adapter/engine.zig", "compiler-adapter/notebook.zig", "compiler-adapter/analysis.zig", "compiler-adapter/script.zig", "compiler-adapter/engine_state.zig", "compiler-adapter/image.zig", "compiler-adapter/workspace.zig", "compiler-adapter/platform.zig", "compiler-adapter/platform/main.roc", "compiler-adapter/platform/Echo.roc", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "compiler-adapter/document_frontend.zig", "package/Display.roc", "package/Input.roc", "package/InputValues.roc", "package/display-package-url.txt", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
+const inputs = [_][]const u8{ "build.zig", "build.zig.zon", "tools/prepare-compiler.sh", "tools/compress-builtins.zig", "compiler-adapter/embedding.patch", "compiler-adapter/engine.zig", "compiler-adapter/notebook.zig", "compiler-adapter/analysis.zig", "compiler-adapter/script.zig", "compiler-adapter/engine_state.zig", "compiler-adapter/display.zig", "compiler-adapter/image.zig", "compiler-adapter/workspace.zig", "compiler-adapter/platform.zig", "compiler-adapter/platform/main.roc", "compiler-adapter/platform/Echo.roc", "tools/build-tool.zig", "compiler.lock.json", "compiler-adapter/bridge.zig", "compiler-adapter/native.zig", "compiler-adapter/syntax.zig", "compiler-adapter/document.zig", "compiler-adapter/document_frontend.zig", "vendor/md4c/md4c.c", "vendor/md4c/md4c.h", "vendor/md4c/roclet-md.h" };
+const runtime_inputs = [_][]const u8{ "vendor/roclet-display/Display.roc", "vendor/roclet-display/Input.roc", "vendor/roclet-display/InputValues.roc", "dependencies/roclet-display-url.txt" };
 const Lock = struct { protocol: u32, compilerRepository: []const u8, compilerCommit: []const u8, zigVersion: []const u8, nativeOptimize: []const u8, wasmOptimize: []const u8 };
 fn path(gpa: Allocator, root: []const u8, relative: []const u8) ![]const u8 {
     return std.fs.path.join(gpa, &.{ root, relative });
@@ -41,6 +42,16 @@ fn artifactHash(io: std.Io, file: []const u8) !struct { bytes: u64, sha256: [64]
     hasher.final(&hash);
     return .{ .bytes = size, .sha256 = std.fmt.bytesToHex(hash, .lower) };
 }
+fn runtimeAssets(gpa: Allocator, io: std.Io, root: []const u8) !void {
+    try cwd.createDirPath(io, try path(gpa, root, "artifacts"));
+    try writeJson(gpa, io, try path(gpa, root, "artifacts/display.json"), .{
+        .schema = 1,
+        .url = std.mem.trim(u8, try read(gpa, io, try path(gpa, root, "dependencies/roclet-display-url.txt")), "\r\n"),
+        .display = try read(gpa, io, try path(gpa, root, "vendor/roclet-display/Display.roc")),
+        .input = try read(gpa, io, try path(gpa, root, "vendor/roclet-display/Input.roc")),
+        .input_values = try read(gpa, io, try path(gpa, root, "vendor/roclet-display/InputValues.roc")),
+    });
+}
 fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: []const []const u8) !void {
     try cwd.createDirPath(io, try path(gpa, root, "artifacts"));
     if (binaries.len < 2 or binaries.len > 4) return error.InvalidArguments;
@@ -51,8 +62,9 @@ fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: [
     const wasm = try stripWasmDebug(gpa, try read(gpa, io, binaries[1]));
     defer gpa.free(wasm);
     try cwd.writeFile(io, .{ .sub_path = try path(gpa, root, "artifacts/roclet.wasm"), .data = wasm });
+    try runtimeAssets(gpa, io, root);
     var artifacts: std.json.ObjectMap = .empty;
-    for ([_][]const u8{ "roclet-native", "roclet.wasm" }) |name| {
+    for ([_][]const u8{ "roclet-native", "roclet.wasm", "display.json" }) |name| {
         const hash = try artifactHash(io, try path(gpa, root, try std.fmt.allocPrint(gpa, "artifacts/{s}", .{name})));
         var item: std.json.ObjectMap = .empty;
         try item.put(gpa, "bytes", .{ .integer = @intCast(hash.bytes) });
@@ -61,6 +73,8 @@ fn publish(gpa: Allocator, io: std.Io, root: []const u8, lock: Lock, binaries: [
     }
     var input_hashes: std.json.ObjectMap = .empty;
     for (inputs) |name| try input_hashes.put(gpa, name, .{ .string = try gpa.dupe(u8, &digest(try read(gpa, io, try path(gpa, root, name)))) });
+    for (runtime_inputs) |name|
+        try input_hashes.put(gpa, name, .{ .string = try gpa.dupe(u8, &digest(try read(gpa, io, try path(gpa, root, name)))) });
     try writeJson(gpa, io, try path(gpa, root, "artifacts/manifest.json"), .{
         .protocol = lock.protocol,
         .compilerRepository = lock.compilerRepository,
@@ -86,6 +100,13 @@ fn check(gpa: Allocator, io: std.Io, root: []const u8) !void {
             return error.OutdatedAdapter;
         }
     }
+    for (runtime_inputs) |name| {
+        const expected = manifest.object.get("inputs").?.object.get(name) orelse return error.OutdatedDisplayAssets;
+        if (!std.mem.eql(u8, expected.string, &digest(try read(gpa, io, try path(gpa, root, name))))) {
+            std.debug.print("Display assets changed ({s}); regenerate with zig build adapter (engines can be reused)\n", .{name});
+            return error.OutdatedDisplayAssets;
+        }
+    }
     var it = manifest.object.get("artifacts").?.object.iterator();
     while (it.next()) |entry| {
         const file = try path(gpa, root, try std.fmt.allocPrint(gpa, "artifacts/{s}", .{entry.key_ptr.*}));
@@ -98,6 +119,7 @@ pub fn main(init: std.process.Init) !void {
     if (args.len < 3) return error.InvalidArguments;
     const root = args[2];
     const lock = try std.json.parseFromSliceLeaky(Lock, gpa, try read(gpa, init.io, try path(gpa, root, "compiler.lock.json")), .{});
+    if (std.mem.eql(u8, args[1], "assets")) return runtimeAssets(gpa, init.io, root);
     if (std.mem.eql(u8, args[1], "publish")) return publish(gpa, init.io, root, lock, args[3..]);
     if (std.mem.eql(u8, args[1], "check")) return check(gpa, init.io, root);
     return error.InvalidArguments;

@@ -1,16 +1,18 @@
-# Embedded Display package
+# Vendored Display package
 
 The standalone package now lives in [ageron/roclet-display](https://github.com/ageron/roclet-display).
 Its API documentation, source development, license, and release workflow belong
 there. This directory retains a vendored copy of its four Roc modules because
-Roclet embeds them in the native and browser engines for offline use. Building
+Roclet packages the runtime modules as offline assets loaded by its native and
+browser engines. Updating them does not require recompiling those engines. Building
 Roclet does not require a sibling checkout or a package download.
 
-Current published package pin:
+The release pin is maintained separately in
+[`dependencies/roclet-display-url.txt`](../../dependencies/roclet-display-url.txt):
 
 https://github.com/ageron/roclet-display/releases/download/0.4.0/Gv78dUSQfYRU2yvV9HuS5oHYdMfik84S4sgsej6mbjLd.tar.zst
 
-The embedded sources match the published Display 0.4.0 archive, including
+The vendored sources match the published Display 0.4.0 archive, including
 `Display.plotly`.
 Do not delete older release assets from `ageron/roclet`.
 

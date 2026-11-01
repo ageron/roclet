@@ -20,7 +20,7 @@ def package(site, binary, platform, version, output):
                 if path.is_absolute() or '..' in path.parts or '\\' in name:
                     raise ValueError(f'Invalid site archive path: {name}')
             archive.extractall(root)
-        for required in ('index.html', 'web/install.html', 'web/edit.html', 'artifacts/manifest.json', 'artifacts/roclet.wasm'):
+        for required in ('index.html', 'web/install.html', 'web/edit.html', 'artifacts/manifest.json', 'artifacts/roclet.wasm', 'artifacts/display.json'):
             if not (root / required).is_file():
                 raise ValueError(f'Missing site asset: {required}')
         executable = 'roclet.exe' if platform.startswith('windows-') else 'roclet'

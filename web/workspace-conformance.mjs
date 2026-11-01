@@ -42,6 +42,17 @@ try {
   const response=await fetch('../artifacts/roclet.wasm');if(!response.ok) throw new Error('Build the compiler WASM artifact to complete workspace conformance');
   const bytes=await response.arrayBuffer(),raw=await createWasmTransport(bytes);
   assert(raw.workspace,'Compiler WASM lacks workspace ABI');
+  const displayAssets=await fetch('../artifacts/display.json').then(r=>r.json());
+  const alternate={...displayAssets,url:'https://example.com/next-display.tar.zst',
+    display:displayAssets.display.replace('text: clip(source, 16384)', 'text: "updated at runtime"')};
+  const updated=await createWasmTransport(bytes,{loadDisplay:async()=>alternate});
+  const displayRequest={operation:'document',action:'evaluate',format:'roc',source:'import Display\n# %%\nDisplay.text("original")'};
+  assert.equal(raw(displayRequest).evaluation.values[0].text,'original');
+  assert(updated.importCache(raw.takeCacheUpdates()));
+  assert.equal(updated(displayRequest).evaluation.values[0].text,'updated at runtime');
+  const exported=updated({...displayRequest,action:'export',target:'roc'});
+  assert.equal(exported.status,'ok');assert(exported.source.includes(alternate.url));
+  report('PASS identical WASM binary loads different Display sources and exports the runtime release URL');
   const evaluate=source=>({operation:'document',action:'evaluate',format:'roc',source}),request=evaluate('import Fresh\nout_1 = Fresh.value');
   const session=new DocumentSession(bytes),files=[{path:'/workspace/Fresh.roc',source:'Fresh := [].{ value : U64\nvalue = 7 }'}];
   const first=await session.request({...request,files});assert.equal(first.status,'ok');assert.equal(first.evaluation.values[0].text,'7');

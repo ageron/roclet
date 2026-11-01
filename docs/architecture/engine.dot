@@ -1,0 +1,31 @@
+digraph Engine {
+  graph [rankdir=TB, bgcolor="#f8fafc", pad=0.4, nodesep=0.4, ranksep=0.55, fontname="Helvetica", fontsize=25, fontcolor="#172554", label="Roclet · Inside each engine\nSame Zig implementation in WASM and native hosts", labelloc=t];
+  node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=13, margin="0.2,0.13", color="#94a3b8", fillcolor="white", fontcolor="#0f172a"];
+  edge [fontname="Helvetica", fontsize=10, color="#64748b", fontcolor="#475569", arrowsize=0.7];
+  host [label="Browser WASM transport  /  native CLI\nDocument actions · file bytes · package archives", fillcolor="#dbeafe", color="#60a5fa"];
+  bridge [label="bridge.zig · public boundary\nParse request once · dispatch · serialize response", fillcolor="#ede9fe", color="#a78bfa"];
+  doc [label="Document preparation\ndocument.zig + document_frontend.zig + syntax.zig\nRoc / Markdown parsing · cells · source maps\nConversions · exports · reactive plan"];
+  notebook [label="Notebook path · notebook.zig\nRetain one checked / lowered revision\nEvaluate selected output roots"];
+  script [label="Whole-program path · script.zig\nRun / check scripts · verify exports\nFresh compilation pipeline"];
+  compiler [label="Pinned Roc compiler\nResolve imports → canonicalize → type-check → lower\nCompiler-owned dependency and package semantics", fillcolor="#ede9fe", color="#a78bfa"];
+  interpreter [label="LIR image + Roc interpreter\nExecute checked code\nNo separate WASM generation for user programs", fillcolor="#ede9fe", color="#a78bfa"];
+  outputs [label="Attributed results\nValues · diagnostics · dbg / tests / failures\nDisplay wire data → browser renderers", fillcolor="#dbeafe", color="#60a5fa"];
+  state [label="Per-engine state\nengine_state.zig · workspace.zig · baseline.zig\nVirtual files + compiler artifact store\nRetained revision + reactive baseline\nRuntime Display assets", fillcolor="#dcfce7", color="#86b99a"];
+  display [label="display.json · startup configuration\nRelease pin + Roc module sources\nOwned by this engine instance", fillcolor="#fef3c7", color="#d6ad4c"];
+  platform [label="Embedded notebook platform\nplatform.zig + platform/*.roc\nHosted effects + observation callbacks", fillcolor="#fef3c7", color="#d6ad4c"];
+
+  host -> bridge [label="JSON request / response", dir=both];
+  bridge -> doc [label="document / syntax / markdown"];
+  bridge -> script [label="program"];
+  doc -> notebook [label="analyze / evaluate"];
+  doc -> script [label="run / check / export verification"];
+  notebook -> compiler [label="new or changed revision"];
+  script -> compiler;
+  compiler -> interpreter [label="checked LIR image"];
+  platform -> interpreter [label="hosted functions", style=dashed];
+  interpreter -> outputs [label="root-attributed observations"];
+  outputs -> bridge [label="typed response", constraint=false];
+  display -> state [label="load once", style=dashed];
+  state -> notebook [label="reuse / invalidate", dir=both, style=dashed];
+  state -> compiler [label="files, modules, caches", dir=both, style=dashed];
+}
