@@ -27,6 +27,29 @@ HTML and SVG are inert; widgets allow inline JavaScript inside an isolated frame
 Markup is limited to 16 KiB. Widgets can update their own controls but do not
 feed values into Roc definitions. Saved snapshots and reports disable scripts.
 
+## Plotly charts with Plume
+
+The source package provides `Display.plotly(plain_text, figure_json)`. Pass
+`chart.to_json()` from [Plume 0.5.0](https://github.com/lukewilliamboswell/plume/releases/tag/0.5.0):
+
+```roc
+chart = Chart.new({ traces: [Scatter(curve)] })
+out_chart = Display.plotly("A description of the curve", chart.to_json())
+```
+
+See the complete [Plume notebook](../demos/05-plume-charts.roc) for imports,
+the pinned dependency, and a reactive amplitude slider. This constructor is
+available in the source and embedded Roclet package; the published `0.2.0`
+archive predates it. Ordinary Roc consumers need the local package until the
+next Display release.
+
+Figures must be JSON objects with a `data` array of trace objects and a `layout`
+object. JSON is limited to 128 KiB; oversized figures return a text explanation,
+and malformed figures keep the plain-text fallback. Roclet supplies Plotly.js
+4.2.0 locally, so charts work offline after loading the Plume package. Charts
+support hover and zoom inside an isolated frame. Saved previews and HTML reports
+show the text summary without running chart scripts; run the cell to draw it.
+
 ## Reactive slider inputs
 
 ```roc
@@ -89,8 +112,9 @@ zig build test-demos
 ```
 
 The test builds the bundle, extracts it, compares the extracted sources, and runs
-all five example notebooks against that extracted package with ordinary Roc.
-No published release or network access is needed. Use `-Droc=/path/to/roc` to
+the example notebooks against that extracted package with ordinary Roc. The
+Plume demo fetches its pinned release on first use, then uses Roc's package cache.
+No published Display release is needed. Use `-Droc=/path/to/roc` to
 choose the compiler. Generated archives stay in ignored build directories.
 
 ## Publish

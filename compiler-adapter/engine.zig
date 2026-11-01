@@ -9,6 +9,7 @@ const std = @import("std");
 const base = @import("base");
 const check = @import("check");
 const can = @import("can");
+const collections = @import("collections");
 const compile = @import("compile");
 const echo_platform = @import("platform.zig");
 const eval = @import("eval");
@@ -346,6 +347,7 @@ pub fn runEcho(opts: RunOptions) RunEchoError!u8 {
     build_env.package_cache_dir = try allocator.dupe(u8, "/packages");
     const cache = try allocator.create(compile.CacheManager);
     cache.* = compile.CacheManager.init(allocator, .{ .enabled = true, .cache_dir = "/cache", .roc_ctx = echo_ctx.io() }, echo_ctx.io());
+    cache.storage = .core_ctx;
     build_env.setCacheManager(cache);
     defer {
         const cache_stats = cache.getStats();
@@ -512,10 +514,6 @@ fn runEchoView(
         },
         error.Crash => {
             if (observer) |sink| sink.observe(.crashed, interpreter.getCrashMessage());
-            return error.EvaluationFailed;
-        },
-        error.ComptimeExhaustiveness => {
-            diag.step("interpreter.runEntrypoint", err);
             return error.EvaluationFailed;
         },
         error.OutOfMemory => {
@@ -806,18 +804,18 @@ pub const DebugCapture = struct {
         while (pending.pop()) |item| {
             if ((try reachable.getOrPut(a, item)).found_existing) continue;
             const env = item.env;
-            var pattern_defs: std.AutoHashMapUnmanaged(can.CIR.Pattern.Idx, can.CIR.Def.Idx) = .{};
+            var pattern_defs = collections.DenseMap(can.CIR.Pattern.Idx, can.CIR.Def.Idx).init(a);
             var binders: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
             var binder_stack: std.ArrayList(can.CIR.Pattern.Idx) = .empty;
             for (env.store.sliceDefs(env.all_defs)) |idx| {
                 binders.clearRetainingCapacity();
                 try can.DependencyGraph.appendPatternBinders(env, env.store.getDef(idx).pattern, &binders, &binder_stack, a);
-                for (binders.items) |binder| try pattern_defs.put(a, binder, idx);
+                for (binders.items) |binder| try pattern_defs.put(binder, idx);
             }
             const expr = item.expr;
-            var references: std.AutoHashMapUnmanaged(can.CIR.Def.Idx, void) = .{};
+            var references = collections.DenseMap(can.CIR.Def.Idx, void).init(a);
             var stack: std.ArrayList(can.CIR.Expr.Idx) = .empty;
-            var defaults: std.AutoHashMapUnmanaged(can.CIR.Expr.Idx, void) = .{};
+            var defaults = collections.DenseMap(can.CIR.Expr.Idx, void).init(a);
             try can.DependencyGraph.collectNameReferences(env, &pattern_defs, expr, &references, &stack, &defaults, a);
             var refs = references.keyIterator();
             while (refs.next()) |def| try pending.append(a, .{ .env = env, .def = def.*, .expr = env.store.getDef(def.*).expr });
@@ -850,7 +848,7 @@ pub const DebugCapture = struct {
         for (self.events.items) |event| {
             for (modules) |module| {
                 const artifact = module.semantic.checked_artifact orelse continue;
-                if (!std.meta.eql(artifact.key, event.module)) continue;
+                if (!artifact.key.digest().eql(event.module)) continue;
                 const env = module.semantic.env;
                 var include = false;
                 if (event.source) |source| if (source == .def) {

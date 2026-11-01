@@ -211,12 +211,17 @@ and recompiling the compiler binary each time.
 
 ## Compiler build cache
 
-Roc's canonicalized and checked artifact caches use compiler-authored keys for
-source, import, configuration, and file-input invalidation. Browser persistence
+Roc's canonicalized, inference, and checked artifact caches use compiler-authored
+keys for source, import, configuration, and file-input invalidation. Browser persistence
 stores the opaque artifacts, partitioned by compiler compatibility identity and
 the actual WASM binary digest. `workspaceCache` reports compiler hit/miss/store
 counters for the whole top-level request. These counters are instrumentation,
 not part of semantic result equality.
+
+The embedding selects `CacheManager.storage = .core_ctx` so compiler-owned
+artifact identities and serialized payloads use the workspace's atomic byte
+writes. This supports both native and WASM engines without opening Roc's native
+artifact catalog; the workspace owns persistence and eviction.
 
 `web/build-cache.mjs` persists artifacts in IndexedDB with per-entry SHA-256
 verification and recency eviction. Compiler artifacts and verified package
@@ -280,8 +285,9 @@ name references, type references in annotations, constructions and patterns,
 external lookups, method dispatch on a local nominal receiver (a
 type-variable receiver depends on every local type), and from each type to
 its associated items and the definitions its declaration reads (field
-defaults). The union is permanent: strict demand does not follow a lambda
-passed to a builtin (`List.map(xs, f)` demands `f`, not what `f` reads), and
+defaults). The union retains name references conservatively alongside strict
+demand. The pinned compiler includes callback captures in strict demand, so
+`List.map(xs, f)` also tracks what `f` reads.
 `workspaceCache.demand_union_fallbacks` counts the definitions a non-function
 definition reaches only through name references.
 
@@ -339,9 +345,13 @@ byte offsets. No terminal diagnostic text is parsed for semantics.
 
 Values retain `{root, text}`. A nominal compiler-checked `Display` value from the
 trusted unaliased bundled module may also provide versioned text, Markdown,
-bounded table, or embedded raster presentation. Inspected text is never parsed to
-infer a renderer. Markdown rendering consists of MD4C events, including math
-spans, rendered with locally pinned KaTeX assets.
+bounded table, embedded raster, isolated markup, input control, or Plotly figure
+presentation. Inspected text is never parsed to infer a renderer. Markdown
+rendering consists of MD4C events, including math spans, rendered with locally
+pinned KaTeX assets. Plotly figures carry at most 128 KiB of JSON in `content`,
+with a `data` array and `layout` object. The browser validates this shape and
+loads the bundled Plotly renderer inside an opaque-origin frame. Saved previews
+and reports retain the text summary without executing chart scripts.
 
 Observations are buffered and attributed to the selected evaluation root. Detailed
 checked provenance lets the engine exclude unrelated compile-time debug events

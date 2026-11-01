@@ -22,6 +22,14 @@ Display :: { version : U64, kind : Str, text : Str, content : Str, mime : Str, c
     svg = |alt, source| markup("svg", alt, source)
     widget = |alt, source| markup("widget", alt, source)
 
+    # A Plotly figure object, e.g. plume.Chart.to_json(chart). No HTML required.
+    plotly : Str, Str -> Display
+    plotly = |alt, json| if List.len(Str.to_utf8(json)) > 131072 {
+        text("${clip(alt, 16000)}\nChart preview omitted: JSON is limited to 128 KiB.")
+    } else {
+        Display.({ version: 1, kind: "plotly", text: clip(alt, 16384), content: json, mime: "", columns: [], rows: [], row_count: 0, column_count: 0 })
+    }
+
     # Native notebook input; custom HTML widgets remain isolated.
     slider : { key : Str, label : Str, min : F64, max : F64, step : F64, default : F64, value : F64 } -> Display
     slider = |config| Display.({ version: 1, kind: "slider", text: "${config.label}: ${config.value.to_str()}", content: Json.to_str({ key: config.key, label: config.label, min: config.min.to_str(), max: config.max.to_str(), step: config.step.to_str(), default: config.default.to_str(), value: config.value.to_str() }), mime: "", columns: [], rows: [], row_count: 0, column_count: 0 })

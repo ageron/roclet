@@ -14,6 +14,7 @@ const suites=[
   ['Compact notebook UI','edit-ui-conformance',null,'390x960'],
   ['Sharing and offline','m3-conformance'],
   ['Rich outputs','m5-conformance'],
+  ['Plotly charts','plotly-conformance'],
   ['Math','math-conformance'],
   ['Workspace and packages','workspace-conformance'],
   ['Side-by-side notebooks','dual-conformance'],

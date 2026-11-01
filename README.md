@@ -9,7 +9,7 @@ Roclet runs Roc locally through WebAssembly—and keeps working offline.
 - **Reactive by default.** Cells follow their dependencies, not their position on the page.
 - **Files you can read.** Save notebooks as Roc or Markdown. Export runnable Roc scripts.
 - **Room to think.** A quiet editor with keyboard navigation, multiple cursors, and collapsible source.
-- **More than plain text.** Markdown, math, tables, images, and inline `dbg` output.
+- **More than plain text.** Markdown, math, tables, images, interactive Plotly charts, and inline `dbg` output.
 - **Bring your data.** Attach local files as exact copies, import UTF-8 text or raw bytes, and keep them in portable bundles.
 - **Take your work with you.** Download a notebook, share a portable bundle, or export a self-contained report.
 
@@ -22,7 +22,8 @@ change `width`, and see what happens. The [installation guide](docs/installation
 covers offline use and running locally.
 
 Or explore the [little demos](demos/README.md): a simple reactive calculation, a coding
-puzzle with checks and hints, and a meeting scheduler using roc-time.
+puzzle with checks and hints, a meeting scheduler using roc-time, and
+[interactive charts with Plume](https://ageron.github.io/roclet/web/edit.html?example=plume-charts).
 The [CSV attachments demo](https://ageron.github.io/roclet/web/edit.html?example=csv-attachments)
 uses roc-parser to turn an attached sales file into a report. Replace the CSV
 through **File → Attachments** to try your own data.
@@ -65,8 +66,7 @@ Roclet is an experimental alpha. **Only Chrome has been tested.** Other browsers
 may work, but haven't been verified yet. Native builds have been tested on Linux x86_64 and macOS
 with Apple Silicon.
 
-Roclet uses a pinned development version of Roc. Widgets and plots are still
-ahead of us. If something breaks, please open an issue
+Roclet uses a pinned development version of Roc. If something breaks, please open an issue
 with a small notebook that reproduces it, your browser version, and what you expected.
 
 ## Build it yourself

@@ -10,6 +10,7 @@ export const examples = new Map([
   ['coding-puzzle', ['../demos/02-coding-puzzle.roc', 'Coding puzzle: longest streak.roc']],
   ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
   ['meeting-windows', ['../demos/04-meeting-windows.roc', 'Finding room for a design review.roc']],
+  ['plume-charts', ['../demos/05-plume-charts.roc', 'Plot a wave with Plume.roc']],
   ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich Outputs and Widgets.roc']],
   ['csv-attachments', ['../demos/05-csv-attachments.roc', 'A café sales report from a CSV attachment.roc', [{path:'data/cafe-sales.csv',url:'../demos/data/cafe-sales.csv'}]]],
 ]);

@@ -158,6 +158,7 @@ pub const State = struct {
         build.setSyntheticRootSourceMappingWithLineOffset(std.fs.path.basename(opts.paths.app_abs), owned_user_source, self.prefix, @intCast(std.mem.count(u8, header, "\n")));
         const cache = try a.create(compile.CacheManager);
         cache.* = compile.CacheManager.init(a, .{ .cache_dir = "/cache", .roc_ctx = fs.io() }, fs.io());
+        cache.storage = .core_ctx;
         build.setCacheManager(cache);
         build.discoverDependencies(opts.paths.app_abs) catch |err| {
             self.reports = try build.drainReports();
