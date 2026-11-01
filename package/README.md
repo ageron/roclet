@@ -37,7 +37,7 @@ chart = Chart.new({ traces: [Scatter(curve)] })
 out_chart = Display.plotly("A description of the curve", chart.to_json())
 ```
 
-See the complete [Plume notebook](../demos/05-plume-charts.roc) for imports,
+See the complete [Plume notebook](../demos/04-plume-charts.roc) for imports,
 the pinned dependency, and a reactive amplitude slider. This constructor is
 available in the source and embedded Roclet package; the published `0.2.0`
 archive predates it. Ordinary Roc consumers need the local package until the

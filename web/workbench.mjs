@@ -7,12 +7,12 @@ import {attachment} from './attachments.mjs';
 
 // Bundled examples only, never arbitrary URLs supplied by a query parameter.
 export const examples = new Map([
-  ['coding-puzzle', ['../demos/02-coding-puzzle.roc', 'Coding puzzle: longest streak.roc']],
   ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
-  ['meeting-windows', ['../demos/04-meeting-windows.roc', 'Finding room for a design review.roc']],
-  ['plume-charts', ['../demos/05-plume-charts.roc', 'Plot a wave with Plume.roc']],
-  ['rich-outputs', ['../fixtures/documents/rich-outputs.roc', 'Rich Outputs and Widgets.roc']],
+  ['coding-puzzle', ['../demos/02-coding-puzzle.roc', 'Coding puzzle: longest streak.roc']],
+  ['rich-outputs', ['../demos/03-rich-outputs.roc', 'Rich Outputs and Widgets.roc']],
+  ['plume-charts', ['../demos/04-plume-charts.roc', 'Plot a wave with Plume.roc']],
   ['csv-attachments', ['../demos/05-csv-attachments.roc', 'A café sales report from a CSV attachment.roc', [{path:'data/cafe-sales.csv',url:'../demos/data/cafe-sales.csv'}]]],
+  ['meeting-windows', ['../demos/06-meeting-windows.roc', 'Finding room for a design review.roc']],
 ]);
 export const exampleTitle = name => examples.get(name)?.[1].replace(/\.roc$/, '');
 

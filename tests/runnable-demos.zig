@@ -33,7 +33,7 @@ pub fn main(init: std.process.Init) !void {
     // CI publishes precisely this archive, not a glob which might include old builds.
     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ bundle_dir, "tested-bundle.txt" }), .data = archive });
     std.debug.print("PASS extracted Display archive matches its sources\n", .{});
-    for ([_][]const u8{ "demos/01-reactivity.roc", "demos/02-coding-puzzle.roc", "demos/05-plume-charts.roc", "fixtures/documents/rich-outputs.roc", "fixtures/documents/wall.roc" }) |file| {
+    for ([_][]const u8{ "demos/01-reactivity.roc", "demos/02-coding-puzzle.roc", "demos/04-plume-charts.roc", "demos/03-rich-outputs.roc", "fixtures/documents/wall.roc" }) |file| {
         const path = try std.fs.path.join(a, &.{ root, file });
         const source = try std.Io.Dir.cwd().readFileAlloc(init.io, path, a, .limited(256 * 1024));
         const argv: []const []const u8 = if (std.mem.find(u8, source, url) != null) &.{ roc, "--replace-dep", url, bundled_package, path } else &.{ roc, path };

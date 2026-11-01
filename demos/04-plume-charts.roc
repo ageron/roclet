@@ -13,25 +13,26 @@ import plume.Title
 
 # %%
 # # Plot a wave with Plume
-# Move the amplitude slider to redraw the curve, or edit the equation below.
+# Move the frequency slider to redraw the curve, or edit the equation below.
+# Frequency is measured in radians per x-unit; the amplitude stays at 1.
 # Hover for coordinates, drag to zoom, and double-click to reset the axes.
 #
 # This notebook uses Plume 0.5.0. Load its release bundle when prompted on first
 # use. Roclet keeps the package for offline use and includes the Plotly renderer.
 
 # %%
-amplitude_control = Input.slider({
-    key: "amplitude", label: "Amplitude", min: 0.5, max: 4, step: 0.5, default: 1,
+frequency_control = Input.slider({
+    key: "frequency", label: "Frequency", min: 0.5, max: 4, step: 0.5, default: 1,
 })
-amplitude = amplitude_control.value
-out_amplitude = amplitude_control.display
+frequency = frequency_control.value
+out_frequency = frequency_control.display
 
 # %%
-draw_wave = |magnitude| {
+draw_wave = |angular_frequency| {
     points = List.from_iter((0.U64..<81).iter()).map_try(|step| {
         number = step.to_f64() / 10
         x = Coordinate.from_number(number)?
-        y = Coordinate.from_number(magnitude * F64.sin(number))?
+        y = Coordinate.from_number(F64.sin(angular_frequency * number))?
         Ok({ x, y })
     })?
     curve = Scatter.new({ data: points, mode: Lines, name: "Sine wave" })
@@ -39,11 +40,11 @@ draw_wave = |magnitude| {
         traces: [Scatter(curve)],
         layout: Layout.new({ title: Title.new({ text: "A sine wave with Plume" }) }),
     })
-    Ok(Display.plotly("Sine wave: amplitude ${magnitude.to_str()}, 81 samples from x = 0 to 8.", chart.to_json()))
+    Ok(Display.plotly("Sine wave: frequency ${angular_frequency.to_str()}, 81 samples from x = 0 to 8.", chart.to_json()))
 }
 
 # %%
-out_wave = draw_wave(amplitude) ?? Display.text("The curve needs finite coordinates.")
+out_wave = draw_wave(frequency) ?? Display.text("The curve needs finite coordinates.")
 
 # %%
 # `Display.plotly(plain_text, chart.to_json())` accepts the JSON from a Plume
@@ -54,7 +55,7 @@ out_wave = draw_wave(amplitude) ?? Display.text("The curve needs finite coordina
 display! = |value| echo!("${Str.inspect(value)}\n")
 
 main! = |_args| {
-    display!(out_amplitude)
+    display!(out_frequency)
     display!(out_wave)
     Ok({})
 }

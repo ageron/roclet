@@ -301,7 +301,7 @@ file invalidates the results that depend on the workspace.
 
 The [demos](../demos/README.md) have **Open demo** links for the hosted app.
 For local use, download the source file and open it in Roclet. The
-[meeting-window demo](../demos/04-meeting-windows.roc) uses the released roc-time
+[meeting-window demo](../demos/06-meeting-windows.roc) uses the released roc-time
 0.2.0 package. Download and load its bundle when prompted on first use. With the
 bundled server running, open
 <http://127.0.0.1:4173/web/edit.html?example=meeting-windows>.

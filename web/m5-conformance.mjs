@@ -68,7 +68,7 @@ try {
   const rows=Array.from({length:205},(_,i)=>`["${i}"]`).join(',');const bounded=await session.request({operation:'document',action:'evaluate',format:'roc',source:`import Display\n# %%\nDisplay.table(["Index"], [${rows}])`});assert.equal(bounded.status,'ok');assert.equal(bounded.evaluation.values[0].display.rows.length,200);assert.equal(bounded.evaluation.values[0].display.row_count,205);
   report('Roc bounds table previews before crossing the WASM boundary');
   notebook=await startNotebook({save:async()=>{},list:async()=>[]});await until(()=>notebook.result?.status==='ok');
-  await notebook.open(await fetch('../fixtures/documents/rich-outputs.roc').then(r=>r.text()),'Rich Outputs and Widgets.roc');notebook.setAuto(false);await notebook.run();
+  await notebook.open(await fetch('../demos/03-rich-outputs.roc').then(r=>r.text()),'Rich Outputs and Widgets.roc');notebook.setAuto(false);await notebook.run();
   assert.equal(notebook.result.status,'ok');assert.equal(document.querySelectorAll('#cells .rich-output').length,7);assert.equal(document.querySelectorAll('#cells .display-image').length,2);assert.match(document.querySelector('#cells table').textContent,/Measurement[\s\S]*Width[\s\S]*Area/);
   await until(()=>document.querySelector('#cells .display-image')?.complete);assert(document.querySelector('#cells .display-image').naturalWidth>0);
   const original=document.querySelector('#cells table'),slider=document.querySelector('#cells input[type="range"]');

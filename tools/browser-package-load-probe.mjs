@@ -48,7 +48,7 @@
   assert(await cached()===3 && !dialog(),'Verified package caches differ');
   $('stop').click();$('run').click();await until(()=>$('status').textContent.startsWith('Current'));
   assert(values()[0]==='Ok(12345)' && !dialog(),'Fresh worker did not restore both parser dependencies');
-  const bytes=await fetch('/artifacts/roclet.wasm').then(r=>r.arrayBuffer()),timeSource=await fetch('/demos/04-meeting-windows.roc').then(r=>r.text());
+  const bytes=await fetch('/artifacts/roclet.wasm').then(r=>r.arrayBuffer()),timeSource=await fetch('/demos/06-meeting-windows.roc').then(r=>r.text());
   const module=path=>JSON.stringify(new URL(path,location.href).href);
   const code=`import{createWasmTransport}from ${module('/compiler-adapter/wasm.mjs')};import{BuildCache,compilerNamespace}from ${module('/web/build-cache.mjs')};import{BrowserPackages}from ${module('/web/packages.mjs')};onmessage=async({data})=>{try{const raw=await createWasmTransport(data.bytes),ns=await compilerNamespace(data.bytes,raw.cacheIdentity());const packages=new BrowserPackages(new BuildCache(ns+':packages'),{fetch:async()=>{throw Error('Package networking disabled');}});const results=[];for(const source of data.sources){const r=await packages.evaluate(raw,{operation:'document',action:'evaluate',format:'roc',source,compact:true});results.push({status:r.status,values:r.evaluation?.values.map(v=>v.text),tests:r.evaluation?.tests});}postMessage({results});}catch(error){postMessage({error:error.stack});}};`;
   const blob=URL.createObjectURL(new Blob([code],{type:'text/javascript'})),worker=new Worker(blob,{type:'module'});

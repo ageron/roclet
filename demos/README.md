@@ -7,8 +7,10 @@ Your changes stay in your browser; they don't modify the published example.
 |---|---|---|
 | [A result before its ingredients](01-reactivity.roc) | Change the number of guests, then move the cells around. | [Open demo](https://ageron.github.io/roclet/web/edit.html?example=reactivity) |
 | [Coding puzzle: longest streak](02-coding-puzzle.roc) | Implement the stub and make every check pass; hints are included, but no solution. | [Open demo](https://ageron.github.io/roclet/web/edit.html?example=coding-puzzle) |
-| [Finding room for a design review](04-meeting-windows.roc) | Follow a calendar analysis: normalize offsets, merge overlaps, find gaps, and recommend a 45-minute meeting. Uses roc-time 0.2.0; download and load its bundle when prompted on first use. | [Open demo](https://ageron.github.io/roclet/web/edit.html?example=meeting-windows) |
-| [Plot a wave with Plume](05-plume-charts.roc) | Plot a sine wave, adjust its amplitude with a slider, and hover or zoom. Uses Plume 0.5.0; load its release bundle when prompted on first use. | [Open demo](https://ageron.github.io/roclet/web/edit.html?example=plume-charts) |
+| [Rich Outputs and Widgets](03-rich-outputs.roc) | Explore Markdown, tables, images, and interactive widgets. | [Open demo](https://ageron.github.io/roclet/web/edit.html?example=rich-outputs) |
+| [Plot a wave with Plume](04-plume-charts.roc) | Plot a sine wave, adjust its frequency with a slider, and hover or zoom. Uses Plume 0.5.0; load its release bundle when prompted on first use. | [Open demo](https://ageron.github.io/roclet/web/edit.html?example=plume-charts) |
+| [A café sales report from CSV](05-csv-attachments.roc) | Decode typed rows with roc-parser and calculate revenue in exact cents. | [Open demo](https://ageron.github.io/roclet/web/edit.html?example=csv-attachments) |
+| [Finding room for a design review](06-meeting-windows.roc) | Follow a calendar analysis: normalize offsets, merge overlaps, find gaps, and recommend a 45-minute meeting. Uses roc-time 0.2.0; download and load its bundle when prompted on first use. | [Open demo](https://ageron.github.io/roclet/web/edit.html?example=meeting-windows) |
 
 You can also download any source file and open it with **File → Open** in a local
 or offline Roclet installation, or run it directly with `roc notebook.roc`.

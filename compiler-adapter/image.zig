@@ -21,7 +21,7 @@ pub const Limits = struct {
 const mib = 1024 * 1024;
 
 /// Measured images (native, 2026-10-20): Wall Area 5 KiB, the roc-time
-/// calendar notebook (demos/04-meeting-windows.roc) 461 KiB. WASM linear
+/// calendar notebook (demos/06-meeting-windows.roc) 461 KiB. WASM linear
 /// memory never shrinks, so start at 1 MiB there; native pages are committed
 /// only when touched, so a larger first buffer costs nothing. Powers of two
 /// match the WASM allocator's big size classes.

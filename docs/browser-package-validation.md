@@ -72,7 +72,7 @@ to the command's exit status.
 
 ## roc-time demonstration
 
-[`demos/04-meeting-windows.roc`](../demos/04-meeting-windows.roc) imports the real
+[`demos/06-meeting-windows.roc`](../demos/06-meeting-windows.roc) imports the real
 [roc-time 0.2.0 release](https://github.com/lukewilliamboswell/roc-time/releases/tag/0.2.0).
 The notebook investigates the earliest 45-minute opening for a design review.
 It shows the supplied calendar, normalizes offset-bearing bookings, merges
@@ -188,7 +188,7 @@ formatted notebook now also passes with the native Debug engine (see
 `compiler-adapter/README.md`).
 
 ```sh
-./zig-out/bin/roclet run demos/04-meeting-windows.roc
+./zig-out/bin/roclet run demos/06-meeting-windows.roc
 ./zig-out/bin/roclet run fixtures/documents/roc-parser-package.roc
 ```
 

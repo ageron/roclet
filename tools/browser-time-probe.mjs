@@ -55,7 +55,7 @@
   $('run').click();await until(()=>$('status').textContent.startsWith('Needs attention'));
   assert(rows('out_candidates').length===3 && [...document.querySelectorAll('#notebook .tests')].some(node=>node.textContent.includes('1 failed, 1 passed')),'Failed boundary test hid independent results or stayed green');
   replace(checkEditor,checkSource);await run();
-  const manifest=await fetch('/artifacts/manifest.json').then(response=>response.json()),source=await fetch('/demos/04-meeting-windows.roc').then(response=>response.text()),bytes=await fetch('/artifacts/roclet.wasm').then(response=>response.arrayBuffer());
+  const manifest=await fetch('/artifacts/manifest.json').then(response=>response.json()),source=await fetch('/demos/06-meeting-windows.roc').then(response=>response.text()),bytes=await fetch('/artifacts/roclet.wasm').then(response=>response.arrayBuffer());
   const module=path=>JSON.stringify(new URL(path,location.href).href);
   const code=`import{createWasmTransport}from ${module('/compiler-adapter/wasm.mjs')};import{BuildCache,compilerNamespace}from ${module('/web/build-cache.mjs')};import{BrowserPackages}from ${module('/web/packages.mjs')};onmessage=async({data})=>{try{const raw=await createWasmTransport(data.bytes),ns=await compilerNamespace(data.bytes,raw.cacheIdentity());if(!raw.importCache(await new BuildCache(ns).load()))throw Error('Invalid compiler cache');const packages=new BrowserPackages(new BuildCache(ns+':packages'),{fetch:async()=>{throw Error('Package networking disabled');}});postMessage({result:await packages.evaluate(raw,data.request)});}catch(error){postMessage({error:error.stack});}};`;
   const blob=URL.createObjectURL(new Blob([code],{type:'text/javascript'})),worker=new Worker(blob,{type:'module'});let offline;
