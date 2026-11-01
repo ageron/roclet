@@ -32,6 +32,48 @@ remain available, including in browsers without direct file access.
 Roc files are saved as runnable apps, so resolve compilation errors before
 saving them, or switch to Markdown to save unfinished work.
 
+## Work with a local project
+
+Build Roclet with `zig build`, then run:
+
+```sh
+./zig-out/bin/roclet serve                         # Current directory
+./zig-out/bin/roclet serve ~/projects/my-project   # Another directory
+./zig-out/bin/roclet serve ~/notes/example.roc     # Open a notebook
+```
+
+In a downloaded `roclet.zip` distribution, use `./roclet` instead. Keep the
+executable and web assets together. No Node.js or Python is needed.
+
+The command opens your browser and serves only on `127.0.0.1`. The home page
+lists project notebooks; **File → Open file** selects another. **Save** writes
+to the original file, and **Save as** chooses a relative path within the project.
+New notebooks ask for a filename on their first save. Parent directories must
+already exist. Starting with a file uses its parent directory as the project.
+
+File associations survive reloads in local mode. Browser autosave remains a
+recovery copy, including unsaved edits. Changes made by another editor are
+checked when you return to Roclet; clean notebooks reload, while unsaved edits
+are preserved and conflicting saves are refused. Files are replaced atomically.
+
+Local modules and text imports are read from the notebook's directory and its
+subdirectories before each compiler request. Edit those files with your usual
+editor, then run the notebook again. Hidden files, symlinks, `node_modules`,
+`zig-out`, and `zig-pkg` are excluded. The existing limit of 256 supporting text
+files and 16 MiB applies; choose a focused project directory. The root
+`Main.roc`/`main.roc` name remains reserved for the generated notebook module.
+
+GitHub release packages download automatically through the local server and
+are verified against their Roc hashes. With `HOME` set, they are cached in
+`~/.cache/roclet/packages` for reuse across server restarts and offline sessions.
+Compilation and execution still happen in browser WASM. The static website
+continues to work independently without a server.
+
+Use `--port 4174` to choose a different port or `--no-browser` to print the URL
+without opening it. `--assets /path/to/roclet` selects a web distribution when
+it is not next to the executable. Keep the same port to reuse browser recovery
+storage. Stop the server with Ctrl-C.
+
 ## Work offline
 
 1. While connected, choose **File → Offline & storage → Prepare for offline use**.

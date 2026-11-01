@@ -47,7 +47,7 @@ fn archive(gpa: std.mem.Allocator, files: []const File) ![]const u8 {
         std.mem.writeInt(u32, entry[20..24], @intCast(file.data.len), .little);
         std.mem.writeInt(u32, entry[24..28], @intCast(file.data.len), .little);
         std.mem.writeInt(u16, entry[28..30], @intCast(file.path.len), .little);
-        const executable = std.mem.eql(u8, file.path, "roclet") or std.mem.eql(u8, file.path, "roclet-serve");
+        const executable = std.mem.eql(u8, file.path, "roclet") or std.mem.eql(u8, file.path, "roclet-serve") or std.mem.eql(u8, file.path, "roclet-native");
         std.mem.writeInt(u32, entry[38..42], @as(u32, if (executable) 0o100755 else 0o100644) << 16, .little);
         std.mem.writeInt(u32, entry[42..46], @intCast(offset), .little);
         try directory.writer.writeAll(&entry);
@@ -86,6 +86,7 @@ pub fn main(init: std.process.Init) !void {
         "web/edit.html",
         "web/edit.mjs",
         "web/local-files.mjs",
+        "web/server-project.mjs",
         "web/notebook-panel.mjs",
         "web/workbench.mjs",
         "web/edit-model.mjs",
@@ -165,7 +166,7 @@ pub fn main(init: std.process.Init) !void {
     try files.append(a, .{ .path = "web/offline-release.json", .data = release });
     try files.append(a, .{ .path = "web/offline-worker.mjs", .data = worker });
     if (args.len == 3 and std.mem.eql(u8, args[2], "package")) {
-        const instructions = "Roclet offline distribution\n\nServe this directory over HTTPS or localhost. With the included host-platform server:\n  ./roclet-serve . 4173\nThen open http://127.0.0.1:4173/web/edit.html\nChoose File > Offline & storage > Prepare for offline use before disconnecting.\nNo Node, npm, Python, external CDN or account is required.\n\nHeadless runner (host platform): ./roclet run notebook.roc (or notebook.md).\nJSON stdout uses the same core and evaluation contract as the browser. Exit 1 means diagnostics/failure; 0 means success. Bound execution time in your job supervisor for untrusted/nonterminating programs. Imports remain limited to the pinned adapter capabilities.\nThe native binary is specific to the platform in artifacts/manifest.json.\n\nRoclet is licensed under UPL-1.0. See LICENSE and THIRD_PARTY_NOTICES.md. See docs/installation.md for setup and demos/README.md for examples. Only Chrome has been tested.\n";
+        const instructions = "Roclet offline distribution\n\nLocal projects: ./roclet serve [DIRECTORY|NOTEBOOK.roc|NOTEBOOK.md]\nOpens your browser; Save writes to disk and packages download automatically.\nUse --port PORT or --no-browser if needed. Keep the distribution files together.\n\nServe this directory over HTTPS or localhost. With the included host-platform server:\n  ./roclet-serve . 4173\nThen open http://127.0.0.1:4173/web/edit.html\nChoose File > Offline & storage > Prepare for offline use before disconnecting.\nNo Node, npm, Python, external CDN or account is required.\n\nHeadless runner (host platform): ./roclet run notebook.roc (or notebook.md).\nJSON stdout uses the same core and evaluation contract as the browser. Exit 1 means diagnostics/failure; 0 means success. Bound execution time in your job supervisor for untrusted/nonterminating programs. Imports remain limited to the pinned adapter capabilities.\nThe native binary is specific to the platform in artifacts/manifest.json.\n\nRoclet is licensed under UPL-1.0. See LICENSE and THIRD_PARTY_NOTICES.md. See docs/installation.md for setup and demos/README.md for examples. Only Chrome has been tested.\n";
         try files.append(a, .{ .path = "README.txt", .data = instructions });
         try files.append(a, .{ .path = "roclet-serve", .data = try read(a, io, root, "zig-out/bin/roclet-serve") });
         for ([_][]const u8{ "docs/installation.md", "demos/README.md" }) |path| try files.append(a, .{ .path = path, .data = try read(a, io, root, path) });
@@ -173,6 +174,8 @@ pub fn main(init: std.process.Init) !void {
         for (files.items) |file| if (!std.mem.eql(u8, file.path, "roclet-serve")) try site.append(a, file);
         try site.append(a, .{ .path = ".nojekyll", .data = "" });
         try write(a, io, root, "zig-out/roclet-pages.zip", try archive(a, site.items));
+        try files.append(a, .{ .path = "roclet", .data = try read(a, io, root, "zig-out/bin/roclet") });
+        try files.append(a, .{ .path = "roclet-native", .data = try read(a, io, root, "artifacts/roclet-native") });
         const distribution = try archive(a, files.items);
         try write(a, io, root, "zig-out/roclet.zip", distribution);
         var runner: std.ArrayList(File) = .empty;

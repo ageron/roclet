@@ -1,7 +1,8 @@
 //! Small local static server for the browser host and conformance page.
 const std = @import("std");
 const proxy = @import("package-proxy.zig");
-const Context = struct { root: []const u8, cache: proxy.Cache = .{}, proxy_only: bool = false };
+const local = @import("local-project.zig");
+const Context = struct { root: []const u8, cache: proxy.Cache = .{}, proxy_only: bool = false, project: ?local.Project = null, disk_cache: ?[]const u8 = null };
 fn assetPath(gpa: std.mem.Allocator, target: []const u8) ![]u8 {
     const end = std.mem.findScalar(u8, target, '?') orelse target.len;
     const encoded = target[0..end];
@@ -68,6 +69,10 @@ fn serveOne(io: std.Io, context: *Context, stream: std.Io.net.Stream) !void {
     var writer = stream.writer(io, &write_buffer);
     var server = std.http.Server.init(&reader.interface, &writer.interface);
     var request = try server.receiveHead();
+    if (context.project) |*project| {
+        if (!try local.trusted(&request, project, gpa)) return request.respond("Forbidden", .{ .status = .forbidden, .keep_alive = false });
+        if (std.mem.startsWith(u8, request.head.target, "/api/local/")) return local.handle(&request, project, io, gpa);
+    }
     if (std.mem.startsWith(u8, request.head.target, proxy.prefix)) {
         if (request.head.method == .OPTIONS) return packageResponse(&request, .no_content, "", "none");
         if (request.head.method != .GET and request.head.method != .HEAD) return packageResponse(&request, .method_not_allowed, "Use GET or HEAD", "none");
@@ -78,8 +83,20 @@ fn serveOne(io: std.Io, context: *Context, stream: std.Io.net.Stream) !void {
         }
         defer _ = context.cache.active.fetchSub(1, .acq_rel);
         if (try context.cache.get(gpa, io, package.hash)) |bytes| return packageResponse(&request, .ok, bytes, "hit");
+        const cache_file = if (context.disk_cache) |path| try std.fs.path.join(gpa, &.{ path, &std.fmt.bytesToHex(package.hash, .lower) }) else null;
+        if (cache_file) |path| {
+            if (std.Io.Dir.cwd().readFileAlloc(io, path, gpa, .limited(proxy.limit))) |cached| {
+                if (proxy.verify(cached, package.hash)) |_| return packageResponse(&request, .ok, cached, "disk") else |_| {}
+            } else |_| {}
+        }
         const bytes = proxy.download(gpa, io, package) catch |err| return packageResponse(&request, .bad_gateway, try std.fmt.allocPrint(gpa, "Package download failed: {s}", .{@errorName(err)}), "none");
         try context.cache.put(io, package.hash, bytes);
+        if (cache_file) |path| {
+            var atomic = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true, .make_path = true });
+            defer atomic.deinit(io);
+            try atomic.file.writeStreamingAll(io, bytes);
+            try atomic.replace(io);
+        }
         return packageResponse(&request, .ok, bytes, "miss");
     }
     if (context.proxy_only) return request.respond("Not found", .{ .status = .not_found, .keep_alive = false });
@@ -119,20 +136,87 @@ pub fn main(init: std.process.Init) !void {
         } else return error.UnknownOption;
     }
     if (port == 0) return error.InvalidPort;
+    try listen(init, &context, bind, port, false);
+}
+fn listen(init: std.process.Init, context: *Context, bind: []const u8, port: u16, browser: bool) !void {
     const address = try std.Io.net.IpAddress.parse(bind, port);
     var server = try address.listen(init.io, .{ .reuse_address = true });
     defer server.deinit(init.io);
     var group: std.Io.Group = .init;
     defer group.cancel(init.io);
-    std.debug.print("Roclet: http://{s}:{d}/{s}\n", .{ bind, port, if (context.proxy_only) "api/packages/" else "web/edit.html" });
+    const url = try std.fmt.allocPrint(init.arena.allocator(), "http://{s}:{d}/", .{ bind, port });
+    std.debug.print("Roclet: {s}\n", .{url});
+    if (context.project) |project| std.debug.print("Project: {s}\nPress Ctrl-C to stop.\n", .{project.root});
+    if (browser) {
+        const command: []const []const u8 = switch (@import("builtin").os.tag) {
+            .macos => &.{ "open", url },
+            .windows => &.{ "cmd", "/c", "start", "", url },
+            else => &.{ "xdg-open", url },
+        };
+        if (std.process.spawn(init.io, .{ .argv = command, .stdout = .ignore, .stderr = .ignore })) |child_value| {
+            var child = child_value;
+            _ = child.wait(init.io) catch {};
+        } else |_| std.debug.print("Open the URL above in your browser.\n", .{});
+    }
     while (true) {
         const stream = try server.accept(init.io);
-        group.concurrent(init.io, handle, .{ init.io, &context, stream }) catch |err| {
+        group.concurrent(init.io, handle, .{ init.io, context, stream }) catch |err| {
             stream.close(init.io);
             return err;
         };
     }
 }
+pub fn serveProject(init: std.process.Init, args: []const []const u8) !void {
+    const a = init.arena.allocator();
+    const io = init.io;
+    var target: []const u8 = ".";
+    var selected = false;
+    var port: u16 = 4173;
+    var browser = true;
+    var assets: ?[]const u8 = null;
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        if (std.mem.eql(u8, args[i], "--no-browser")) {
+            browser = false;
+        } else if (std.mem.eql(u8, args[i], "--port") or std.mem.eql(u8, args[i], "--assets")) {
+            const option = args[i];
+            i += 1;
+            if (i == args.len) return error.MissingOptionValue;
+            if (std.mem.eql(u8, option, "--port")) port = try std.fmt.parseInt(u16, args[i], 10) else assets = args[i];
+        } else if (!selected and !std.mem.startsWith(u8, args[i], "--")) {
+            target = args[i];
+            selected = true;
+        } else return error.UnknownOption;
+    }
+    if (port == 0) return error.InvalidPort;
+    const actual = try std.Io.Dir.cwd().realPathFileAlloc(io, target, a);
+    const stat = try std.Io.Dir.cwd().statFile(io, actual, .{});
+    if (stat.kind != .directory and !(stat.kind == .file and (std.mem.endsWith(u8, actual, ".roc") or std.mem.endsWith(u8, actual, ".md")))) return error.ExpectedDirectoryOrNotebook;
+    const project_root = if (stat.kind == .directory) actual else std.fs.path.dirname(actual).?;
+    const exe_dir = try std.process.executableDirPathAlloc(io, a);
+    var asset_root = assets orelse exe_dir;
+    if (assets == null) {
+        const index = try std.fs.path.join(a, &.{ asset_root, "web/edit.html" });
+        std.Io.Dir.cwd().access(io, index, .{}) catch {
+            asset_root = try std.fs.path.resolve(a, &.{ exe_dir, "../.." });
+        };
+    }
+    asset_root = try std.Io.Dir.cwd().realPathFileAlloc(io, asset_root, a);
+    try std.Io.Dir.cwd().access(io, try std.fs.path.join(a, &.{ asset_root, "web/edit.html" }), .{});
+    var random: [32]u8 = undefined;
+    try io.randomSecure(&random);
+    var context: Context = .{ .root = asset_root, .project = .{
+        .root = project_root,
+        .token = try a.dupe(u8, &std.fmt.bytesToHex(random, .lower)),
+        .host = try std.fmt.allocPrint(a, "127.0.0.1:{d}", .{port}),
+        .initial = if (stat.kind == .file) std.fs.path.basename(actual) else null,
+    } };
+    // Separate from the project and web assets; survives server/browser restarts.
+    if (init.environ_map.get("HOME")) |home| context.disk_cache = try std.fs.path.join(a, &.{ home, ".cache", "roclet", "packages" });
+    defer context.cache.deinit();
+    try listen(init, &context, "127.0.0.1", port, browser);
+}
+
 test "static asset paths reject traversal, hidden files, and malformed escapes" {
     const gpa = std.testing.allocator;
     for ([_][]const u8{ "/../compiler.lock.json", "/web/%2e%2e/.toolchain/x", "/web/%00x", "/web/%xy", "/web/%5csecret", "/.git/config", "/tools/build-tool.zig", "/web//x" }) |target| {

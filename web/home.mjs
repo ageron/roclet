@@ -1,3 +1,4 @@
+import {serverProjectReady} from './server-project.mjs';
 import {DraftStore} from './edit-store.mjs';
 const store = new DraftStore();
 const status = document.getElementById('recent-status');
@@ -33,3 +34,25 @@ more.onclick = () => { expanded = !expanded; void refresh(); };
 addEventListener('pageshow', () => void refresh());
 addEventListener('focus', () => void refresh());
 void refresh();
+
+// Local projects retain the same homepage and demos, with disk notebooks first.
+const project=await serverProjectReady;
+if(project) {
+  if(project.config.initial && !new URL(location.href).searchParams.has('home')) {
+    location.replace(`web/edit.html?file=${encodeURIComponent(project.config.initial)}`);
+  } else {
+    const section=document.createElement('section');
+    const heading=document.createElement('h2');heading.textContent='Project notebooks';
+    const root=document.createElement('p');root.textContent=project.config.root;
+    const entries=document.createElement('ul');entries.className='recent-list';
+    section.append(heading,root,entries);document.querySelector('.workspace').before(section);
+    try {
+      const {paths}=await project.call('list');
+      for(const path of paths.sort()) {
+        const item=document.createElement('li'),link=document.createElement('a');
+        link.href=`web/edit.html?file=${encodeURIComponent(path)}`;link.textContent=path;item.append(link);entries.append(item);
+      }
+      if(!paths.length){const empty=document.createElement('p');empty.textContent='No notebooks here yet. Create one above and use Save to choose its filename.';section.append(empty);}
+    }catch(error){root.textContent=error.message;}
+  }
+}

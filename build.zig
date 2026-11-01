@@ -47,10 +47,20 @@ pub fn build(b: *std.Build) void {
     publish.has_side_effects = true;
     const ready = &publish.step;
     b.step("adapter", "Build native and browser compiler workspace engines").dependOn(ready);
+    const launcher = b.addExecutable(.{ .name = "roclet", .root_module = b.createModule(.{
+        .root_source_file = b.path("tools/cli.zig"),
+        .target = host,
+        .optimize = .small,
+    }) });
+    const launcher_install = b.addInstallArtifact(launcher, .{});
+    b.getInstallStep().dependOn(&launcher_install.step);
+    const local_server = b.step("local-server", "Build the local project launcher and static server");
+    local_server.dependOn(&launcher_install.step);
     const cli = if (cached_engines != null)
-        &b.addInstallBinFile(native_bin, "roclet").step
+        &b.addInstallBinFile(native_bin, "roclet-native").step
     else
-        &b.addInstallArtifact(native, .{ .dest_sub_path = "roclet" }).step;
+        &b.addInstallArtifact(native, .{}).step;
+    cli.dependOn(&launcher_install.step);
     b.getInstallStep().dependOn(cli);
     const run = if (cached_engines != null) blk: {
         const cached_run = std.Build.Step.Run.create(b, "run cached native engine");
@@ -66,6 +76,7 @@ pub fn build(b: *std.Build) void {
         .optimize = .small,
     }) });
     b.installArtifact(server);
+    local_server.dependOn(&b.addInstallArtifact(server, .{}).step);
     const serve = b.addRunArtifact(server);
     serve.addArg(root);
     serve.addPassthruArgs();
@@ -109,7 +120,7 @@ pub fn build(b: *std.Build) void {
     fixture_run.has_side_effects = true;
     b.step("package-fixture", "Write a verified local package for browser integration tests").dependOn(&fixture_run.step);
     const unit_step = b.step("test-unit", "Test the document layer and host utilities");
-    inline for (.{ "tools/build-tool.zig", "tools/serve.zig", "tools/package-proxy.zig" }) |file| {
+    inline for (.{ "tools/build-tool.zig", "tools/serve.zig", "tools/package-proxy.zig", "tools/local-project.zig" }) |file| {
         const tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path(file), .target = host }) });
         unit_step.dependOn(&b.addRunArtifact(tests).step);
     }

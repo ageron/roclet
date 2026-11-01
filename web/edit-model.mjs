@@ -1,3 +1,4 @@
+import {serverProject} from './server-project.mjs';
 import {inputValues, inputModule} from './input-values.mjs';
 import { DocumentSession } from './document-session.mjs';
 import { renameEdits } from './compiler-tools.mjs';
@@ -21,6 +22,7 @@ export function newDraft(title = 'Untitled', demo = false) {
 export function independentCopy(record) {
   const copy = clone(record);
   delete copy._storageVersion;
+  delete copy.serverFile;
   return { ...copy, id: key(), title: `${(record.title || 'Untitled').slice(0, 113)} (copy)`, cells: copy.cells.map(cell => ({ ...cell, key: key() })), revision: 1, updatedAt: Date.now() };
 }
 // The draft that opening a Roc or Markdown file creates; it starts in source
@@ -191,8 +193,17 @@ export class Notebook {
     if (result.graph) this.lastChecked = result;
     return result;
   }
-  async request(request,{onPackageWaiting}={}) {
+  async request(request,{onPackageWaiting,localFile=this.state?.serverFile}={}) {
     const runId=this.runId;
+    const state=this.state;
+    if(serverProject && localFile?.project===serverProject.config.root) {
+      const files=await serverProject.files({serverFile:localFile});
+      if(this.state!==state || this.runId!==runId)throw new DOMException('Notebook changed','AbortError');
+      const checked=projectFiles(files),changed=JSON.stringify(state.files)!==JSON.stringify(checked);
+      state.files=checked;
+      if(changed){this.result=null;void this.persist();}
+      request.files=state.files.map(file=>({...file,path:`/workspace/${file.path}`}));
+    }
     if (request.reactivity) { this.baselineId = this.state.id; this.resetBaseline = false; }
     try {
       return await this.session.request(request,{loadPackage:this.loadPackage,onPackageWaiting:waiting=>{
@@ -262,7 +273,7 @@ export class Notebook {
     this.invalidate(); this.session.stop(); this.state.autoRun = false; this.status = message; this.emit(); void this.persist();
   }
   setAuto(value) { this.state.autoRun = value; void this.persist(); if (value) this.schedule(); else { clearTimeout(this.timer); this.timer = null; } this.emit(); }
-  async inspect(action = 'parse', target = this.state.format, { draft = false } = {}) {
+  async inspect(action = 'parse', target = this.state.format, { draft = false, localFile = this.state?.serverFile } = {}) {
     clearTimeout(this.timer); this.timer = null;
     const revision = this.state.revision, id = this.state.id, token = ++this.runId;
     this.activeOperation = token;
@@ -271,7 +282,7 @@ export class Notebook {
     // Structural edits need spans for the editable cells, not imported source
     // that may still contain markers or saved-output comments.
     try {
-      const result = await this.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target));
+      const result = await this.request(action === 'analyze' && !draft ? this.reactiveRequest(action) : requestFor(draft ? {...this.state, sourceCurrent:false} : this.state, action, target),{localFile});
       if (token !== this.runId || revision !== this.state.revision || id !== this.state.id) throw new DOMException('Document changed', 'AbortError');
       if (!result.model) throw new Error(result.failure ?? 'The document engine could not read this draft.');
       this.status = result.status === 'ok' ? (this.result?.evaluation?.status === 'ok' && Array.isArray(this.result.evaluation.values) ? 'Current' : 'Ready') : 'Needs attention'; this.emit();
@@ -306,7 +317,7 @@ export class Notebook {
     this.views.set(this.state.format, clone(this.state));
     const saved = this.views.get(format);
     if (saved) {
-      this.invalidate(); this.state = { ...clone(saved), revision: before.revision + 1, mode: before.mode, title: before.title, autoRun: before.autoRun };
+      this.invalidate(); this.state = { ...clone(saved), revision: before.revision + 1, mode: before.mode, title: before.title, autoRun: before.autoRun, serverFile: before.serverFile };
     } else {
       const result = await this.inspect('view', format);
       if (result.status !== 'ok') { this.result = result; this.status = 'Fix diagnostics before switching format'; this.emit('result'); return; }
@@ -320,13 +331,14 @@ export class Notebook {
     const from = redo ? this.future : this.history, to = redo ? this.history : this.future;
     if (!from.length) return;
     if (editing) this.diagnosticsDeferred = true;
-    const revision = this.state.revision + 1; to.push(clone(this.state)); this.invalidate();
-    this.state = { ...from.pop(), revision }; this.group = null; this.views.clear();
+    const revision = this.state.revision + 1, serverFile = this.state.serverFile; to.push(clone(this.state)); this.invalidate();
+    // Saving to another path is not a document edit and must not be undone.
+    this.state = { ...from.pop(), revision, serverFile }; this.group = null; this.views.clear();
     this.emit('document'); void this.persist(); this.schedule();
   }
   async recoveryCopy() {
     this.diagnosticsDeferred = false;
-    this.invalidate();this.resetBaseline=true;this.state={...clone(this.state),id:key(),title:`${this.state.title.slice(0,100)} (recovery)`,revision:1};delete this.state._storageVersion;this.history=[];this.future=[];this.views.clear();this.emit("document");await this.persist();
+    this.invalidate();this.resetBaseline=true;this.state={...clone(this.state),id:key(),title:`${this.state.title.slice(0,100)} (recovery)`,revision:1};delete this.state._storageVersion;delete this.state.serverFile;this.history=[];this.future=[];this.views.clear();this.emit("document");await this.persist();
   }
   // Switching away from a draft that cannot be kept is refused with an
   // UnsavedError whose `discard` switches anyway, losing this tab's changes.

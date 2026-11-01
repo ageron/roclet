@@ -53,8 +53,13 @@ or switching away from it offers a download or to continue without saving. **Vie
 the last run's worker time, evaluated and reused results, and memory to each
 status bar.
 
-Drafts are saved in your browser. **Download copies of work you want to keep**:
-browser storage is separate from files on your computer.
+Drafts are saved in your browser. **Save** can write a local file, while
+**Download a copy** keeps a separate copy.
+
+For a local project, run `roclet serve ./my-project` (or pass a notebook path).
+Roclet opens in your browser, saves directly to disk, loads local modules, and
+downloads packages automatically. See the [local project guide](docs/installation.md#work-with-a-local-project)
+for building or running the downloaded distribution.
 
 ## Early days
 

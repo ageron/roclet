@@ -1,3 +1,4 @@
+import {serverProject,serverProjectReady} from './server-project.mjs';
 import { localFiles } from './local-files.mjs';
 import { prepareOffline, offlineStatus, storageStatus } from './offline.mjs';
 import { captureExport, exportBundle, importBundle, exportReport, exportSite, download, downloadName } from './sharing.mjs';
@@ -130,13 +131,25 @@ async function downloadCopy(target) {
   target.notice('Download requested for a separate copy. The original file is not updated.');
 }
 async function saveFile(target,as=false) {
-  if(!window.showSaveFilePicker)return downloadCopy(target);
+  if(!serverProject && !window.showSaveFilePicker)return downloadCopy(target);
   const state=target.notebook.state,extension=state.format==='roc'?'.roc':'.md';
-  const name=await localFiles.save(target.notebook,()=>window.showSaveFilePicker({
+  const name=await localFiles.save(target.notebook,()=>serverProject ? serverProject.pick({save:true,name:`${downloadName(state.title)}${extension}`}) : window.showSaveFilePicker({
     suggestedName:`${downloadName(state.title)}${extension}`,
     types:[{description:extension==='.roc'?'Roc notebook':'Markdown notebook',accept:{'text/plain':[extension]}}],
   }),{as});
   target.render('saved');target.notice(`Saved to ${name}. Browser autosave remains available for recovery.`);
+}
+async function openLocal(target,handle) {
+  if(handle.serverPath) {
+    const records=await target.notebook.store.list().catch(()=>[]);
+    const recovery=records.find(r=>r.serverFile?.project===handle.projectRoot && r.serverFile.path===handle.serverPath && r.revision!==r.serverFile.revision);
+    if(recovery) {
+      await target.notebook.replace(recovery);await target.notebook.mode('notebook');
+      target.notice('Recovered unsaved edits for this file. Save writes to disk; external changes are checked before saving.');
+      return;
+    }
+  }
+  await localFiles.open(target.notebook,handle);
 }
 function closePanel(slot) {
   const right = bench.right, target = bench.panel(slot);
@@ -185,15 +198,15 @@ function bind() {
     const focused = document.activeElement;
     if (focused === document.body || focused === $('recent') || $('recent-dialog').contains(focused)) $('document-menu').querySelector('summary').focus({preventScroll:true});
   };
-  $('open-local').hidden=!window.showOpenFilePicker;
-  $('save-as').hidden=!window.showSaveFilePicker;
+  $('open-local').hidden=!serverProject && !window.showOpenFilePicker;
+  $('save-as').hidden=!serverProject && !window.showSaveFilePicker;
   $('open-local').onclick=()=>{const target=active();return target.perform(async()=>{
-    const [handle]=await window.showOpenFilePicker({multiple:false,types:[{description:'Roclet notebook',accept:{'text/plain':['.roc','.md']}}]});
+    const [handle]=serverProject ? [await serverProject.pick()] : await window.showOpenFilePicker({multiple:false,types:[{description:'Roclet notebook',accept:{'text/plain':['.roc','.md']}}]});
     for(const panel of [bench.left,bench.right].filter(Boolean)) {
       const attached=panel.notebook.state && localFiles.get(panel.notebook.state);
       if(panel!==target && attached && await handle.isSameEntry(attached.handle))throw new Error('This file is already open in the other panel.');
     }
-    await localFiles.open(target.notebook,handle);target.render('saved');closeMenus();target.focusSelection();
+    await openLocal(target,handle);target.render('saved');closeMenus();target.focusSelection();
     target.notice('Editing a local file. Use Save to write changes back; browser autosave keeps a recovery copy.');
   });};
   $('save').onclick=()=>{const target=active();return target.perform(()=>saveFile(target));};
@@ -211,6 +224,9 @@ function bind() {
   };
   $('project-files').onclick=()=>{
     const target=active(), project=target.notebook;closeMenus();
+    if(serverProject && project.state.serverFile?.project===serverProject.config.root) {
+      target.notice('Local modules are read from disk before each run. Edit them with your text editor; no import is needed.');return;
+    }
     $('project-select').onchange=()=>showProjectFile(target,$('project-select').value);
     $('project-upload').onchange=()=>target.perform(async()=>{
       const additions=[];
@@ -274,7 +290,7 @@ function bind() {
     if (event.key === 'Escape' && menu) { event.preventDefault(); event.stopPropagation(); menu.open = false; menu.querySelector('summary').focus(); return; }
     if (!active().notebook.state) return;
     if (mod && key==='f') {event.preventDefault();event.stopPropagation();active().find();return;}
-    if (mod && key === 's') { event.preventDefault(); event.stopPropagation(); $(event.shiftKey && window.showSaveFilePicker ? 'save-as' : 'save').click(); return; }
+    if (mod && key === 's') { event.preventDefault(); event.stopPropagation(); $(event.shiftKey && (serverProject || window.showSaveFilePicker) ? 'save-as' : 'save').click(); return; }
     if (target !== document.body) return;
     if (mod && key === 'z') { event.preventDefault(); event.stopPropagation(); active().notebook.undo(event.shiftKey, { editing: !!editorFor(target) }); }
     else if (event.key === '?' && !mod) { event.preventDefault(); event.stopPropagation(); showHelp(); }
@@ -286,6 +302,7 @@ export async function startNotebook(drafts = new DraftStore()) {
 const template = $('notebook-panel-template'), root = clonePanel(template, '');
 root.dataset.panel = 'left'; root.id = 'left-panel'; $('workbench').append(root);
 try {
+  await serverProjectReady;
   const [binary, manifest] = await Promise.all([fetch('../artifacts/roclet.wasm').then(r => { if (!r.ok) throw new Error('Build the compiler adapter first.'); return r.arrayBuffer(); }), fetch('../artifacts/manifest.json').then(r => r.json())]);
   const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', binary))].map(v => v.toString(16).padStart(2,'0')).join('');
   if (hash !== manifest.artifacts['roclet.wasm'].sha256) throw new Error('Compiler artifact does not match its manifest. Rebuild or refresh Roclet.');
@@ -310,13 +327,35 @@ try {
   const panel = await bench.addPanel('left'), notebook = panel.notebook;
   // The left notebook stands for the page in existing tests: disposing it
   // disposes every panel and the shared highlighter.
-  notebook.dispose=()=>{highlighter.dispose();bench.dispose();};
+  let checkingDisk=false;
+  const checkDisk=async()=>{
+    if(!serverProject || checkingDisk || bench.holdScheduling)return;
+    checkingDisk=true;
+    try {for(const target of bench.panels) {
+      const state=target.notebook.state,binding=state && localFiles.get(state);
+      if(!binding?.handle.serverPath)continue;
+      const file=await binding.handle.getFile();
+      if(file.exists===false){target.notice('This file no longer exists on disk. Your browser draft is still available; use Save as.');continue;}
+      const disk=await file.text();
+      if(target.notebook.state!==state || disk===binding.source)continue;
+      if(state.revision===binding.revision) {
+        await localFiles.open(target.notebook,binding.handle);target.render('document');target.notice('Reloaded changes made on disk.');
+      } else target.notice('This file changed on disk. Your unsaved edits are preserved; use Save as to keep both versions.');
+    }}catch(error){bench.left.notice(error.message);}finally{checkingDisk=false;}
+  };
+  addEventListener('focus',checkDisk);
+  notebook.dispose=()=>{removeEventListener('focus',checkDisk);highlighter.dispose();bench.dispose();};
   bind();
   const layout = parseLayout(location.href);
   const launch = new URL(location.href);
   const id = launch.searchParams.get('notebook'), fresh = launch.searchParams.get('new') === '1';
   await notebook.initialize({id, fresh});
   if (id || fresh) {launch.searchParams.delete('notebook');launch.searchParams.delete('new');history.replaceState(null,'',launch.pathname+launch.search+launch.hash);}
+  const localPath=launch.searchParams.get('file');
+  if(serverProject && localPath) {
+    await openLocal(panel,serverProject.handle(localPath));
+    const url=new URL(location.href);url.searchParams.delete('file');history.replaceState(null,'',url.pathname+url.search+url.hash);
+  }
   const example=new URL(location.href).searchParams.get('example');
   if (example) {
     clearTimeout(notebook.timer);
@@ -346,6 +385,7 @@ try {
   document.documentElement.dataset.startup = 'ready';
   document.documentElement.dataset.ready = 'true';
   bench.holdScheduling = false;
+  await checkDisk();
   for (const target of bench.panels) target.notebook.resumeScheduling();
   return notebook;
 } catch (error) {

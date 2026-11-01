@@ -95,11 +95,15 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Run JavaScript unit and workspace tests
-        run: node --test tests/*.test.mjs
+        run: |
+          zig build local-server
+          node --test tests/*.test.mjs
       - name: Package the verified site
         run: zig build package $ROCLET_BUILD_FLAGS -Dcached-engines=.engine-cache --summary all
       - name: Run Chrome conformance tests
-        run: node tools/test-browser.mjs
+        run: |
+          node tools/test-browser.mjs
+          node tools/test-local-project.mjs
       - name: Save compiler build cache
         if: ${{ always() && !cancelled() && steps.compiler-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4

@@ -12,11 +12,13 @@ export function download(blob,name) {
   const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),5000);
 }
 export async function captureExport(notebook,compiler,{results=false,debug=false}={}) {
-  const state=structuredClone(notebook.state),current=structuredClone(notebook.result);
+  const state=structuredClone(notebook.state);
+  let current=structuredClone(notebook.result);
   const parsed=await notebook.inspect('export');
+  if(JSON.stringify(state.files)!==JSON.stringify(notebook.state.files))current=null;
   if(state.format==='roc' && parsed.status!=='ok') throw new Error('Fix the errors before exporting runnable Roc, or switch to Markdown to save unfinished source.');
   const document={schema:1,title:state.title,format:state.format,preamble:state.preamble??'',metadata:state.metadata??'',source:state.sourceCurrent?state.source:'',sourceCurrent:!!state.sourceCurrent,mode:state.mode,
-    inputValues:inputValues(state.inputValues),files:projectFiles(state.files),
+    inputValues:inputValues(state.inputValues),files:projectFiles(notebook.state.files),
     cells:(state.sourceCurrent?(parsed.draft?.cells??parsed.model.cells):state.cells).map(({kind,source,attributes,outputs})=>({kind,source,attributes:attributes??'',outputs:outputs??[]}))};
   const snapshots=results && ['ok','partial'].includes(current?.status) ? (current.evaluation?.values??[]).map(v=>({cell:current.model.cells.findIndex(c=>c.output===v.root),root:v.root,text:v.text,...(v.display?{display:normalizeDisplay(v.display)}:{})})) : [];
   const events=debug ? (current?.evaluation?.events??[]).map(({cell,root,kind,message})=>({cell,root,kind,message})) : [];

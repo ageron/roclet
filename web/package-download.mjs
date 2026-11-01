@@ -1,3 +1,4 @@
+import {serverProjectReady} from './server-project.mjs';
 // Site configuration selects transport; compiler identities remain original URLs.
 export function githubPackagePath(source) {
   const match=/^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/releases\/download\/([A-Za-z0-9_.+-]+)\/([A-Za-z0-9_.+-]+\.tar\.zst)$/.exec(source);
@@ -9,7 +10,8 @@ export async function configuredPackageFetch({fetch=globalThis.fetch.bind(global
   if(!response.ok)throw new Error(`Cannot load package download configuration: HTTP ${response.status}`);
   const config=await response.json();
   if(config.endpoint!==null && typeof config.endpoint!=='string')throw new Error('Package endpoint must be a URL or null');
-  const endpoint=config.endpoint===null?null:new URL(config.endpoint,configUrl);
+  const local=await serverProjectReady;
+  const endpoint=local?new URL('/api/packages/',configUrl):config.endpoint===null?null:new URL(config.endpoint,configUrl);
   if(endpoint && (endpoint.username || endpoint.password || endpoint.search || endpoint.hash || !endpoint.pathname.endsWith('/') || !(endpoint.protocol==='https:' || (endpoint.protocol==='http:' && ['localhost','127.0.0.1','[::1]'].includes(endpoint.hostname)))))throw new Error('Package endpoint requires HTTPS (or localhost HTTP) and a trailing slash');
   return (url,options)=>{
     const path=githubPackagePath(url);

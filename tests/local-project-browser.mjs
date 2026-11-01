@@ -1,0 +1,67 @@
+(async()=>{
+  const assert=(condition,message)=>{if(!condition)throw new Error(message);};
+  const pause=ms=>new Promise(r=>setTimeout(r,ms));
+  const until=async(fn,label)=>{for(let i=0;i<800;i++){if(await fn())return;await pause(25);}throw new Error('Timed out: '+label);};
+  const {serverProjectReady}=await import('/web/server-project.mjs'),project=await serverProjectReady;
+  assert(project,'Local server detected');
+  const frame=document.createElement('iframe');frame.style.cssText='width:100%;height:800px';document.body.replaceChildren(frame);
+  let win,n,files;
+  const load=async(url)=>{
+    frame.src=url;await new Promise(r=>frame.onload=r);
+    await until(()=>frame.contentDocument.documentElement.dataset.startup==='ready','editor startup: '+frame.contentDocument.body.innerText);
+    win=frame.contentWindow;
+    n=(await win.eval("import('./edit.mjs')")).workbench().left.notebook;
+    files=(await win.eval("import('./local-files.mjs')")).localFiles;
+    n.setAuto(false);
+  };
+  await load('/web/edit.html?file=Notebook.roc');
+  assert(n.state.serverFile.path==='Notebook.roc','File identity');
+  await n.run();assert(n.result?.evaluation?.values?.[0]?.text==='42.0','Local imported module: '+JSON.stringify(n.result));
+  const helper=(await project.call('read','Helper.roc')).source;
+  await project.call('write','Helper.roc',{source:helper.replace('42','43'),expected:helper});
+  await n.run();assert(n.result?.evaluation?.values?.[0]?.text==='43.0','Imported module reread from disk');
+  n.editCell(0,'import Helper\nout_1 = Helper.answer + 1');
+  await files.save(n,()=>{throw new Error('Unexpected picker');});
+  assert((await project.call('read','Notebook.roc')).source.includes('main! ='),'Saved runnable generated main');
+  assert(files.status(n.state).startsWith('Saved to'),'Disk saved status: '+JSON.stringify({status:files.status(n.state),revision:n.state.revision,binding:files.get(n.state)}));
+  await load('/web/edit.html?file=Notebook.roc');
+  assert(files.get(n.state)?.handle.serverPath==='Notebook.roc','File association survives reload');
+  n.editCell(0,'import Helper\nout_1 = Helper.answer + 2');await n.persist();const recoveryId=n.state.id;
+  await load('/web/edit.html?file=Notebook.roc');
+  assert(n.state.id===recoveryId && n.state.cells[0].source.includes('+ 2'),'Unsaved recovery survives reload');
+  const disk=(await project.call('read','Notebook.roc')).source;
+  await project.call('write','Notebook.roc',{source:disk+'\n# external\n',expected:disk});
+  let conflict=false;try{await files.save(n,()=>null);}catch(error){conflict=/changed outside/.test(error.message);}
+  assert(conflict,'External edit is preserved');
+  assert((await project.call('read','Notebook.roc')).source.endsWith('# external\n'),'Conflict did not overwrite disk');
+  n.editCell(0,'import Helper\nout_1 = Helper.answer + 3');
+  await files.save(n,async()=>project.handle('Copy.roc'),{as:true});
+  n.undo(false);
+  assert(n.state.serverFile.path==='Copy.roc','Undo preserves Save as association');
+  await files.save(n,()=>null);
+  assert(n.state.serverFile.path==='Copy.roc','Save as rebinds file');
+  assert((await project.call('read','Copy.roc')).source.includes('+ 2'),'Save as contains edits');
+  const {captureExport}=await win.eval("import('./sharing.mjs')");
+  const manifest=await (await fetch('/artifacts/manifest.json')).json();
+  const capture=await captureExport(n,manifest);
+  assert(capture.document.files.some(f=>f.path==='Helper.roc' && f.source.includes('43')),'Bundles include current disk modules');
+  await n.open('app [main!] {}\n\n# %%\nimport Helper\nout_1 = Helper.answer + 10\n','Fresh.roc');
+  await files.save(n,async()=>project.handle('Fresh.roc'));
+  assert((await project.call('read','Fresh.roc')).source.includes('main! ='),'New notebook validates with target-directory imports');
+  const clean=(await project.call('read','Fresh.roc')).source;
+  await project.call('write','Fresh.roc',{source:clean.replace('+ 10','+ 11'),expected:clean});
+  win.dispatchEvent(new win.Event('focus'));
+  await until(()=>n.state.source.includes('+ 11'),'clean notebook reloads external edits on focus');
+  assert(n.state.serverFile.path==='Fresh.roc','Reload keeps file identity');
+  // Test the actual local file menu and accessible picker, not just transport calls.
+  win.document.querySelector('#open-local').click();
+  await until(()=>win.document.querySelector('.local-project-dialog[open]'),'project picker');
+  const dialog=win.document.querySelector('.local-project-dialog');
+  assert(dialog.textContent.includes('Notebook.roc'),'Disk notebooks listed');
+  [...dialog.querySelectorAll('button')].find(b=>b.textContent==='Cancel').click();
+  const {configuredPackageFetch}=await win.eval("import('./package-download.mjs')");
+  const requests=[];const fetchPackage=await configuredPackageFetch({configUrl:new URL('/web/package-config.json',location.href),fetch:async(url)=>{requests.push(String(url));return {ok:true,json:async()=>({endpoint:null})};}});
+  await fetchPackage('https://github.com/test/test/releases/download/1/hash.tar.zst',{});
+  assert(requests.at(-1).includes('/api/packages/test/test/1/hash.tar.zst'),'Local package route selected automatically');
+  n.dispose();return {result:'pass',checks:'local module loading and refresh, runnable disk save, persistent binding, unsaved recovery, external conflict, Save as, file picker, package transport, bundle modules, new notebook imports and clean external reload'};
+})()
