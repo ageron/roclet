@@ -17,7 +17,7 @@
 <header><a class="wordmark" href="./" aria-label="Roclet home">Roclet</a><a class="repo" href="https://github.com/ageron/roclet">GitHub <span aria-hidden="true">↗</span></a></header>
 <main>
 <section class="hero" aria-labelledby="welcome">
-  <div class="intro"><h1 id="welcome">Reactive notebooks<br>in Roc</h1><p class="description">Write Roc code alongside notes, equations, and images. When you change a value, all dependent results update automatically.</p><p class="description">Notebooks can also be run as regular Roc apps or exported as Markdown documents.</p><a class="primary" href="web/edit.html?new=1"><span aria-hidden="true">＋</span> New notebook</a><p class="quiet">Runs in your browser, with no installation or account required.</p></div>
+  <div class="intro"><h1 id="welcome">Reactive notebooks<br>in Roc</h1><p class="description">Write Roc code alongside notes, equations, and images. When you change a value, all dependent results update automatically.</p><p class="description">Notebooks can also be run as regular Roc apps or exported as Markdown documents.</p><div class="home-actions"><a class="primary" href="web/edit.html?new=1"><span aria-hidden="true">＋</span> New notebook</a><button class="secondary" id="open-notebook" type="button">Open notebook…</button><input id="open-notebook-file" type="file" accept=".roc,.md,.roclet.zip,.zip" hidden></div><p id="open-status" class="quiet" role="status" hidden></p><p class="quiet">Runs in your browser, with no installation or account required.</p></div>
   <img class="hero-logo" src="web/assets/roclet-logo-large.png" width="640" height="640" alt="Roclet’s purple and turquoise origami hummingbird" fetchpriority="high">
 </section>
 <div class="workspace">
@@ -28,6 +28,7 @@
 <li><a href="web/edit.html?example=rich-outputs"><span class="demo-number" aria-hidden="true">03</span><span><strong>Rich Outputs and Widgets</strong><span class="detail">Create Markdown, tables, images, and widgets that communicate with Roc.</span></span><span class="arrow" aria-hidden="true">↗</span></a></li>
 <li><a href="web/edit.html?example=meeting-windows"><span class="demo-number" aria-hidden="true">04</span><span><strong>Meeting scheduler with roc-time</strong><span class="detail">Find a shared meeting time using a Roc date and time package.</span></span><span class="arrow" aria-hidden="true">↗</span></a></li>
 <li><a href="web/edit.html?example=plume-charts"><span class="demo-number" aria-hidden="true">05</span><span><strong>Interactive charts with Plume</strong><span class="detail">Plot a sine wave and change its amplitude with a slider.</span></span><span class="arrow" aria-hidden="true">↗</span></a></li>
+<li><a href="web/edit.html?example=csv-attachments"><span class="demo-number" aria-hidden="true">06</span><span><strong>A café sales report from CSV</strong><span class="detail">Inspect an attachment, decode it with roc-parser, and replace the data.</span></span><span class="arrow" aria-hidden="true">↗</span></a></li>
 </ul></section>
 </div>
 <section class="uses" aria-labelledby="uses-heading">
@@ -41,6 +42,7 @@
 </dl>
 </section>
 <section class="platforms" aria-labelledby="platforms-heading"><h2 id="platforms-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="8" y="3" width="8" height="6" rx="1"/><rect x="2" y="16" width="8" height="5" rx="1"/><rect x="14" y="16" width="8" height="5" rx="1"/><path d="M12 9v4M6 16v-3h12v3"/></svg>Planned platforms</h2><p>We plan to add Roclet platforms for specific uses, such as turtle graphics for teaching programming and tools for creating and testing web services. Each platform would provide the capabilities and interface that suit the task.</p></section>
+<section class="platforms" aria-labelledby="install-heading"><h2 id="install-heading">Prefer running your own server?</h2><p>Most people can use Roclet right here. For a local copy, download the optional server for macOS, Windows, or Linux.</p><a href="web/install.html">Install the Roclet server <span aria-hidden="true">→</span></a></section>
 </main>
 <footer><span>Built with <a href="https://www.roc-lang.org/">Roc</a>.</span><a href="https://github.com/ageron/roclet/issues">Report an issue <span aria-hidden="true">↗</span></a></footer>
 </div>

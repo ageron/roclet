@@ -9,9 +9,11 @@ export function fileChanges(previous,files) {
   const next=new Map(),put=[],drop=[];
   for(const file of files) {
     const path=workspacePath(file.path);
-    if(next.has(path) || typeof file.source!=='string') throw new Error('Invalid or duplicate workspace module');
-    next.set(path,file.source);
-    if(previous.get(path)!==file.source) put.push({path,source:file.source});
+    const binary=file.blob instanceof Blob && /^[a-f0-9]{64}$/.test(file.sha256);
+    if(next.has(path) || (!binary && typeof file.source!=='string')) throw new Error('Invalid or duplicate workspace file');
+    const identity=binary?`blob:${file.sha256}`:`text:${file.source}`;
+    next.set(path,identity);
+    if(previous.get(path)!==identity) put.push(binary?{path,blob:file.blob}:{path,source:file.source});
   }
   for(const path of previous.keys()) if(!next.has(path)) drop.push(path);
   return {next,patch:{put,drop}};
@@ -20,5 +22,5 @@ export function mountChanges(transport,patch) {
   if(!patch || (!patch.put.length && !patch.drop.length)) return;
   if(!transport.workspace) throw new Error('Rebuild the compiler adapter to enable workspace modules');
   for(const path of patch.drop) transport.dropFile(workspacePath(path));
-  for(const file of patch.put) transport.putFile(workspacePath(file.path),file.source);
+  for(const file of patch.put) transport.putFile(workspacePath(file.path),file.bytes??file.source);
 }

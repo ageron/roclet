@@ -42,7 +42,7 @@ Build Roclet with `zig build`, then run:
 ./zig-out/bin/roclet serve ~/notes/example.roc     # Open a notebook
 ```
 
-In a downloaded `roclet.zip` distribution, use `./roclet` instead. Keep the
+In a downloaded server distribution, use `./roclet` instead. Keep the
 executable and web assets together. No Node.js or Python is needed.
 
 The command opens your browser and serves only on `127.0.0.1`. The home page
@@ -74,6 +74,64 @@ without opening it. `--assets /path/to/roclet` selects a web distribution when
 it is not next to the executable. Keep the same port to reuse browser recovery
 storage. Stop the server with Ctrl-C.
 
+## Attach data files
+
+Choose **File → Attachments → Choose files…**, or drop files onto the attachment
+dialog. Roclet copies each file into the notebook; it does not upload the data or
+keep a live connection to the original file. Files initially use a path such as
+`data/measurements.csv`. Select a file to preview it, download its original bytes,
+or copy a Roc import:
+
+```roc
+import "data/measurements.csv" as csv_text : Str
+```
+
+`Str` imports require valid UTF-8. To read a binary file, or preserve any byte
+sequence without text decoding, choose **Raw bytes · List(U8)**:
+
+```roc
+import "data/sample.bin" as sample_bytes : List(U8)
+```
+
+The attachment store preserves every byte, including line endings and byte-order
+marks. CSV/JSON decoding is a separate Roc operation. The
+[CSV demo](https://ageron.github.io/roclet/web/edit.html?example=csv-attachments)
+uses roc-parser to decode column names and numeric types, handle quoted fields,
+and report invalid data. Its first run may need the existing package-download
+fallback; verified packages are cached for offline use.
+
+**Replace file…** changes the saved copy while keeping its path, even when the
+replacement has another filename. With Auto-run on, dependent calculations
+update. **Remove** deletes the attachment and imports of it then report a missing
+file. **Undo** restores replaced or removed files. **Update path** changes the
+relative path; update the corresponding import in your code as well. Paths may
+contain folders, spaces, and Unicode; absolute paths, `..`, duplicate paths,
+and paths already used by project sources are rejected.
+
+Undo history retains at most 64 MiB of distinct attachment contents, including
+the current files; older undo entries are discarded when necessary. Reimporting
+identical data shares its saved contents rather than retaining another copy.
+Closing the attachment dialog cancels a pending disk read without changing the
+notebook. The dialog can be reopened immediately, even if that read
+has not finished.
+
+Browser drafts retain attachments, including after reload. Each notebook supports
+up to 128 attachments totaling 16 MiB. These are Roclet's current limits, not
+general browser file-size limits. Previews show only the first 4 KiB of text or
+256 binary bytes; truncation never changes the saved file.
+
+Download a **Roclet bundle** to preserve the source and attachments together.
+Bundles store original file bytes, relative paths, media types, and checked
+content hashes. Import verifies them before opening an independent copy with
+Auto-run off. Bundles are limited to 40 MiB, including project sources and any
+selected result snapshots. Interactive sites also carry their notebook bundle.
+
+A `.roc` or `.md` source save/download does **not** include attachment bytes.
+To run source with ordinary Roc, provide the same files at the same relative
+paths. Static reports show captured outputs; use a bundle for editable data.
+Browser storage belongs to one origin/profile and can be cleared, so keep a
+downloaded bundle for work you want to preserve.
+
 ## Work offline
 
 1. While connected, choose **File → Offline & storage → Prepare for offline use**.
@@ -87,20 +145,12 @@ reopen to activate it.
 
 ## Run a downloaded release locally
 
-When a release provides `roclet.zip`, extract it and open a terminal in the
-extracted directory. The included server must match your operating system and
-architecture; native builds have been tested on Linux x86_64 and macOS Apple Silicon.
-
-```sh
-./roclet-serve . 4173
-```
-
-Open <http://127.0.0.1:4173/web/edit.html>. Leave the terminal running while
-using the app, or prepare offline use before stopping it. Don't double-click
-`edit.html`: the interactive app needs HTTPS or a localhost server.
-
-The browser files can also be served by another static web server. The bundled
-native executable is platform-specific; the browser app is WebAssembly.
+See the [server installation page](https://ageron.github.io/roclet/web/install.html)
+for macOS, Windows, and Linux downloads and PATH setup. Extract the archive for
+your computer, keep its files together, and run `./roclet serve` (`.\roclet.exe serve` in
+PowerShell). Open <http://127.0.0.1:4173/>; press Ctrl+C to stop the server.
+No Roc or Zig installation is needed. This server distribution is separate from
+the source-built headless runner described below.
 
 ## Build from source
 
@@ -329,3 +379,12 @@ service. Browser cache identities retain the original package URLs.
 
 Existing offline users can prepare the updated version through
 **File → Offline & storage**, then close all Roclet tabs and reopen.
+
+## Publish a server release
+
+Run **Release Roclet server** from GitHub Actions on `main`, specifying a version
+such as `0.1.0` and the run ID of a successful **Roclet CI** run for that exact
+commit. The workflow reuses that run's tested browser site, builds and smoke-tests
+the server on macOS (Apple Silicon and Intel), Linux (ARM64 and x64), and Windows
+(x64), then publishes all archives and `SHA256SUMS` together under `server-vVERSION`.
+It refuses a site from another commit or an unsuccessful CI run.

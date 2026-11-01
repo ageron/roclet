@@ -75,6 +75,8 @@ pub fn main(init: std.process.Init) !void {
     for ([_][]const u8{
         "index.html",
         "web/home.mjs",
+        "web/open-notebook.mjs",
+        "web/install.html",
         "web/notebook-search-worker.mjs",
         "web/home.css",
         "web/assets/roclet-logo-large.png",
@@ -87,6 +89,9 @@ pub fn main(init: std.process.Init) !void {
         "web/edit.mjs",
         "web/local-files.mjs",
         "web/server-project.mjs",
+
+        "web/attachments.mjs",
+        "web/attachment-dialog.mjs",
         "web/notebook-panel.mjs",
         "web/workbench.mjs",
         "web/edit-model.mjs",
@@ -114,6 +119,8 @@ pub fn main(init: std.process.Init) !void {
         "web/package-config.json",
         "demos/04-meeting-windows.roc",
         "demos/05-plume-charts.roc",
+        "demos/05-csv-attachments.roc",
+        "demos/data/cafe-sales.csv",
         "web/formats.mjs",
         "compiler-adapter/wasm.mjs",
         "artifacts/roclet.wasm",

@@ -12,11 +12,19 @@ Your changes stay in your browser; they don't modify the published example.
 
 You can also download any source file and open it with **File → Open** in a local
 or offline Roclet installation, or run it directly with `roc notebook.roc`.
+For the CSV example, keep `data/cafe-sales.csv` beside the notebook in its `data/`
+directory, or open the web demo to get the notebook and attachment together.
 Rich-output demos fetch the Display package automatically on the first ordinary
 Roc run; Roclet already includes it for offline use.
 
 For Markdown, tables, HTML, images, and interactive widgets,
 [open the Rich Outputs and Widgets demo](https://ageron.github.io/roclet/web/edit.html?example=rich-outputs).
+
+The [CSV attachments demo](05-csv-attachments.roc) decodes typed rows with
+roc-parser 2.0.0 and calculates revenue in exact cents.
+[Open demo](https://ageron.github.io/roclet/web/edit.html?example=csv-attachments)
+to get the notebook and its [sample data](data/cafe-sales.csv) together, then use
+**File → Attachments** to replace the CSV.
 
 These are small, editable examples, not screenshots. Keep experimenting, then
 use **Download a copy** to save your version. [Installation and offline use](../docs/installation.md).

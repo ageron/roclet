@@ -1,5 +1,15 @@
 // Semantic locations come exclusively from the checked compiler response.
 const bytes = new TextEncoder(), text = new TextDecoder();
+// An empirical branch warning describes the current sample input, not a
+// defect in a notebook's error handling. Keep the raw compiler response, but
+// omit this specific warning from reader-facing diagnostics and reports.
+export function isVisibleDiagnostic(diagnostic) {
+  const message=diagnostic.message??'';
+  const unusedBranch=diagnostic.title==='Unused Branch' || message.startsWith('**Unused Branch**\n');
+  return !(diagnostic.severity==='warning' && unusedBranch
+    && message.includes('was not taken during compile-time evaluation.')
+    && message.includes('This warning is empirical;'));
+}
 export function sourceRange(result, span) {
   if (!span) return null;
   const m = result.mappings?.find(m => m.generated_start <= span.start && span.end <= m.generated_end);

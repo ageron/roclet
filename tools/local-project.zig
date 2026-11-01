@@ -2,7 +2,6 @@
 const std = @import("std");
 const A = std.mem.Allocator;
 const Io = std.Io;
-const cwd = Io.Dir.cwd();
 pub const Project = struct {
     root: []const u8,
     token: []const u8,
@@ -43,7 +42,7 @@ fn reply(r: *std.http.Server.Request, a: A, status: std.http.Status, value: anyt
 // Walk each parent through a directory handle, never following symlinks.
 fn parent(io: Io, root: []const u8, path: []const u8) !Io.Dir {
     if (!validPath(path)) return error.InvalidPath;
-    var dir = try cwd.openDir(io, root, .{ .iterate = true });
+    var dir = try Io.Dir.cwd().openDir(io, root, .{ .iterate = true });
     errdefer dir.close(io);
     if (std.fs.path.dirname(path)) |parents| {
         var parts = std.mem.splitScalar(u8, parents, '/');
@@ -70,7 +69,7 @@ fn read(io: Io, a: A, dir: Io.Dir, name: []const u8) ![]const u8 {
     var buffer: [4096]u8 = undefined;
     var reader = file.reader(io, &buffer);
     const bytes = try reader.interface.allocRemaining(a, .limited(16 * 1024 * 1024));
-    if (!std.unicode.utf8ValidateSlice(bytes) or std.mem.indexOfScalar(u8, bytes, 0) != null) return error.NotTextFile;
+    if (!std.unicode.utf8ValidateSlice(bytes) or std.mem.findScalar(u8, bytes, 0) != null) return error.NotTextFile;
     return bytes;
 }
 const Source = struct { path: []const u8, source: []const u8 };
@@ -127,7 +126,7 @@ fn scan(io: Io, a: A, dir: Io.Dir, prefix: []const u8, excluded: []const u8, pat
 const Input = struct { action: []const u8, path: []const u8 = "", source: ?[]const u8 = null, expected: ?[]const u8 = null };
 fn execute(r: *std.http.Server.Request, p: *Project, io: Io, a: A, input: Input) !void {
     if (std.mem.eql(u8, input.action, "list")) {
-        var dir = try cwd.openDir(io, p.root, .{ .iterate = true });
+        var dir = try Io.Dir.cwd().openDir(io, p.root, .{ .iterate = true });
         defer dir.close(io);
         var paths: std.ArrayList([]const u8) = .empty;
         var total: usize = 0;

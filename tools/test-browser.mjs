@@ -6,7 +6,9 @@ import {performance} from 'node:perf_hooks';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 const driver=fileURLToPath(new URL('./browser-check.mjs',import.meta.url));
 const suites=[
-  ['Document parity','document-conformance'],
+  // Full parity plus a new worker per execution fixture outgrows the usual
+  // three-minute budget on shared CI runners. Keep other suites bounded as before.
+  ['Document parity','document-conformance',null,null,300000],
   ['Reactive evaluation','m4-conformance'],
   ['Notebook lifecycle','edit-conformance'],
   ['Notebook startup','startup-conformance'],
@@ -23,12 +25,15 @@ const suites=[
   ['Demos','demos-conformance'],
   ['Desktop assertions','edit','browser-expect-probe.mjs'],
   ['Compact assertions','edit','browser-expect-probe.mjs','390x960'],
+  ['Desktop attachments','edit?new=1','browser-attachments-probe.mjs'],
+  ['Compact attachments','edit?new=1','browser-attachments-probe.mjs','390x960'],
+  ['CSV demo startup','edit?example=csv-attachments&verify-demo-startup=1','browser-attachments-probe.mjs'],
 ];
 // Each worker owns a complete driver process, including Chrome/profile/server.
 // Buffer its log so parallel suites still produce readable GitHub log groups.
-function runSuite([label,page,script,viewport]) {
+function runSuite([label,page,script,viewport,timeout=180000]) {
   const [name,query]=page.split('?');
-  const args=[driver,'--page',`web/${name}.html${query===undefined?'':'?'+query}`,'--timeout','180000'];
+  const args=[driver,'--page',`web/${name}.html${query===undefined?'':'?'+query}`,'--timeout',String(timeout)];
   if(script)args.push('--script',fileURLToPath(new URL(script,import.meta.url)));
   if(viewport)args.push('--viewport',viewport);
   return new Promise(resolve=>{

@@ -117,13 +117,27 @@ fn serveOne(io: std.Io, context: *Context, stream: std.Io.net.Stream) !void {
 }
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    if (args.len < 2) return error.ExpectedRootAndOptionalPort;
-    const root = try std.Io.Dir.cwd().realPathFileAlloc(init.io, args[1], init.arena.allocator());
+    if (args.len > 1 and std.mem.eql(u8, args[1], "serve")) return serveProject(init, args[2..]);
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--help")) {
+        try std.Io.File.stdout().writeStreamingAll(init.io,
+            \\Usage: roclet serve [DIRECTORY|NOTEBOOK.roc|NOTEBOOK.md] [--port PORT] [--no-browser]
+            \\       roclet [ROOT] [PORT] [--port PORT] [--bind ADDRESS] [--proxy-only]
+            \\Serves the bundled Roclet site at http://127.0.0.1:4173/ by default.
+            \\ROOT defaults to the directory containing this executable.
+            \\Keep the executable with its web and artifacts folders. Stop with Ctrl-C.
+            \\
+        );
+        return;
+    }
+    var index: usize = 1;
+    const explicit_root = index < args.len and !std.mem.startsWith(u8, args[index], "--");
+    const root_arg = if (explicit_root) args[index] else std.fs.path.dirname(try std.process.executablePathAlloc(init.io, init.arena.allocator())).?;
+    if (explicit_root) index += 1;
+    const root = try std.Io.Dir.cwd().realPathFileAlloc(init.io, root_arg, init.arena.allocator());
     var port: u16 = 4173;
     var bind: []const u8 = "127.0.0.1";
     var context: Context = .{ .root = root };
     defer context.cache.deinit();
-    var index: usize = 2;
     if (index < args.len and !std.mem.startsWith(u8, args[index], "--")) {
         port = try std.fmt.parseInt(u16, args[index], 10);
         index += 1;
@@ -133,6 +147,10 @@ pub fn main(init: std.process.Init) !void {
             index += 1;
             if (index == args.len) return error.ExpectedBindAddress;
             bind = args[index];
+        } else if (std.mem.eql(u8, args[index], "--port")) {
+            index += 1;
+            if (index == args.len) return error.ExpectedPort;
+            port = try std.fmt.parseInt(u16, args[index], 10);
         } else return error.UnknownOption;
     }
     if (port == 0) return error.InvalidPort;

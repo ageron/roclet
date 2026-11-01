@@ -146,6 +146,36 @@ dialog { background:var(--page); }
 .app-header > summary::before { content:'▸'; position:absolute; left:-43px; top:50%; transform:translateY(-50%); width:14px; text-align:center; font-size:13px; line-height:22px; color:var(--muted); } .app-header[open] > summary::before { content:'▾'; }
 .app-header > summary span { color:var(--muted); font-size:.75rem; } .app-header-editor { border-top:1px solid var(--line); min-width:0; }
 @media(max-width:680px) { .app-header { margin-left:38px; } .app-header > summary::before { left:-39px; } .app-header > summary { padding:.65rem .8rem; } }
+
+#attachments-dialog { width:min(960px,calc(100vw - 2rem)); max-width:960px; }
+.attachment-intro,.attachment-footnote { color:var(--muted); line-height:1.6; }
+#attachment-drop { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:.4rem; padding:1.3rem; border:1px dashed var(--selection-border); border-radius:10px; background:var(--surface); }
+#attachment-drop[data-dragging=true] { background:var(--selected); outline:2px solid var(--focus); }
+#attachment-drop small { flex-basis:100%; text-align:center; margin-top:.3rem; color:var(--muted); }
+.attachment-primary { color:var(--accent); border-color:var(--line); background:var(--page); }
+.attachment-layout { display:grid; grid-template-columns:minmax(150px,1fr) minmax(0,2.4fr); gap:1.5rem; }
+#attachment-list { display:flex; flex-direction:column; gap:.3rem; min-width:0; max-height:440px; overflow:auto; }
+.attachment-entry { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:.25rem; padding:.75rem; border:1px solid transparent; }
+.attachment-entry strong { font-size:.85rem; font-weight:550; overflow-wrap:anywhere; }
+.attachment-entry small,.attachment-muted { color:var(--muted); font-size:.8rem; line-height:1.5; }
+.attachment-entry[aria-pressed=true] { background:var(--selected); border-color:var(--selection-border); }
+.attachment-path-row { display:flex; align-items:center; gap:.4rem; margin:.4rem 0; }
+.attachment-path-row input,.attachment-path-row textarea { flex:1; min-width:0; width:100%; border:1px solid var(--line); background:var(--surface); color:var(--text); border-radius:6px; padding:.55rem; }
+.attachment-path-row button { flex:none; border-color:var(--line); font-size:.8rem; }
+.attachment-path-row textarea { font:12px/1.6 ui-monospace,monospace; resize:vertical; }
+.attachment-actions { display:flex; flex-wrap:wrap; gap:.3rem; margin:.75rem 0 1.3rem; }
+.attachment-actions button { border-color:var(--line); font-size:.8rem; }
+#attachment-remove { color:var(--error); }
+.attachment-code { padding:.9rem; border:1px solid var(--line); border-radius:8px; }
+.attachment-code label { font-size:.8rem; }.attachment-code select { max-width:100%; font-size:.8rem; }
+#attachment-preview-label { font-size:.8rem; font-weight:550; margin:1.2rem 0 .5rem; }
+#attachment-preview { max-height:200px; overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:.75rem; font:12px/1.6 ui-monospace,monospace; white-space:pre; }
+.attachment-status-row { display:flex; align-items:center; gap:.6rem; }
+#attachment-undo { color:var(--accent); border-color:var(--line); font-size:.8rem; }
+#attachment-status { min-height:1.5em; color:var(--accent); font-size:.85rem; overflow-wrap:anywhere; }
+#attachment-status[data-error=true] { color:var(--error); }
+.attachment-footnote { font-size:.8rem; border-top:1px solid var(--line); padding-top:1rem; margin-bottom:0; }
+@media(max-width:680px) { .attachment-layout { grid-template-columns:minmax(0,1fr); gap:1rem; } #attachment-list { max-height:140px; } .attachment-path-row { flex-wrap:wrap; } .attachment-path-row input,.attachment-path-row textarea { flex-basis:65%; } .attachment-code .attachment-path-row { display:block; } #attachment-import { min-height:5em; } #attachment-copy { margin-top:.4rem; } }
 </style>
 </head>
 <body>
@@ -162,7 +192,7 @@ dialog { background:var(--page); }
     <button id="save">Save <kbd>⌘ / Ctrl S</kbd></button>
     <button id="save-as" hidden>Save as… <kbd>⇧ ⌘ / Ctrl S</kbd></button>
     <button id="download">Download a copy</button>
-    <button id="project-files">Project files…</button>
+    <button id="attachments">Attachments…</button><button id="project-files">Project files…</button>
     <button id="share">Export & share…</button><button id="offline">Offline & storage…</button>
     <button id="recent">Open recent…</button>
     <div class="menu-divider"></div><div class="menu-group"><span class="menu-label" id="format-label">File format</span><div id="format" class="menu-choices" role="group" aria-labelledby="format-label"><button data-format="roc" aria-pressed="true">Roc</button><button data-format="markdown" aria-pressed="false">Markdown</button></div></div>
@@ -217,13 +247,35 @@ dialog { background:var(--page); }
 <dialog id="share-dialog" aria-labelledby="share-title"><div class="dialog-title"><h2 id="share-title">Export & share</h2><button data-close aria-label="Close export">×</button></div>
 <p><label>Export as <select id="share-type"><option value="bundle">Roclet bundle (.roclet.zip)</option><option value="report">Static report (.html)</option><option value="site">Interactive site (.site.zip)</option></select></label></p>
 <p><label><input type="checkbox" id="share-results"> Include current result snapshots</label><br><label><input type="checkbox" id="share-debug"> Include debug messages from this run</label><br><label><input type="checkbox" id="share-source" checked> Show code in the static report</label></p>
-<p>Roclet bundles include the source, cell structure, and compiler identity. Open them in a compatible version of Roclet. Reports open directly in a browser. Interactive sites include Roclet and the compiler for hosting on HTTPS or localhost. Existing saved-output comments stay part of the source. Nothing is uploaded.</p>
+<p>Roclet bundles include the source, attachments, project files, cell structure, and compiler identity. Open them in a compatible version of Roclet. Reports open directly in a browser. Interactive sites include Roclet and the compiler for hosting on HTTPS or localhost. Existing saved-output comments stay part of the source. Nothing is uploaded.</p>
 <p>Roc downloads are runnable scripts. Rich outputs use a pinned Display package, which Roc downloads automatically. Roclet supplies it offline.</p>
 <button id="export-share">Download export</button><p id="share-status" role="status"></p></dialog>
 <dialog id="offline-dialog" aria-labelledby="offline-title"><div class="dialog-title"><h2 id="offline-title">Offline & storage</h2><button data-close aria-label="Close offline settings">×</button></div>
 <p id="offline-state" role="status">Not prepared for offline use</p><button id="prepare-offline">Prepare for offline use</button>
 <p>This installs a verified copy of Roclet and its compiler. Bookmark this Roclet address, then reopen it to edit and run without a network connection. Updates take effect after all Roclet tabs are closed.</p>
 <p id="storage-state" role="status"></p><button id="persist-storage">Keep browser storage</button><p>Browser drafts belong to this origin and profile. Keep downloaded copies of important notebooks.</p></dialog>
+<dialog id="attachments-dialog" aria-labelledby="attachments-title">
+<div class="dialog-title"><h2 id="attachments-title">Attachments</h2><button data-close aria-label="Close attachments">×</button></div>
+<p class="attachment-intro">Keep a copy of your data with this notebook. Files stay in your browser and are included in Roclet bundles.</p>
+<div id="attachment-controls">
+<div id="attachment-drop"><span>Drop files here, or</span> <button id="attachment-add" class="attachment-primary">Choose files…</button><small>Up to 16 MiB per notebook · text and binary files</small></div>
+<input id="attachment-upload" type="file" multiple hidden aria-label="Choose attachments">
+<input id="attachment-replacement" type="file" hidden aria-label="Choose replacement file">
+<p id="attachment-count" class="attachment-muted"></p>
+<p id="attachment-empty">No attachments yet. Add a CSV, JSON, image, or another file to get started.</p>
+<div class="attachment-layout"><nav id="attachment-list" aria-label="Attached files"></nav>
+<section id="attachment-details" hidden aria-label="Selected attachment">
+<label for="attachment-path">Path in this notebook</label><div class="attachment-path-row"><input id="attachment-path" spellcheck="false" autocomplete="off"><button id="attachment-rename">Update path</button></div>
+<small class="attachment-muted">Use a relative path such as data/measurements.csv. Changing it also requires updating your import.</small>
+<p id="attachment-meta" class="attachment-muted"></p>
+<div class="attachment-actions"><button id="attachment-replace">Replace file…</button><button id="attachment-download">Download file</button><button id="attachment-remove">Remove</button></div>
+<div class="attachment-code"><label for="attachment-kind">Use in Roc as</label> <select id="attachment-kind"><option value="text">UTF-8 text · Str</option><option value="bytes">Raw bytes · List(U8)</option></select>
+<div class="attachment-path-row"><textarea id="attachment-import" readonly rows="2" spellcheck="false" aria-label="Roc import"></textarea><button id="attachment-copy">Copy import</button></div></div>
+<h3 id="attachment-preview-label">Preview</h3><pre id="attachment-preview"></pre><small id="attachment-preview-note" class="attachment-muted"></small>
+</section></div></div>
+<div class="attachment-status-row"><p id="attachment-status" role="status" aria-live="polite"></p><button id="attachment-undo" hidden>Undo</button></div>
+<p class="attachment-footnote">Save a <strong>Roclet bundle</strong> to take your data with you. A .roc or .md source file contains only the notebook code and prose.</p>
+</dialog>
 <dialog id="project-dialog" aria-labelledby="project-title"><div class="dialog-title"><h2 id="project-title">Project files</h2><button data-close aria-label="Close project files">×</button></div>
 <p>Add Roc modules and text files beside your notebook. Import a module with <code>import Geometry</code>. Download a Roclet bundle to include these files.</p>
 <p><label class="file-label">Add files…<input id="project-upload" type="file" multiple accept=".roc,.json,.csv,.txt,text/plain" aria-label="Add project files"></label></p>
