@@ -86,6 +86,38 @@ test "two engines in one process keep revisions, counters and events apart" {
     try std.testing.expectEqual(@as(u64, 0), a.stats.frontend_builds);
 }
 
+test "a fresh engine restores compiler artifacts through the virtual filesystem" {
+    var cold = Engine.init(std.testing.allocator, .failing);
+    defer cold.deinit();
+    const module = "Fresh := [].{ value : U64\nvalue = 7 }";
+    const source = "# %%\nimport Fresh\nout_value = Fresh.value";
+    try cold.workspace.put("/workspace/Fresh.roc", module, false);
+    var first = try evaluate(&cold, source);
+    defer first.deinit();
+    try std.testing.expectEqualStrings("ok", first.field("status").string);
+    try std.testing.expect(first.counter("stores") > 0);
+    try std.testing.expectEqual(@as(i64, 0), first.counter("store_failures"));
+    const artifacts = try cold.workspace.takeUpdates();
+    defer response_allocator.free(artifacts);
+
+    var restored = Engine.init(std.testing.allocator, .failing);
+    defer restored.deinit();
+    try restored.workspace.importCache(artifacts);
+    try restored.workspace.put("/workspace/Fresh.roc", module, false);
+    var second = try evaluate(&restored, source);
+    defer second.deinit();
+    try std.testing.expectEqualStrings("ok", second.field("status").string);
+    try std.testing.expectEqualStrings("7", second.evaluation("values")[0].object.get("text").?.string);
+    try std.testing.expect(second.counter("hits") > 0);
+    try std.testing.expect(second.counter("misses") < first.counter("misses"));
+
+    try restored.workspace.put("/workspace/Fresh.roc", "Fresh := [].{ value : U64\nvalue = 8 }", false);
+    var edited = try evaluate(&restored, source);
+    defer edited.deinit();
+    try std.testing.expectEqualStrings("ok", edited.field("status").string);
+    try std.testing.expectEqualStrings("8", edited.evaluation("values")[0].object.get("text").?.string);
+}
+
 test "observations carry the root of the execution that produced them" {
     var engine = Engine.init(std.testing.allocator, .failing);
     defer engine.deinit();

@@ -233,7 +233,7 @@
     "reused": [
       "out_other"
     ],
-    "demandUnionFallbacks": 1
+    "demandUnionFallbacks": 0
   },
   {
     "name": "import-unrelated-module",
