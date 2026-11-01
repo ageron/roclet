@@ -11,6 +11,27 @@
   const manifest=await fetch('/artifacts/manifest.json').then(response=>response.json());
   const reports=[];
   const textValue=text=>'['+[...new TextEncoder().encode(text)].join(', ')+']';
+  if(new URL(location.href).searchParams.has('verify-demo-startup')) {
+    // Exercise the actual ?example= launch path, not Workbench.load after the
+    // editor has already started. No external package downloads are needed to
+    // verify that the selected example mounted its original attachment.
+    notebook.stop();
+    const files=notebook.state.attachments??[];
+    assert(files.length===1 && files[0].path==='data/cafe-sales.csv','Direct demo launch did not load its CSV attachment');
+    const original=await fetch('/demos/data/cafe-sales.csv').then(response=>response.text());
+    assert(await files[0].blob.text()===original,'Direct demo launch changed the CSV bytes');
+    const {DocumentSession}=await import('/web/document-session.mjs');
+    const session=new DocumentSession(await fetch('/artifacts/roclet.wasm').then(response=>response.arrayBuffer()));
+    try {
+      const result=await session.request({operation:'document',action:'evaluate',format:'roc',source:'app [] {}\n# %%\nimport "data/cafe-sales.csv" as csv : Str\nout_bytes = Str.to_utf8(csv)',files:files.map(file=>({...file,path:`/workspace/${file.path}`}))});
+      assert(result.status==='ok',JSON.stringify(result));
+      assert(result.evaluation.values[0].text===textValue(original),'Direct demo launch did not supply its CSV to Roc');
+    } finally {session.stop();}
+    await notebook.persist();
+    const stored=await bench.active.store.get(notebook.state.id);
+    assert(stored.attachments.length===1 && await stored.attachments[0].blob.text()===original,'Direct demo launch did not persist its CSV attachment');
+    return {result:'pass',checks:['direct CSV demo URL loads, mounts and persists its attachment before evaluation']};
+  }
   notebook.state.autoRun=false;
   const source='app [main!] {}\n# %%\nimport "data/values.csv" as csv : Str\nout_text = Str.to_utf8(csv)\n# %%\nimport "data/raw.bin" as bytes : List(U8)\nout_bytes = bytes\n# %%\nout_constant = 7\n';
   await notebook.open(source,'Attachment checks.roc');notebook.state.autoRun=false;

@@ -327,10 +327,7 @@ try {
   if (example) {
     clearTimeout(notebook.timer);
     try {
-      const entry=examples.get(example);if(!entry) throw new Error('Unknown example.');
-      const response=await fetch(entry[0]);if(!response.ok) throw new Error('Example is unavailable.');
-      await notebook.open(await response.text(),entry[1]);
-      panel.notice('Opened your own editable copy. Download a copy to keep your changes.');
+      await bench.load(panel,{example});
       const url=new URL(location.href);url.searchParams.delete('example');history.replaceState(null,'',url.pathname+url.search+url.hash);
     } catch(error) {panel.notice(`Example could not be opened: ${error.message}`);}
   }
