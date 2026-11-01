@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PATHS = (
     'package/display-package-url.txt', 'package/README.md',
     'demos/04-meeting-windows.roc',
+    'demos/05-plume-charts.roc',
     'fixtures/documents/rich-outputs.roc', 'tests/documents.json',
 )
 

@@ -1,0 +1,13 @@
+{
+  "version": "4.2.0",
+  "files": {
+    "plotly.min.js": {
+      "source": "https://cdn.plot.ly/plotly-4.2.0.min.js",
+      "sha256": "fde93964a7511bfa54c5745c49b5d0e41715cbde0cc5ebeae3f9a02de0396cae"
+    },
+    "LICENSE": {
+      "source": "https://raw.githubusercontent.com/plotly/plotly.js/v4.2.0/LICENSE",
+      "sha256": "8c45d9eaf50c2f72dd9c7ab9ef440788ba58a3538484b5c51c1f17d5128752e7"
+    }
+  }
+}

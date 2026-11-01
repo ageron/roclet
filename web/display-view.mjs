@@ -1,10 +1,11 @@
 import {connectWidget,widgetBootstrap} from './widget-bridge.mjs';
 import {sliderConfig} from './input-values.mjs';
 import {renderMarkdown} from './markdown-view.mjs';
+import {plotlyFigure,renderPlotly} from './plotly-view.mjs';
 
 // Validate even cached/imported snapshots. Renderers never interpret inspected Roc.
 export function normalizeDisplay(value) {
-  if (!value || value.version!==1 || !['text','markdown','table','image','html','svg','widget','slider','input'].includes(value.kind)) return null;
+  if (!value || value.version!==1 || !['text','markdown','table','image','html','svg','widget','slider','input','plotly'].includes(value.kind)) return null;
   if (typeof value.text!=='string' || value.text.length>65536) return null;
   const out={version:1,kind:value.kind,text:value.text};
   if (value.kind==='table') {
@@ -21,6 +22,9 @@ export function normalizeDisplay(value) {
       size+=event.text.length; if(size>262144) return null;
     }
     out.content=value.content;out.events=value.events.map(({event,kind,text,detail})=>({event,kind,text,detail}));
+  } else if(value.kind==='plotly') {
+    if(!plotlyFigure(value.content)) return null;
+    out.content=value.content;
   } else if(value.kind==='slider' || value.kind==='input') {
     if(!sliderConfig(value.content,value.kind==='input')) return null;
     out.content=value.content;
@@ -64,6 +68,10 @@ export function renderDisplay(raw,text,{doc=document,interactive=true,onInput}={
       };
     }
     if (value.kind==='markdown') root.append(renderMarkdown(value.events,doc));
+    if (value.kind==='plotly') {
+      if(interactive) root.append(renderPlotly(value.content,text,doc));
+      else {note('Saved chart preview. Run this cell to draw the chart.');fallback().open=true;return root;}
+    }
     if (value.kind==='svg') {
       // SVG in an image cannot execute scripts or access the surrounding document.
       const img=doc.createElement('img');img.alt=text;img.className='display-image';
