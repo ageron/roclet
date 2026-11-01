@@ -7,6 +7,7 @@ pub const Project = struct {
     token: []const u8,
     host: []const u8,
     any_address: bool = false,
+    public_url: ?[]const u8 = null,
     cookie_name: []const u8 = "roclet_session",
     initial: ?[]const u8 = null,
     mutex: Io.Mutex = .init,
@@ -30,7 +31,7 @@ pub fn trusted(r: *std.http.Server.Request, p: *Project, a: A) !bool {
     const host = header(r, "Host") orelse return false;
     if (!allowedHost(p, host)) return false;
     if (header(r, "Sec-Fetch-Site")) |site| if (!std.mem.eql(u8, site, "same-origin") and !std.mem.eql(u8, site, "none")) return false;
-    if (header(r, "Origin")) |origin| if (!std.mem.eql(u8, origin, try std.fmt.allocPrint(a, "http://{s}", .{host}))) return false;
+    if (header(r, "Origin")) |origin| if (!std.mem.eql(u8, origin, p.public_url orelse try std.fmt.allocPrint(a, "http://{s}", .{host}))) return false;
     return true;
 }
 fn tokenMatches(expected: []const u8, actual: []const u8) bool {
@@ -44,7 +45,7 @@ pub fn authorize(r: *std.http.Server.Request, p: *Project, a: A) !bool {
         if (tokenMatches(p.token, r.head.target[8..])) {
             try r.respond("", .{ .status = .see_other, .keep_alive = false, .extra_headers = &.{
                 .{ .name = "Location", .value = "/" },
-                .{ .name = "Set-Cookie", .value = try std.fmt.allocPrint(a, "{s}={s}; Path=/; HttpOnly; SameSite=Strict", .{ p.cookie_name, p.token }) },
+                .{ .name = "Set-Cookie", .value = try std.fmt.allocPrint(a, "{s}={s}; Path=/; HttpOnly; SameSite=Strict{s}", .{ p.cookie_name, p.token, if (p.public_url != null) "; Secure" else "" }) },
                 .{ .name = "Cache-Control", .value = "no-store" },
                 .{ .name = "Referrer-Policy", .value = "no-referrer" },
             } });

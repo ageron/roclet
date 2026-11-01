@@ -133,6 +133,8 @@ pub fn printHelp(io: std.Io) !void {
         \\  -h, --help       Show this help.
         \\
         \\Project options:
+        \\  --public-url URL HTTPS origin served by a local reverse proxy (no path).
+        \\                   Requires loopback --bind; TLS is handled by the proxy.
         \\  --no-browser     Print the URL without opening a browser.
         \\  --assets DIR     Use website assets from DIR instead of the bundled copy.
         \\Static options:
@@ -197,7 +199,8 @@ fn listen(init: std.process.Init, context: *Context, bind: []const u8, port: u16
     var group: std.Io.Group = .init;
     defer group.cancel(init.io);
     const display_bind = if (std.mem.eql(u8, bind, "0.0.0.0")) "127.0.0.1" else if (std.mem.eql(u8, bind, "::")) "::1" else bind;
-    const url = try std.fmt.allocPrint(init.arena.allocator(), "http://{s}/{s}{s}", .{ try hostPort(init.arena.allocator(), display_bind, port), if (context.project != null) "?token=" else "", if (context.project) |p| p.token else "" });
+    const origin = if (context.project) |p| p.public_url else null;
+    const url = try std.fmt.allocPrint(init.arena.allocator(), "{s}/{s}{s}", .{ origin orelse try std.fmt.allocPrint(init.arena.allocator(), "http://{s}", .{try hostPort(init.arena.allocator(), display_bind, port)}), if (context.project != null) "?token=" else "", if (context.project) |p| p.token else "" });
     if (!std.mem.eql(u8, display_bind, bind)) std.debug.print("Listening on {s}; use this computer's network IP from another device.\n", .{bind});
     std.debug.print("Roclet: {s}\n", .{url});
     if (context.project) |project| std.debug.print("Project: {s}\nPress Ctrl-C to stop.\n", .{project.root});
@@ -229,21 +232,26 @@ pub fn serveProject(init: std.process.Init, args: []const []const u8) !void {
     var browser = true;
     var bind: []const u8 = "127.0.0.1";
     var assets: ?[]const u8 = null;
+    var public_url: ?[]const u8 = null;
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
         if (std.mem.eql(u8, args[i], "--no-browser")) {
             browser = false;
-        } else if (std.mem.eql(u8, args[i], "--port") or std.mem.eql(u8, args[i], "--assets") or std.mem.eql(u8, args[i], "--bind")) {
+        } else if (std.mem.eql(u8, args[i], "--port") or std.mem.eql(u8, args[i], "--assets") or std.mem.eql(u8, args[i], "--bind") or std.mem.eql(u8, args[i], "--public-url")) {
             const option = args[i];
             i += 1;
             if (i == args.len) return error.MissingOptionValue;
-            if (std.mem.eql(u8, option, "--port")) port = try std.fmt.parseInt(u16, args[i], 10) else if (std.mem.eql(u8, option, "--bind")) bind = args[i] else assets = args[i];
+            if (std.mem.eql(u8, option, "--port")) port = try std.fmt.parseInt(u16, args[i], 10) else if (std.mem.eql(u8, option, "--bind")) bind = args[i] else if (std.mem.eql(u8, option, "--public-url")) public_url = try publicOrigin(a, args[i]) else assets = args[i];
         } else if (!selected and !std.mem.startsWith(u8, args[i], "--")) {
             target = args[i];
             selected = true;
         } else return error.UnknownOption;
     }
     if (port == 0) return error.InvalidPort;
+    if (public_url != null and !std.mem.eql(u8, bind, "127.0.0.1") and !std.mem.eql(u8, bind, "::1")) {
+        std.debug.print("--public-url requires --bind 127.0.0.1 or ::1; run the HTTPS proxy on this computer.\n", .{});
+        return error.ExpectedLoopbackBind;
+    }
     const actual = try std.Io.Dir.cwd().realPathFileAlloc(io, target, a);
     const stat = try std.Io.Dir.cwd().statFile(io, actual, .{});
     if (stat.kind != .directory and !(stat.kind == .file and (std.mem.endsWith(u8, actual, ".roc") or std.mem.endsWith(u8, actual, ".md")))) return error.ExpectedDirectoryOrNotebook;
@@ -263,7 +271,8 @@ pub fn serveProject(init: std.process.Init, args: []const []const u8) !void {
     var context: Context = .{ .root = asset_root, .project = .{
         .root = project_root,
         .token = try a.dupe(u8, &std.fmt.bytesToHex(random, .lower)),
-        .host = try hostPort(a, bind, port),
+        .host = if (public_url) |url| url[8..] else try hostPort(a, bind, port),
+        .public_url = public_url,
         .cookie_name = try std.fmt.allocPrint(a, "roclet_session_{d}", .{port}),
         .any_address = std.mem.eql(u8, bind, "0.0.0.0") or std.mem.eql(u8, bind, "::"),
         .initial = if (stat.kind == .file) std.fs.path.basename(actual) else null,
@@ -293,4 +302,20 @@ fn hostPort(a: std.mem.Allocator, bind: []const u8, port: u16) ![]const u8 {
         std.fmt.allocPrint(a, "[{s}]:{d}", .{ bind, port })
     else
         std.fmt.allocPrint(a, "{s}:{d}", .{ bind, port });
+}
+
+// Accept only an HTTPS origin. Never infer it from untrusted forwarded headers.
+fn publicOrigin(a: std.mem.Allocator, value: []const u8) ![]const u8 {
+    const url = if (std.mem.endsWith(u8, value, "/")) value[0 .. value.len - 1] else value;
+    if (!std.mem.startsWith(u8, url, "https://") or url.len <= 8) return error.InvalidPublicUrl;
+    for (url[8..]) |c| if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '-' and c != ':' and c != '[' and c != ']') return error.InvalidPublicUrl;
+    const uri = std.Uri.parse(url) catch return error.InvalidPublicUrl;
+    if (uri.host == null or uri.host.?.isEmpty() or !uri.path.isEmpty() or uri.port == 0) return error.InvalidPublicUrl;
+    // Match browser serialization: lowercase hosts and normalized ports.
+    const authority = if (uri.port != null) url[8..std.mem.findScalarLast(u8, url, ':').?] else url[8..];
+    const host = try std.ascii.allocLowerString(a, authority);
+    return if (uri.port) |port|
+        if (port == 443) try std.fmt.allocPrint(a, "https://{s}", .{host}) else try std.fmt.allocPrint(a, "https://{s}:{d}", .{ host, port })
+    else
+        try std.fmt.allocPrint(a, "https://{s}", .{host});
 }

@@ -37,6 +37,21 @@
 <p>Add the extracted folder to your PATH. On macOS or Linux, add this line to your shell configuration (such as <code>~/.zshrc</code> or <code>~/.bashrc</code>), replacing the path:</p>
 <pre><code>export PATH="/absolute/path/to/roclet:$PATH"</code></pre>
 <p>On Windows, search for <strong>Edit environment variables for your account</strong>, edit your user <strong>Path</strong>, and add the extracted folder. Open a new terminal, then run <code>roclet serve</code>.</p>
+<h2>Optional HTTPS with Caddy</h2>
+<p>For use on the same computer, ordinary local HTTP is enough. For HTTPS, <a href="https://caddyserver.com/docs/install">install Caddy</a> and run it alongside Roclet. Caddy handles encryption and certificates; Roclet still requires its private token URL.</p>
+<h3>On this computer</h3>
+<p>Start Roclet (replace <code>demos</code> with your project directory):</p>
+<pre><code>roclet serve demos --public-url https://localhost:8443 --no-browser</code></pre>
+<p>In a second terminal, start Caddy:</p>
+<pre><code>caddy reverse-proxy --from localhost:8443 --to 127.0.0.1:4173</code></pre>
+<p>Open the <strong>HTTPS token URL printed by Roclet</strong>. Caddy may ask for an administrator password to trust its local certificate. If the browser still reports an untrusted certificate, follow <a href="https://caddyserver.com/docs/automatic-https#local-https">Caddy’s local certificate instructions</a>. Keep both processes running; Ctrl+C stops each one.</p>
+<h3>With a public domain</h3>
+<p>Point a domain such as <code>notebooks.example.com</code> to your server and allow incoming ports 80 and 443 through its firewall/router. Run both commands on that server:</p>
+<pre><code>roclet serve demos --public-url https://notebooks.example.com --no-browser
+caddy reverse-proxy --from notebooks.example.com --to 127.0.0.1:4173</code></pre>
+<p>Run these in separate terminals, or configure services for continuous use. Caddy automatically obtains and renews a trusted certificate; it needs permission to bind ports 80 and 443. See <a href="https://caddyserver.com/docs/automatic-https">Caddy’s HTTPS requirements</a>. Only share Roclet’s token URL with people allowed to read and edit your project.</p>
+<p>For private-network access without a public domain, use the server’s hostname or IP in both commands instead of <code>localhost</code>. Each connecting device must trust Caddy’s root certificate. Do not forward ports on your router for this setup.</p>
+<p><code>--public-url</code> accepts an HTTPS origin with an optional port, but no path, query, or fragment. It does not enable TLS inside Roclet. Keep Roclet bound to <code>127.0.0.1</code> (the default), with Caddy on the same computer. If you change Roclet’s <code>--port</code>, change Caddy’s <code>--to</code> address to match. The token changes whenever Roclet restarts.</p>
 <p>The server serves the browser app; it does not run notebooks headlessly. For development and the separate headless runner, see the <a href="https://github.com/ageron/roclet/blob/main/docs/installation.md#build-from-source">source build instructions</a>.</p>
 </main>
 <footer><a href="../">← Back to Roclet</a><span>Built with <a href="https://www.roc-lang.org/">Roc</a>.</span></footer>

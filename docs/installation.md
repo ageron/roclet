@@ -167,6 +167,28 @@ PowerShell). Open the private token URL printed in the terminal; press Ctrl+C to
 No Roc or Zig installation is needed. This server distribution is separate from
 the source-built headless runner described below.
 
+## HTTPS with Caddy
+
+Roclet supports HTTPS through a reverse proxy on the same computer:
+
+```sh
+roclet serve demos --public-url https://localhost:8443 --no-browser
+```
+
+In a second terminal, after installing [Caddy](https://caddyserver.com/docs/install):
+
+```sh
+caddy reverse-proxy --from localhost:8443 --to 127.0.0.1:4173
+```
+
+Open the HTTPS token URL printed by Roclet. Caddy may request administrator
+permission to trust its local certificate. Keep both processes running.
+`--public-url` accepts only an HTTPS origin, without a path, query, or fragment,
+and requires Roclet to bind to `127.0.0.1` or `::1`. Caddy terminates TLS;
+Roclet uses HTTP on loopback and secure cookies for browser authentication.
+See the [installation page](https://ageron.github.io/roclet/web/install.html)
+for public-domain and private-network setup, including certificate trust.
+
 ## Build from source
 
 Install **Zig 0.17.0**, Git, and tar. Clone this Roclet repository, then obtain a

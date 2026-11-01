@@ -17,7 +17,8 @@ async function launch(project,home,args=[]){
   let log='';child.stderr.on('data',b=>log+=b);
   for(let i=0;i<100;i++){
     const token=log.match(/\?token=([a-f0-9]{64})/)?.[1];
-    const response=token?await fetch(`${base}/api/local/config`,{headers:{'X-Roclet-Token':token}}).catch(()=>null):null;
+    const publicUrl=args.includes('--public-url')?new URL(args[args.indexOf('--public-url')+1]):null;
+    const response=token?await httpResponse(`${base}/api/local/config`,{'X-Roclet-Token':token,...(publicUrl?{Host:publicUrl.host}: {})}).catch(()=>null):null;
     if(response?.ok){const config=await response.json();return {base,child,config,client:new ServerProject(config,{fetch:(path,options)=>fetch(base+path,options)})};}
     if(child.exitCode!==null)throw new Error(log);await pause(30);
   }
@@ -144,4 +145,37 @@ test('private startup URL protects pages, APIs and proxy; cookie login and token
     // Even a cookie with this server's name cannot reuse the old secret.
     assert.equal((await fetch(server.base+'/api/local/config',{headers:{Cookie:`roclet_session_${new URL(server.base).port}=${oldToken}`}})).status,401);
   } finally {if(server && server.child.exitCode===null)await stop(server);await rm(temp,{recursive:true,force:true});}
+});
+
+function httpResponse(url,headers={}){
+  return new Promise((resolve,reject)=>{
+    const req=request(url,{headers},res=>{
+      let body='';res.on('data',b=>body+=b);res.on('end',()=>resolve({status:res.statusCode,ok:res.statusCode===200,headers:res.headers,json:()=>JSON.parse(body),body}));
+    });req.on('error',reject);req.end();
+  });
+}
+test('HTTPS proxy origin, secure login and forwarded-header rejection',{skip:!available},async()=>{
+  const temp=await mkdtemp(join(tmpdir(),'roclet-https-'));let server;
+  try{
+    server=await launch(temp,temp,['--public-url','https://NOTEBOOKS.example:0443/']);
+    const headers={Host:'notebooks.example','X-Roclet-Token':server.config.token};
+    assert.equal((await httpResponse(server.base+'/api/local/config',{...headers,Origin:'https://notebooks.example'})).status,200);
+    for(const origin of ['http://notebooks.example','https://evil.example'])assert.equal((await httpResponse(server.base+'/api/local/config',{...headers,Origin:origin})).status,403);
+    assert.equal((await httpResponse(server.base+'/api/local/config',{'X-Roclet-Token':server.config.token,'X-Forwarded-Host':'notebooks.example','X-Forwarded-Proto':'https'})).status,403);
+    assert.equal((await httpResponse(server.base+'/',{Host:'notebooks.example'})).status,401);
+    const login=await httpResponse(server.base+'/?token='+server.config.token,{Host:'notebooks.example'});
+    assert.equal(login.status,303);assert.equal(login.headers.location,'/');
+    const cookie=login.headers['set-cookie'][0];assert.match(cookie,/; Secure/);assert.match(cookie,/HttpOnly/);
+    assert.equal((await httpResponse(server.base+'/',{Host:'notebooks.example',Cookie:cookie.split(';')[0]})).status,200);
+  }finally{if(server)await stop(server);await rm(temp,{recursive:true,force:true});}
+});
+test('public URL rejects paths, credentials, HTTP and exposed backends',{skip:!available},async()=>{
+  for(const args of [
+    ['--public-url','http://localhost'],['--public-url','https://localhost/path'],
+    ['--public-url','https://user@localhost'],['--public-url','https://localhost?x=1'],
+    ['--public-url','https://localhost','--bind','0.0.0.0']
+  ]){
+    const child=spawn(binary,['serve','--no-browser',...args],{stdio:'ignore'});
+    assert.notEqual(await new Promise(r=>child.once('exit',r)),0);
+  }
 });
