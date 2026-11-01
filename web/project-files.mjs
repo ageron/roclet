@@ -1,6 +1,7 @@
 // Portable project sources. Compiler and package-cache files belong to the
 // workspace engine and are never stored as part of an editable notebook.
 const encoder = new TextEncoder();
+export const projectLimit = 16 * 1024 * 1024;
 export function projectPath(path) {
   if (typeof path !== 'string' || !path || path.length > 480 || path.startsWith('/') || /[\\:\u0000-\u001f\u007f]/u.test(path)
       || path.split('/').some(part => !part || part === '.' || part === '..') || path === 'Main.roc' || path === 'main.roc') {
@@ -15,7 +16,7 @@ export function projectFiles(files = []) {
     const path = projectPath(file?.path);
     if (typeof file.source !== 'string' || paths.has(path)) throw new Error('Project files need text contents and unique paths.');
     paths.add(path); size += encoder.encode(file.source).length;
-    if (size > 16 * 1024 * 1024) throw new Error('Project sources exceed the 16 MiB limit.');
+    if (size > projectLimit) throw new Error('Project sources exceed the 16 MiB limit.');
     return {path, source:file.source};
   });
 }

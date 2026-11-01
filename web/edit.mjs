@@ -1,4 +1,6 @@
 import { localFiles } from './local-files.mjs';
+import { AttachmentDialog } from './attachment-dialog.mjs';
+import { bundleLimit } from './attachments.mjs';
 import { prepareOffline, offlineStatus, storageStatus } from './offline.mjs';
 import { captureExport, exportBundle, importBundle, exportReport, exportSite, download, downloadName } from './sharing.mjs';
 import { validDraft, independentCopy } from './edit-model.mjs';
@@ -127,7 +129,7 @@ async function downloadCopy(target) {
   const link = document.createElement('a'); link.href = url; link.download = `${(notebook.state.title || 'notebook').replace(/[^a-z0-9._ -]/gi, '_')}.${notebook.state.format === 'roc' ? 'roc' : 'md'}`; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   notebook.markDownloaded();
-  target.notice('Download requested for a separate copy. The original file is not updated.');
+  target.notice(notebook.state.attachments?.length?'Notebook source downloaded. Use Export & share → Roclet bundle to include your attachments.':'Download requested for a separate copy. The original file is not updated.');
 }
 async function saveFile(target,as=false) {
   if(!window.showSaveFilePicker)return downloadCopy(target);
@@ -145,6 +147,8 @@ function closePanel(slot) {
   void target.perform(() => bench.close(slot));
 }
 function bind() {
+  const attachmentDialog=new AttachmentDialog();
+  $('attachments').onclick=()=>{closeMenus();void active().perform(()=>attachmentDialog.open(active()));};
   const perform = work => active().perform(work);
   const notebook = () => active().notebook;
   // A panel that was refused a document has none; only page-level commands apply.
@@ -198,7 +202,7 @@ function bind() {
   });};
   $('save').onclick=()=>{const target=active();return target.perform(()=>saveFile(target));};
   $('save-as').onclick=()=>{const target=active();return target.perform(()=>saveFile(target,true));};
-  $('open').onchange = () => perform(async () => { const target = active(), file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>20*1024*1024) throw new Error('Roclet bundles are limited to 20 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await target.notebook.replace(record);target.notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await target.notebook.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); target.focusSelection(); });
+  $('open').onchange = () => perform(async () => { const target = active(), file = $('open').files[0]; if (!file) return; if(file.name.toLowerCase().endsWith('.zip')) {if(file.size>bundleLimit) throw new Error('Roclet bundles are limited to 40 MiB.');const {record}=await importBundle(await file.arrayBuffer(),compilerManifest);await target.notebook.replace(record);target.notice('Imported an independent copy. Saved results are unverified; press Run to recompute.');}else {if (file.size > 256 * 1024) throw new Error('This prototype supports Roclet notebooks up to 256 KiB.'); await target.notebook.open(await file.text(), file.name);} $('open').value = ''; closeMenus(); target.focusSelection(); });
   $('preview').onclick = () => perform(async () => { const result = await notebook().inspect('export', 'roc'); $('generated').textContent = result.source; closeMenus(); $('generated-dialog').showModal(); });
   // Dialogs are shared by the page and bound to the panel active when opened.
   const showProjectFile = (target, path) => {
@@ -231,10 +235,12 @@ function bind() {
   $('share').onclick=()=>{
     const target=active();closeMenus();$('share-dialog').showModal();$('share-results').checked=!!target.notebook.result?.evaluation?.values?.length;$('share-debug').checked=false;$('share-type').dispatchEvent(new Event('change'));
     $('export-share').onclick=()=>target.perform(async()=>{
+      const exported={id:target.notebook.state.id,revision:target.notebook.state.revision};
       const button=$('export-share');button.disabled=true;$('share-status').textContent='Preparing export…';
       try {const type=$('share-type').value,capture=await captureExport(target.notebook,compilerManifest,{results:$('share-results').checked,debug:$('share-debug').checked});
         const blob=type==='report'?await exportReport(capture,{source:$('share-source').checked}):type==='site'?await exportSite(capture,{source:$('share-source').checked}):await exportBundle(capture);
         download(blob,`${downloadName(capture.document.title)}${type==='report'?'.html':type==='site'?'.site.zip':'.roclet.zip'}`);
+        if(type!=='report' && target.notebook.state.id===exported.id && target.notebook.state.revision===exported.revision)target.notebook.markDownloaded({complete:true});
         $('share-status').textContent=`Download requested · ${capture.snapshots.length} result snapshots, ${capture.events.length} debug messages. ${type==='site'?'Extract and serve over HTTPS or localhost.':''}`;
       }finally {button.disabled=false;}
     });
@@ -321,10 +327,7 @@ try {
   if (example) {
     clearTimeout(notebook.timer);
     try {
-      const entry=examples.get(example);if(!entry) throw new Error('Unknown example.');
-      const response=await fetch(entry[0]);if(!response.ok) throw new Error('Example is unavailable.');
-      await notebook.open(await response.text(),entry[1]);
-      panel.notice('Opened your own editable copy. Download a copy to keep your changes.');
+      await bench.load(panel,{example});
       const url=new URL(location.href);url.searchParams.delete('example');history.replaceState(null,'',url.pathname+url.search+url.hash);
     } catch(error) {panel.notice(`Example could not be opened: ${error.message}`);}
   }

@@ -2,6 +2,7 @@ import {inputValues, inputModule} from './input-values.mjs';
 import { DocumentSession } from './document-session.mjs';
 import { renameEdits } from './compiler-tools.mjs';
 import { projectFiles, projectPath } from './project-files.mjs';
+import { attachments, shareAttachmentBlobs, trimAttachmentHistory } from './attachments.mjs';
 
 const clone = value => structuredClone(value);
 const key = () => crypto.randomUUID();
@@ -14,7 +15,7 @@ export function newDraft(title = 'Untitled', demo = false) {
     makeCell('code', 'area = width * height\nout_dimensions = {\n    dbg area\n    area\n}'),
   ] : [makeCell()];
   return { schema: 1, id: key(), title, format: 'roc', preamble: 'app [main!] {}', metadata: '', cells,
-    source: '', sourceCurrent: false, inputValues: {}, files: [], mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
+    source: '', sourceCurrent: false, inputValues: {}, files: [], attachments: [], mode: 'notebook', revision: 1, autoRun: true, updatedAt: Date.now() };
 }
 // A new draft with the same content as another: new id, fresh cell keys, so it
 // can be open and saved beside the original without sharing anything.
@@ -31,7 +32,7 @@ export function openedDraft(source, filename) {
   return record;
 }
 export function validDraft(record) {
-  try { projectFiles(record?.files); inputValues(record?.inputValues); } catch { return false; }
+  try { projectFiles(record?.files); inputValues(record?.inputValues); attachments(record?.attachments, record?.files); } catch { return false; }
   return record?.schema === 1 && typeof record.id === 'string' && typeof record.title === 'string'
     && ['roc', 'markdown'].includes(record.format) && typeof record.source === 'string'
     && Array.isArray(record.cells) && record.cells.every(c => typeof c.key === 'string' && typeof c.source === 'string' && ['code','markdown','generated'].includes(c.kind));
@@ -39,6 +40,7 @@ export function validDraft(record) {
 export function requestFor(state, action, target = state.format) {
   const request = { operation: 'document', action, format: state.format, target, source: state.sourceCurrent ? state.source : '', render: true };
   request.files = projectFiles(state.files).map(file => ({...file, path:`/workspace/${file.path}`}));
+  request.files.push(...attachments(state.attachments, state.files).map(file => ({...file, path:`/workspace/${file.path}`})));
   if (state.sourceCurrent) request.context = { preamble: state.preamble, metadata: state.metadata };
   else request.draft = { preamble: state.preamble, metadata: state.metadata, cells: state.cells.map(({ kind, source, attributes, outputs }) => ({ kind, source, attributes, outputs })) };
   if(['evaluate','analyze','check'].includes(action)) request.modules=[inputModule(state.inputValues)];
@@ -86,6 +88,7 @@ export class Notebook {
     }
     if (id && !validDraft(record)) throw new Error('This notebook is unavailable in this browser. Return home to choose another.');
     this.state = record ? clone(record) : fresh ? newDraft() : newDraft('Wall area', true);
+    if(this.state.attachments) this.state.attachments=shareAttachmentBlobs(this.state.attachments,[]);
     this.status = record && !given ? 'Recovered draft · results must be recomputed' : 'Ready';
     this.emit('document');
     await this.persist();
@@ -109,7 +112,11 @@ export class Notebook {
   }
   // A draft that cannot be saved (for example after another tab changed it)
   // is still kept when this exact revision was downloaded.
-  markDownloaded() { if (this.state) this.downloaded = { id: this.state.id, revision: this.state.revision }; }
+  markDownloaded({complete=false}={}) {
+    // A source download cannot recover attachment bytes if browser saving
+    // failed. Only a complete bundle/site can keep that revision safely.
+    if (this.state && (complete || !this.state.attachments?.length)) this.downloaded = { id: this.state.id, revision: this.state.revision };
+  }
   get downloadedCurrent() { return !!this.state && this.downloaded?.id === this.state.id && this.downloaded.revision === this.state.revision; }
   async keep() { return await this.persist() || this.downloadedCurrent; }
   cancelPending() {
@@ -126,6 +133,7 @@ export class Notebook {
     while (this.history.length > 100 || (this.history.length > 1 && JSON.stringify(this.history).length > 4 * 1024 * 1024)) this.history.shift();
     this.group = group; this.groupAt = now; this.future = []; this.views.clear();
     this.invalidate(); update(this.state); delete this.state.savedResults; this.state.revision++; this.state.sourceCurrent = source;
+    trimAttachmentHistory(this.history,this.state);
     this.emit(reason); void this.persist();
     if (!composing) this.schedule();
   }
@@ -143,6 +151,7 @@ export class Notebook {
   }
   setProjectFiles(files) {
     const checked = projectFiles(files);
+    attachments(this.state.attachments, checked);
     this.change(s => { s.files = checked; }, { source:this.state.sourceCurrent, reason:'project' });
   }
   setProjectFile(path, source) {
@@ -152,6 +161,13 @@ export class Notebook {
   }
   removeProjectFile(path) {
     this.setProjectFiles((this.state.files ?? []).filter(file => file.path !== path));
+  }
+  setAttachments(files) {
+    const checked = shareAttachmentBlobs(attachments(files, this.state.files),[this.state,...this.history,...this.future]);
+    this.change(s => { s.attachments = checked; }, {source:this.state.sourceCurrent, reason:'attachments'});
+  }
+  removeAttachment(path) {
+    this.setAttachments((this.state.attachments ?? []).filter(file => file.path !== path));
   }
   schedule() {
     clearTimeout(this.timer);

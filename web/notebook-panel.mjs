@@ -1,7 +1,7 @@
 import { localFiles } from './local-files.mjs';
 import { Notebook, makeCell, cellsFrom } from './edit-model.mjs';
 import { CellEditor, editorFor } from './cell-editor.mjs';
-import { symbolAt, completionOptions } from './compiler-tools.mjs';
+import { symbolAt, completionOptions, isVisibleDiagnostic } from './compiler-tools.mjs';
 import { renderMarkdown } from './markdown-view.mjs';
 import { settleMathStyles } from './math-view.mjs';
 import { renderDisplay } from './display-view.mjs';
@@ -467,7 +467,7 @@ export class NotebookPanel {
       }
       const failures = showDiagnostics ? result?.model?.diagnostics ?? [] : [];
       const diagnosticTexts = new Set();
-      for (const d of failures) {
+      for (const d of failures.filter(isVisibleDiagnostic)) {
         const view = notebook.state.mode === 'notebook' ? cellAt(d.cell) : null;
         const place = d.location ? ` · ${d.scope === 'cell' ? 'line ' : 'source '}${d.location.line}:${d.location.column}` : '';
         const block = outputBlock(`${d.severity}: ${d.code}${place}`, d.message, 'diagnostic');
@@ -476,7 +476,7 @@ export class NotebookPanel {
         }
         (view?.results ?? diagnostics).append(block); diagnosticTexts.add(d.message);
       }
-      for (const d of showDiagnostics ? result?.evaluation?.diagnostics ?? [] : []) if (!diagnosticTexts.has(d.message)) diagnostics.append(outputBlock(d.title ?? d.severity, d.message, 'diagnostic'));
+      for (const d of showDiagnostics ? result?.evaluation?.diagnostics ?? [] : []) if (isVisibleDiagnostic(d) && !diagnosticTexts.has(d.message)) diagnostics.append(outputBlock(d.title ?? d.severity, d.message, 'diagnostic'));
       if (showDiagnostics && result?.status !== 'partial' && (result?.failure || result?.evaluation?.failure)) diagnostics.append(outputBlock('Run failed', result.failure ?? result.evaluation.failure, 'diagnostic'));
       const transcript = showDiagnostics || result?.status === 'ok' ? result?.evaluation?.events ?? [] : [];
       for (const [index, cell] of notebook.state.cells.entries()) {

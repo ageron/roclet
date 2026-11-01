@@ -32,6 +32,64 @@ remain available, including in browsers without direct file access.
 Roc files are saved as runnable apps, so resolve compilation errors before
 saving them, or switch to Markdown to save unfinished work.
 
+## Attach data files
+
+Choose **File → Attachments → Choose files…**, or drop files onto the attachment
+dialog. Roclet copies each file into the notebook; it does not upload the data or
+keep a live connection to the original file. Files initially use a path such as
+`data/measurements.csv`. Select a file to preview it, download its original bytes,
+or copy a Roc import:
+
+```roc
+import "data/measurements.csv" as csv_text : Str
+```
+
+`Str` imports require valid UTF-8. To read a binary file, or preserve any byte
+sequence without text decoding, choose **Raw bytes · List(U8)**:
+
+```roc
+import "data/sample.bin" as sample_bytes : List(U8)
+```
+
+The attachment store preserves every byte, including line endings and byte-order
+marks. CSV/JSON decoding is a separate Roc operation. The
+[CSV demo](https://ageron.github.io/roclet/web/edit.html?example=csv-attachments)
+uses roc-parser to decode column names and numeric types, handle quoted fields,
+and report invalid data. Its first run may need the existing package-download
+fallback; verified packages are cached for offline use.
+
+**Replace file…** changes the saved copy while keeping its path, even when the
+replacement has another filename. With Auto-run on, dependent calculations
+update. **Remove** deletes the attachment and imports of it then report a missing
+file. **Undo** restores replaced or removed files. **Update path** changes the
+relative path; update the corresponding import in your code as well. Paths may
+contain folders, spaces, and Unicode; absolute paths, `..`, duplicate paths,
+and paths already used by project sources are rejected.
+
+Undo history retains at most 64 MiB of distinct attachment contents, including
+the current files; older undo entries are discarded when necessary. Reimporting
+identical data shares its saved contents rather than retaining another copy.
+Closing the attachment dialog cancels a pending disk read without changing the
+notebook. The dialog can be reopened immediately, even if that read
+has not finished.
+
+Browser drafts retain attachments, including after reload. Each notebook supports
+up to 128 attachments totaling 16 MiB. These are Roclet's current limits, not
+general browser file-size limits. Previews show only the first 4 KiB of text or
+256 binary bytes; truncation never changes the saved file.
+
+Download a **Roclet bundle** to preserve the source and attachments together.
+Bundles store original file bytes, relative paths, media types, and checked
+content hashes. Import verifies them before opening an independent copy with
+Auto-run off. Bundles are limited to 40 MiB, including project sources and any
+selected result snapshots. Interactive sites also carry their notebook bundle.
+
+A `.roc` or `.md` source save/download does **not** include attachment bytes.
+To run source with ordinary Roc, provide the same files at the same relative
+paths. Static reports show captured outputs; use a bundle for editable data.
+Browser storage belongs to one origin/profile and can be cleared, so keep a
+downloaded bundle for work you want to preserve.
+
 ## Work offline
 
 1. While connected, choose **File → Offline & storage → Prepare for offline use**.
