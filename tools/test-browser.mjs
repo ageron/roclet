@@ -17,6 +17,7 @@ const suites=[
   ['Sharing and offline','m3-conformance'],
   ['Rich outputs','m5-conformance'],
   ['Plotly charts','plotly-conformance'],
+  ['Responsive controls','edit?new=1','browser-responsive-scenario.mjs'],
   ['Math','math-conformance'],
   ['Workspace and packages','workspace-conformance'],
   ['Side-by-side notebooks','dual-conformance'],
@@ -34,7 +35,7 @@ const suites=[
 function runSuite([label,page,script,viewport,timeout=180000]) {
   const [name,query]=page.split('?');
   const args=[driver,'--page',`web/${name}.html${query===undefined?'':'?'+query}`,'--timeout',String(timeout)];
-  if(script)args.push('--script',fileURLToPath(new URL(script,import.meta.url)));
+  if(script)args.push(script.endsWith('-scenario.mjs')?'--scenario':'--script',fileURLToPath(new URL(script,import.meta.url)));
   if(viewport)args.push('--viewport',viewport);
   return new Promise(resolve=>{
     const child=spawn(process.execPath,args,{stdio:['ignore','pipe','pipe']});
@@ -75,6 +76,7 @@ if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
     '', '| Suite | Time | Result |', '| --- | ---: | --- |',
     ...[...results].sort((a,b)=>b.seconds-a.seconds).map(r=>`| ${r.label} | ${r.seconds.toFixed(1)}s | ${r.code===0?'PASS':'FAIL'} |`),
     '',
+    ...results.flatMap(r=>{try{const t=JSON.parse(r.log).interaction;return t?[`${r.label}: ${(t.drawnAt-t.receivedAt).toFixed(1)} ms input to drawn; ${(t.paintOpportunityAt-t.drawnAt).toFixed(1)} ms to subsequent paint opportunity (non-gating).`]:[];}catch{return [];}}),
   ].join('\n');
   console.log(summary);
   if(process.env.GITHUB_STEP_SUMMARY)await appendFile(process.env.GITHUB_STEP_SUMMARY,summary+'\n');

@@ -45,7 +45,7 @@ export function normalizeDisplay(value) {
 export function renderDisplay(raw,text,{doc=document,interactive=true,onInput}={}) {
   if (raw==null) return null;
   const root=doc.createElement('div');root.className='rich-output';
-  const value=normalizeDisplay(raw);
+  let value=normalizeDisplay(raw);
   const note=message=>{const p=doc.createElement('p');p.className='display-note';p.textContent=message;root.append(p);};
   const fallback=()=>{const details=doc.createElement('details'),summary=doc.createElement('summary'),pre=doc.createElement('pre');summary.textContent='Plain text';pre.textContent=text;details.append(summary,pre);root.append(details);return details;};
   if (!value) {note('Rich preview unavailable. The plain-text result is still available.');fallback().open=true;return root;}
@@ -56,9 +56,10 @@ export function renderDisplay(raw,text,{doc=document,interactive=true,onInput}={
       label.textContent=config.label+' ';input.type='range';input.min=config.min;input.max=config.max;input.step=config.step;input.value=config.value;
       input.disabled=!interactive || !onInput;input.setAttribute('aria-label',config.label);current.value=String(config.value);
       input.style.cssText='width:min(300px,55vw);vertical-align:middle;accent-color:var(--accent,#8050be);margin:0 1em;';
+      input.onchange=()=>input.oninput();
       input.oninput=()=>{const n=input.valueAsNumber;if(!Number.isFinite(n)||n<config.min||n>config.max)return;current.value=String(n);onInput?.(config.key,n);};
       label.append(input,current);root.append(label);root.sliderKey=config.key;
-      root.updateInput=(raw,text)=>{
+      root.update=(raw,text)=>{
         const next=normalizeDisplay(raw),c=next?.kind==='slider'?sliderConfig(next.content):null;
         if(!c || JSON.stringify({...c,value:0})!==JSON.stringify({...config,value:0})) return false;
         // Do not jump backwards during an active drag; the next result catches up.
@@ -69,7 +70,17 @@ export function renderDisplay(raw,text,{doc=document,interactive=true,onInput}={
     }
     if (value.kind==='markdown') root.append(renderMarkdown(value.events,doc));
     if (value.kind==='plotly') {
-      if(interactive) root.append(renderPlotly(value.content,text,doc));
+      if(interactive) {
+        const frame=renderPlotly(value.content,text,doc);root.append(frame);
+        Object.defineProperty(root,'rendered',{get:()=>frame.rendered.then(()=>{if(frame.failed){frame.hidden=true;const details=root.querySelector('details');if(details)details.open=true;}})});
+        root.dispose=()=>frame.dispose();
+        root.update=(raw,text)=>{
+          const next=normalizeDisplay(raw);
+          if(next?.kind!=='plotly' || !frame.update(next.content,text))return false;
+          const pre=root.querySelector('pre');if(pre)pre.textContent=text;
+          return true;
+        };
+      }
       else {note('Saved chart preview. Run this cell to draw the chart.');fallback().open=true;return root;}
     }
     if (value.kind==='svg') {
@@ -92,10 +103,10 @@ export function renderDisplay(raw,text,{doc=document,interactive=true,onInput}={
       frame.style.cssText='width:100%;height:280px;border:0;display:block;resize:vertical;min-height:80px;max-height:900px;';
       if(config && scripts) {
         connectWidget(root,frame,config,onInput);
-        root.updateInput=(raw,text)=>{
+        root.update=(raw,text)=>{
           const next=normalizeDisplay(raw),c=next?.kind==='input'?sliderConfig(next.content,true):null;
           if(!c || JSON.stringify({...c,value:0})!==JSON.stringify({...config,value:0})) return false;
-          root.setWidgetValue(c.value);
+          frame.title=text || 'Interactive output';root.setWidgetValue(c.value);
           const pre=root.querySelector('pre');if(pre)pre.textContent=text;
           return true;
         };
@@ -122,9 +133,26 @@ export function renderDisplay(raw,text,{doc=document,interactive=true,onInput}={
         status.textContent=value.rows.length?`Rows ${start+1}–${end} of ${value.row_count}`:'No rows';previous.disabled=page===0;next.disabled=end>=value.rows.length;
       };
       previous.onclick=()=>{page--;show();};next.onclick=()=>{page++;show();};
-      if(interactive && value.rows.length>pageSize) controls.append(previous,status,next);else controls.append(status);
-      if(interactive && value.rows.length>pageSize) root.append(controls);show();
-      const limits=[];if(value.row_count>value.rows.length) limits.push(`Preview limited to ${value.rows.length} of ${value.row_count} rows.`);if(value.column_count>value.columns.length) limits.push(`Showing ${value.columns.length} of ${value.column_count} columns.`);if(limits.length) note(limits.join(' '));
+      if(interactive) controls.append(previous,status,next);else controls.append(status);
+      if(interactive)root.append(controls);controls.hidden=value.rows.length<=pageSize;show();
+      root.update=(raw,text)=>{
+        const nextValue=normalizeDisplay(raw);
+        if(nextValue?.kind!=='table' || JSON.stringify(nextValue.columns)!==JSON.stringify(value.columns))return false;
+        value=nextValue;page=Math.min(page,Math.max(0,Math.ceil(value.rows.length/pageSize)-1));
+        caption.textContent=`${value.row_count} rows × ${value.column_count} columns`;
+        controls.hidden=value.rows.length<=pageSize;show();
+        const pre=root.querySelector('pre');if(pre)pre.textContent=text;
+        updateLimits();
+        return true;
+      };
+      function updateLimits() {
+        for(const existing of root.querySelectorAll('.display-note'))existing.remove();
+        const limits=[];
+        if(value.row_count>value.rows.length)limits.push(`Preview limited to ${value.rows.length} of ${value.row_count} rows.`);
+        if(value.column_count>value.columns.length)limits.push(`Showing ${value.columns.length} of ${value.column_count} columns.`);
+        if(limits.length)note(limits.join(' '));
+      }
+      updateLimits();
     }
     fallback();
   } catch {

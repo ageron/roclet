@@ -92,6 +92,8 @@ export function engineDetails(result) {
   if (result?.workerMs == null) return '—';
   const stats = engineStats(result);
   const parts = [`worker ${Math.round(stats.workerMs)} ms`, `${stats.evaluated} evaluated`, `${stats.reused} reused`];
+  const timing=result.interaction;
+  if(timing?.drawnAt!=null)parts.push(`output ${Math.round(timing.drawnAt-timing.receivedAt)} ms`);
   if (stats.memoryBytes) parts.push(`${Math.round(stats.memoryBytes / (1024 * 1024))} MiB`);
   return parts.join(' · ');
 }

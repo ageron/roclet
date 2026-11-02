@@ -81,8 +81,10 @@ try {
   const navigation=await send('Page.navigate',{url:new URL(page,base+'/').href});
   if(navigation.errorText)throw new Error(`Browser navigation failed: ${navigation.errorText}`);
   await sleep(250);
+  const scenario=option('--scenario',null);
   const script=option('--script',null);
-  if(script)console.log(JSON.stringify(await evaluate(await readFile(script,'utf8')),null,2));
+  if(scenario)console.log(JSON.stringify(await (await import((await import('node:url')).pathToFileURL(resolve(scenario)).href)).default({evaluate,send}),null,2));
+  else if(script)console.log(JSON.stringify(await evaluate(await readFile(script,'utf8')),null,2));
   else {
     const start=Date.now();let state;
     do {
