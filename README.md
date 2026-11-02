@@ -66,6 +66,41 @@ Roclet opens in your browser, saves directly to disk, loads local modules, and
 downloads packages automatically. See the [local project guide](docs/installation.md#work-with-a-local-project)
 for building or running the downloaded distribution.
 
+## Open a GitHub Gist
+
+Choose **File → Open GitHub Gist…**, paste a Gist URL or ID, and open a copy.
+You can also share a direct Roclet link:
+
+```text
+https://ageron.github.io/roclet/web/edit.html?gist=GIST_ID
+```
+
+Name the main notebook `notebook.roc` or `notebook.md` (also recognized:
+`Main.roc` and `main.roc`). A single `.roc` or `.md` file is selected automatically.
+For other names or multiple notebooks, add `&gistFile=notes.md` to the link or
+enter the notebook filename in the dialog.
+
+[Try the Gist garden example](https://ageron.github.io/roclet/web/edit.html?example=gist-garden):
+a small notebook declares `garden: "./garden.roc"` in its app header and imports
+`garden.Garden`. The package entry, exposed module, internal helper, and planting
+notes all come from the same revision-pinned Gist. See the [demo sources](demos/gist-garden/).
+
+Other `.roc` files become **Project files**, so `import Geometry` can load a
+`Geometry.roc` from the same Gist. Other text files become **Attachments** at their
+Gist filenames, for example `import "sales.csv" as csv : Str`. Gists use flat
+filenames; use a local project or Roclet bundle for directory trees or binary data.
+
+To pin a version, set `gist` to a full Gist revision URL (URL-encode it when
+building a link). Otherwise Roclet loads the latest version each time the link
+is opened. Each import creates an independent browser draft and waits for
+**Run**. Edits stay in your browser; download a copy or bundle to keep or share
+them. Saving back to GitHub is not supported.
+
+Loading needs an internet connection and is subject to GitHub's unauthenticated
+API rate limits. Notebook and project size limits still apply. Roclet rejects
+incomplete API responses, including files GitHub marks as truncated, instead of
+opening partial code. Use smaller files or a bundle if this happens.
+
 ## Early days
 
 Roclet is an experimental alpha. **Only Chrome has been tested.** Other browsers

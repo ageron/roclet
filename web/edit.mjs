@@ -1,3 +1,4 @@
+import {loadGist} from './gist.mjs';
 import {serverProject,serverProjectReady} from './server-project.mjs';
 import { localFiles } from './local-files.mjs';
 import { AttachmentDialog } from './attachment-dialog.mjs';
@@ -194,6 +195,20 @@ function bind() {
   $('recovery-copy').onclick=()=>perform(()=>notebook().recoveryCopy());
   $('new').onclick = () => perform(async () => { const target = active(); await bench.load(target, { fresh: true }); bench.writeUrl(); target.editSelection(); });
   $('rich-example').onclick=()=>perform(async()=>{const response=await fetch('../demos/03-rich-outputs.roc');if(!response.ok) throw new Error('Example unavailable; rebuild the offline distribution.');await notebook().open(await response.text(),'Rich Outputs and Widgets.roc');closeMenus();});
+  $('open-gist').onclick = () => { closeMenus(); $('gist-dialog').showModal(); };
+  $('gist-form').onsubmit = async event => {
+    event.preventDefault();
+    const target = active(), button = $('gist-submit');
+    button.disabled = true; $('gist-status').textContent = 'Loading Gist…';
+    try {
+      const record = await loadGist($('gist-url').value, {filename:$('gist-file').value.trim() || undefined});
+      await target.notebook.replace(record);
+      await target.notebook.mode('notebook');
+      $('gist-dialog').close(); bench.writeUrl();
+      target.notice('Opened a copy of the Gist. Press Run to compute results. Changes are saved in this browser.');
+    } catch (error) { $('gist-status').textContent = error.message; }
+    finally { button.disabled = false; }
+  };
   $('recent').onclick = () => {
     closeMenus(); $('recent-list').replaceChildren(); $('recent-status').textContent = 'Loading notebooks…';
     $('recent-dialog').showModal(); void refreshLibrary();
@@ -369,6 +384,19 @@ try {
       await bench.load(panel,{example});
       const url=new URL(location.href);url.searchParams.delete('example');history.replaceState(null,'',url.pathname+url.search+url.hash);
     } catch(error) {panel.notice(`Example could not be opened: ${error.message}`);}
+  }
+  const gist = launch.searchParams.get('gist');
+  if (gist) {
+    clearTimeout(notebook.timer);
+    try {
+      const record = await loadGist(gist, {filename:launch.searchParams.get('gistFile')});
+      await notebook.replace(record);
+      await notebook.mode('notebook');
+      panel.notice('Opened a copy of the Gist. Press Run to compute results. Changes are saved in this browser.');
+      const url = new URL(location.href);
+      url.searchParams.delete('gist'); url.searchParams.delete('gistFile');
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    } catch (error) { throw new Error(`Gist could not be opened: ${error.message}`); }
   }
   const publication=new URL(location.href).searchParams.get('publication');
   if(publication==='published.roclet.zip') {

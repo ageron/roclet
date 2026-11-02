@@ -4,8 +4,9 @@
 // objects it is given, so Node tests can import it.
 import { newDraft, validDraft, independentCopy, openedDraft } from './edit-model.mjs';
 import {attachment} from './attachments.mjs';
+import {loadGist} from './gist.mjs';
 
-// Bundled examples only, never arbitrary URLs supplied by a query parameter.
+// Curated bundled examples and revision-pinned Gists; query parameters select only these names.
 export const examples = new Map([
   ['reactivity', ['../demos/01-reactivity.roc', 'A result before its ingredients.roc']],
   ['coding-puzzle', ['../demos/02-coding-puzzle.roc', 'Coding puzzle: longest streak.roc']],
@@ -13,6 +14,7 @@ export const examples = new Map([
   ['plume-charts', ['../demos/04-plume-charts.roc', 'Plot a wave with Plume.roc']],
   ['csv-attachments', ['../demos/05-csv-attachments.roc', 'A café sales report from a CSV attachment.roc', [{path:'data/cafe-sales.csv',url:'../demos/data/cafe-sales.csv'}]]],
   ['meeting-windows', ['../demos/06-meeting-windows.roc', 'Finding room for a design review.roc']],
+  ['gist-garden', ['https://gist.github.com/lukewilliamboswell/ab17cb796239be901ec0436f919d39bb/e18a658e1aab0e79a4467143ac714c5aedec3c55', 'A garden plan from a Gist.roc']],
 ]);
 export const exampleTitle = name => examples.get(name)?.[1].replace(/\.roc$/, '');
 
@@ -38,7 +40,7 @@ export function parseLayout(href) {
 // them; with one panel the slot parameters are removed, as before.
 export function layoutUrl(href, { left = null, right = null } = {}) {
   const url = new URL(href);
-  for (const name of ['notebook', 'new', 'example', 'publication', 'right']) url.searchParams.delete(name);
+  for (const name of ['notebook', 'new', 'example', 'publication', 'right', 'gist', 'gistFile']) url.searchParams.delete(name);
   if (left && right) { url.searchParams.set('notebook', left); url.searchParams.set('right', right); }
   return url.pathname + url.search + url.hash;
 }
@@ -188,6 +190,14 @@ export class Workbench {
     if (request.example) {
       const entry = examples.get(request.example);
       if (!entry) throw new Error('Unknown example.');
+      if (entry[0].startsWith('https://gist.github.com/')) {
+        const record = await loadGist(entry[0], {fetch:this.fetch});
+        record.title = exampleTitle(request.example);
+        if (current) await notebook.replace(record); else await notebook.initialize({record});
+        await notebook.mode('notebook');
+        panel.notice('Opened a copy of the Gist with its relative Roc package and planting notes. Press Run to compute results.');
+        return;
+      }
       const response = await this.fetch(entry[0]);
       if (!response.ok) throw new Error('Example is unavailable.');
       const source = await response.text();

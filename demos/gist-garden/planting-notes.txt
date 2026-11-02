@@ -1,0 +1,3 @@
+Garden notes
+Leave a path around the bed and water seedlings after planting.
+Try changing plants_per_square_metre from 3 to 4 in the notebook.

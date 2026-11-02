@@ -187,6 +187,7 @@ dialog { background:var(--page); }
   <nav class="header-menus" aria-label="Notebook menus">
   <details class="popover" id="document-menu"><summary aria-label="File menu">File</summary><div class="menu-panel"><p class="menu-target" hidden></p>
     <button id="recovery-copy" hidden>Save a recovery copy</button><button id="new">New notebook</button><button id="rich-example">Rich Outputs and Widgets example</button>
+    <button id="open-gist">Open GitHub Gist…</button>
     <button id="open-local" hidden>Open file…</button>
     <label class="file-label">Import a copy…<input id="open" type="file" accept=".roc,.md,.roclet.zip,.zip,text/plain,text/markdown,application/zip" aria-label="Open Roclet notebook"></label>
     <button id="save">Save <kbd>⌘ / Ctrl S</kbd></button>
@@ -276,6 +277,8 @@ dialog { background:var(--page); }
 <div class="attachment-status-row"><p id="attachment-status" role="status" aria-live="polite"></p><button id="attachment-undo" hidden>Undo</button></div>
 <p class="attachment-footnote">Save a <strong>Roclet bundle</strong> to take your data with you. A .roc or .md source file contains only the notebook code and prose.</p>
 </dialog>
+<dialog id="gist-dialog" aria-labelledby="gist-title"><div class="dialog-title"><h2 id="gist-title">Open GitHub Gist</h2><button data-close aria-label="Close Gist import">×</button></div>
+<form id="gist-form"><p><label>Gist URL or ID <input id="gist-url" required placeholder="https://gist.github.com/…"></label></p><p><label>Notebook filename (optional) <input id="gist-file" placeholder="notebook.roc"></label></p><p>Open an editable copy with its supporting files. Changes are saved in this browser.</p><p id="gist-status" role="status"></p><button id="gist-submit" type="submit">Open copy</button></form></dialog>
 <dialog id="project-dialog" aria-labelledby="project-title"><div class="dialog-title"><h2 id="project-title">Project files</h2><button data-close aria-label="Close project files">×</button></div>
 <p>Add Roc modules and text files beside your notebook. Import a module with <code>import Geometry</code>. Download a Roclet bundle to include these files.</p>
 <p><label class="file-label">Add files…<input id="project-upload" type="file" multiple accept=".roc,.json,.csv,.txt,text/plain" aria-label="Add project files"></label></p>
