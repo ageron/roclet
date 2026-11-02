@@ -355,10 +355,14 @@ dependencies, compiler build tools and `ci/engine-build.env` settings. A UI or
 demo edit, Display release URL update, or Display module change reuses these binaries; an engine input change builds a new pair. Native CI builds use
 an explicit baseline x86-64 target so binaries work across hosted runner CPUs.
 
-Zig's build cache is also restored for test executables and other tools, with
-snapshots keyed by build inputs rather than every commit. Partial build caches
-are saved even when tests fail. Every run still checks the current notebooks,
-runs browser tests, and regenerates manifests, parity reports and site packages.
+Downloaded Zig dependency sources (`zig-pkg/`) have a separate exact-key cache,
+limited to 1 GiB uncompressed before saving. Intermediate build outputs, the
+prepared compiler checkout, and Zig's global cache are not persisted: restoring
+an accumulated build cache can exhaust the runner's disk during extraction.
+Tests and tools rebuild as needed and reuse Zig's cache within the job. Every
+run still checks the current notebooks, runs browser tests, and regenerates
+manifests, parity reports and site packages. Disk usage is logged at the start
+and end of the job.
 The `-Dcached-engines=.engine-cache` build option is for CI's exact-input cache;
 normal local builds let Zig manage compilation as before.
 

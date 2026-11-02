@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Report initial disk space
+        run: df -h . "$RUNNER_TEMP"
       - name: Read engine build settings
         # Baseline CPU flags make cached binaries portable across hosted runners.
         run: sed '/^#/d; /^$/d' ci/engine-build.env >> "$GITHUB_ENV"
@@ -34,7 +36,7 @@ jobs:
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ steps.zig-version.outputs.version }}
-          # Restore/save below owns both Zig caches and the prepared compiler.
+          # Cache only downloaded sources below; compiled engines have their own cache.
           use-cache: false
       - name: Check generated artifacts are absent
         run: test ! -e artifacts/manifest.json
@@ -45,17 +47,15 @@ jobs:
           path: .engine-cache
           # Exact matches only: never run engines from different source/build inputs.
           key: roclet-engines-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json', 'build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'vendor/md4c/*.c', 'vendor/md4c/*.h', 'tools/build-tool.zig', 'tools/compress-builtins.zig', 'tools/prepare-compiler.sh', 'ci/engine-build.env') }}
-      - name: Restore Zig build cache
+      - name: Restore Zig dependency sources
         uses: actions/cache/restore@v4
-        id: compiler-cache
+        id: dependencies
         with:
-          path: |
-            .toolchain
-            .zig-cache
-            ~/.cache/zig
-          key: roclet-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-${{ hashFiles('build.zig', 'build.zig.zon', 'compiler-adapter/**/*', 'vendor/md4c/*.c', 'vendor/md4c/*.h', 'tools/**/*', 'tests/**/*', 'ci/**/*', '.github/workflows/ci.yml') }}
-          restore-keys: |
-            roclet-build-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json') }}-
+          # Zig 0.17 materializes downloaded packages here. Do not restore
+          # .zig-cache or the global cache: accumulated build outputs can fill
+          # the runner while the compressed archive is still on disk.
+          path: zig-pkg
+          key: roclet-dependencies-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('compiler.lock.json', 'build.zig.zon') }}
       - name: Prepare pinned compiler dependency
         shell: bash
         run: |
@@ -110,15 +110,37 @@ jobs:
         run: |
           node tools/test-browser.mjs
           node tools/test-local-project.mjs
-      - name: Save compiler build cache
-        if: ${{ always() && !cancelled() && steps.compiler-cache.outputs.cache-hit != 'true' }}
+      - name: Check dependency cache size
+        if: ${{ success() && steps.dependencies.outputs.cache-hit != 'true' }}
+        id: dependency-size
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d zig-pkg ]; then
+            size_kib=$(du -sk zig-pkg | cut -f1)
+            echo "Dependency sources: $size_kib KiB"
+            # Bound the uncompressed restore size to 1 GiB. An oversized
+            # dependency set can still build; it just won't be persisted.
+            if [ "$size_kib" -le 1048576 ]; then
+              echo "save=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::notice::Skipping dependency cache: exceeds 1 GiB"
+            fi
+          fi
+      - name: Save Zig dependency sources
+        if: ${{ success() && steps.dependency-size.outputs.save == 'true' }}
         uses: actions/cache/save@v4
         with:
-          path: |
-            .toolchain
-            .zig-cache
-            ~/.cache/zig
-          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
+          path: zig-pkg
+          key: ${{ steps.dependencies.outputs.cache-primary-key }}
+      - name: Report final disk usage
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          df -h . "$RUNNER_TEMP"
+          for path in .engine-cache .toolchain .zig-cache zig-pkg "$HOME/.cache/zig"; do
+            if [ -d "$path" ]; then du -sh "$path"; fi
+          done
       - name: Upload verified site
         uses: actions/upload-artifact@v4
         with:
