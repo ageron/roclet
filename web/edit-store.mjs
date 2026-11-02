@@ -41,7 +41,7 @@ export class DraftStore {
         if(existing && (!this.versions.has(record.id) || (existing._storageVersion??null)!==expected)) {
           conflict=new Error('Another tab changed this draft. Download your edits or save a recovery copy before reopening it.');tx.abort();return;
         }
-        store.put({...record,_storageVersion:version});
+        store.put({...record,_hiddenFromRecents:existing?._hiddenFromRecents === true,_storageVersion:version});
       };
       tx.oncomplete=()=>{this.versions.set(record.id,version);resolve();};
       tx.onerror=()=>reject(tx.error??read.error);
@@ -52,7 +52,19 @@ export class DraftStore {
   async list() {
     const records = await this.transact('readonly', store => store.getAll());
     for(const record of records) if(!this.versions.has(record.id)) this.versions.set(record.id,record._storageVersion??null);
-    return records.sort((a, b) => b.updatedAt - a.updatedAt);
+    return records.filter(record => !record._hiddenFromRecents).sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+  // History visibility is separate from draft contents and concurrency tokens.
+  // An autosave from an already-open tab must not undo removal from recents.
+  async removeFromRecents(id) {
+    const db = await this.open();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('drafts', 'readwrite'), store = tx.objectStore('drafts'), read = store.get(id);
+      read.onsuccess = () => { if (read.result) store.put({...read.result, _hiddenFromRecents:true}); };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? read.error);
+      tx.onabort = () => reject(tx.error ?? new Error('Could not remove notebook from recent history.'));
+    });
   }
   // Another instance on the same database, with its own optimistic-concurrency
   // tokens: each notebook panel saves through its own instance.

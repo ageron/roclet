@@ -12,7 +12,7 @@ async function refresh() {
     if (current !== generation) return;
     list.replaceChildren();
     status.hidden = records.length > 0;
-    status.textContent = 'No notebooks saved in this browser yet. Create a notebook or open a demo to get started.';
+    status.textContent = 'No recent notebooks. Create a notebook or open a demo to get started.';
     more.hidden = records.length <= 6;
     more.textContent = expanded ? 'Show fewer' : `Show all ${records.length} notebooks`;
     for (const record of expanded ? records : records.slice(0,6)) {
@@ -22,7 +22,24 @@ async function refresh() {
       const updated = new Date(record.updatedAt);
       if (Number.isFinite(updated.getTime())) {date.dateTime = updated.toISOString();date.textContent = `Edited ${updated.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})}`;}
       arrow.className = 'arrow';arrow.textContent = '→';arrow.setAttribute('aria-hidden','true');
-      label.append(title,date);link.append(label,arrow);item.append(link);list.append(item);
+      const remove = document.createElement('button');
+      remove.type = 'button'; remove.className = 'remove-recent'; remove.textContent = '×';
+      remove.title = 'Remove from recent notebooks';
+      remove.setAttribute('aria-label', `Remove ${record.title || 'Untitled'} from recent notebooks`);
+      remove.onclick = async () => {
+        const index = [...list.children].indexOf(item);
+        remove.disabled = true;
+        try {
+          await store.removeFromRecents(record.id);
+          await refresh();
+          (list.children[Math.min(index, list.children.length - 1)]?.querySelector('.remove-recent') ?? document.getElementById('open-notebook')).focus();
+        } catch {
+          remove.disabled = false; status.hidden = false;
+          status.textContent = 'Could not remove this notebook from recent history. Please try again.';
+        }
+      };
+      item.className = 'recent-row';
+      label.append(title,date);link.append(label,arrow);item.append(link,remove);list.append(item);
     }
   } catch {
     if (current !== generation) return;

@@ -593,6 +593,14 @@ try {
   $('recent-list').querySelector(`[data-notebook-id="${alternate.id}"]`).click();await until(()=>notebook.state.id===alternate.id && !$('recent-dialog').open);
   assert.equal($('title').value,alternate.title);assert.equal(document.title,`Roclet: ${alternate.title}`);
   assert($('notebook').contains(document.activeElement),'Opening a recent notebook should return focus to its content');
+  openRecent();await until(()=>$('recent-list').querySelector(`[data-notebook-id="${alternate.id}"]`));
+  $('recent-list').querySelector(`[data-notebook-id="${alternate.id}"]`).parentElement.querySelector('.remove-recent').click();
+  await until(()=>!$('recent-list').querySelector(`[data-notebook-id="${alternate.id}"]`));
+  assert($('recent-dialog').open);assert.equal(notebook.state.id,alternate.id);
+  assert.equal((await store.get(alternate.id)).title,alternate.title);
+  await notebook.persist();assert(!(await store.list()).some(record=>record.id===alternate.id));
+  $('recent-dialog').querySelector('[data-close]').click();
+  report('Removing an open notebook from recents preserves its draft and stays removed after autosave');
   const list=store.list.bind(store);store.list=async()=>[];
   try {
     openRecent();await until(()=>$('recent-list').children.length===0 && $('recent-status').textContent.length>0 && !/loading/i.test($('recent-status').textContent));

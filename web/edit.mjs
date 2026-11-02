@@ -30,7 +30,7 @@ async function refreshLibrary() {
     const records = (await target.store.list()).filter(validDraft);
     if (token !== libraryToken) return;
     list.replaceChildren();
-    $('recent-status').textContent = records.length ? 'Notebooks saved in this browser.' : 'No notebooks have been saved in this browser yet.';
+    $('recent-status').textContent = records.length ? 'Notebooks saved in this browser.' : 'No recent notebooks.';
     const dates = new Intl.DateTimeFormat(undefined, {dateStyle:'medium',timeStyle:'short'}), ids = bench.ids();
     const otherSlot = slot === 'left' ? 'right' : 'left';
     for (const record of records) {
@@ -57,7 +57,21 @@ async function refreshLibrary() {
       modified.textContent = Number.isFinite(modifiedAt.getTime()) ? dates.format(modifiedAt) : 'Saved in this browser';
       description.append(name, modified); entry.append(description);
       if (current || elsewhere) { const label = document.createElement('small'); label.textContent = current ? 'Current' : `Open in the ${otherSlot} panel`; entry.append(label); }
-      list.append(entry);
+      const row = document.createElement('div'), remove = document.createElement('button');
+      row.className = 'recent-row'; remove.className = 'remove-recent'; remove.type = 'button'; remove.textContent = '×';
+      remove.title = 'Remove from recent notebooks'; remove.setAttribute('aria-label', `Remove ${title} from recent notebooks`);
+      remove.onclick = async () => {
+        const index = [...list.children].indexOf(row);
+        remove.disabled = true;
+        try {
+          await target.store.removeFromRecents(record.id);
+          await refreshLibrary();
+          if ($('recent-dialog').open) (list.children[Math.min(index, list.children.length - 1)]?.querySelector('.remove-recent') ?? $('recent-dialog').querySelector('[data-close]')).focus();
+        } catch {
+          remove.disabled = false; $('recent-status').textContent = 'Could not remove this notebook from recent history. Please try again.';
+        }
+      };
+      row.append(entry, remove); list.append(row);
     }
   } catch {
     if (token !== libraryToken) return;

@@ -11,6 +11,8 @@ const suites=[
   ['Document parity','document-conformance',null,null,300000],
   ['Reactive evaluation','m4-conformance'],
   ['Notebook lifecycle','edit-conformance'],
+  ['Home recent notebooks','../index','browser-recents-probe.mjs'],
+  ['Home recent notebooks, mobile','../index','browser-recents-probe.mjs','390x960'],
   ['Notebook startup','startup-conformance'],
   ['Desktop notebook UI','edit-ui-conformance'],
   ['Compact notebook UI','edit-ui-conformance',null,'390x960'],
