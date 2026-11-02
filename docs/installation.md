@@ -284,7 +284,10 @@ Browser checks run separately: open `/web/edit-ui-conformance.html`,
 `/web/document-conformance.html`, `/web/m5-conformance.html`, and
 `/web/math-conformance.html` on your local server. With Node.js 22+ and Chrome,
 `node tools/test-browser.mjs` runs the core browser suites, including startup
-and desktop and compact UI checks. `zig build test` publishes the compiler pair and generates
+and desktop and compact UI checks. Before running the full suite locally, run
+the commands in the “Fetch pinned CSV test packages” step of
+[the CI workflow](../.github/workflows/ci.yml); the CSV evaluation test needs
+those unchanged release bundles in `artifacts/browser-packages`. `zig build test` publishes the compiler pair and generates
 parity fixtures but does not launch Chrome. Packages are written to `zig-out/roclet.zip` and `zig-out/roclet-headless.zip`.
 
 With Node.js 22+ and Chrome installed, run the browser-side unit tests and

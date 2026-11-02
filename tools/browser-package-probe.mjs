@@ -7,8 +7,8 @@
   const assert=(value,message)=>{if(!value)throw Error(message);};
   const $=id=>document.getElementById(id);
   const urls=[
-    'https://github.com/lukewilliamboswell/roc-parser/releases/download/2.0.0/7CLzCK6qUz7zmj6nvBxMEFu11HPwQTnCovKiyWzDSLTW.tar.zst',
-    'https://github.com/roc-lang/unicode/releases/download/4.2.0/4W8SHzvwet9hH9qZewJ1J1CVQoH7YKA6zyijWFTB3y1w.tar.zst'
+    'https://github.com/lukewilliamboswell/roc-parser/releases/download/3.0.0/6xsRdRqenJrAb4wG7HaST4Xh349vD5sHAJDsKTK6E3dr.tar.zst',
+    'https://github.com/roc-lang/unicode/releases/download/4.3.0/7HGaK8HUHMs5judroSmUoS4TjPGZ1kAjPTyPDSCWiSKM.tar.zst'
   ];
   const header=`app [] { parser: "${urls[0]}" }\n\n`;
   const source=header+'# %% id=number\nimport parser.Utf8\nout_number = Utf8.parse_str(Utf8.digits, "12345")\n# %% id=invalid\nout_invalid = Utf8.parse_str(Utf8.digits, "12x")\n';

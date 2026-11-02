@@ -27,8 +27,8 @@
   $('stop').click();$('run').click();await until(()=>$('status').textContent.startsWith('Current'));
   assert(!dialog(),'Restart did not restore the user-loaded archive');
   const {editorFor}=await import('/web/cell-editor.mjs');
-  const parserUrl='https://github.com/lukewilliamboswell/roc-parser/releases/download/2.0.0/7CLzCK6qUz7zmj6nvBxMEFu11HPwQTnCovKiyWzDSLTW.tar.zst';
-  const unicodeUrl='https://github.com/roc-lang/unicode/releases/download/4.2.0/4W8SHzvwet9hH9qZewJ1J1CVQoH7YKA6zyijWFTB3y1w.tar.zst';
+  const parserUrl='https://github.com/lukewilliamboswell/roc-parser/releases/download/3.0.0/6xsRdRqenJrAb4wG7HaST4Xh349vD5sHAJDsKTK6E3dr.tar.zst';
+  const unicodeUrl='https://github.com/roc-lang/unicode/releases/download/4.3.0/7HGaK8HUHMs5judroSmUoS4TjPGZ1kAjPTyPDSCWiSKM.tar.zst';
   const source=`app [] { parser: "${parserUrl}" }\n# %%\nimport parser.Utf8\nout_number = Utf8.parse_str(Utf8.digits, "12345")\n# %%\nout_invalid = Utf8.parse_str(Utf8.digits, "12x")\n`;
   $('auto').checked=false;$('auto').dispatchEvent(new Event('change'));
   $('source-view').click();await until(()=>!$('source-pane').hidden);

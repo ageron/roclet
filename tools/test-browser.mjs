@@ -1,5 +1,6 @@
-// Core browser checks use only local fixtures; real release-download probes are
-// separate integration checks. Each driver owns a fresh Chrome profile/server.
+// Browser checks use local fixtures, including unchanged release archives
+// fetched by CI for the CSV demo. Public-download probes remain separate.
+// Each driver owns a fresh Chrome profile/server.
 import {spawn} from 'node:child_process';
 import {appendFile} from 'node:fs/promises';
 import {performance} from 'node:perf_hooks';
@@ -31,6 +32,7 @@ const suites=[
   ['Desktop attachments','edit?new=1','browser-attachments-probe.mjs'],
   ['Compact attachments','edit?new=1','browser-attachments-probe.mjs','390x960'],
   ['CSV demo startup','edit?example=csv-attachments&verify-demo-startup=1','browser-attachments-probe.mjs'],
+  ['CSV demo evaluation','edit?new=1&parser-demo=1','browser-attachments-probe.mjs'],
 ];
 // Each worker owns a complete driver process, including Chrome/profile/server.
 // Buffer its log so parallel suites still produce readable GitHub log groups.
