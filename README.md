@@ -58,6 +58,12 @@ or switching away from it offers a download or to continue without saving. **Vie
 the last run's worker time, evaluated and reused results, and memory to each
 status bar.
 
+Sliders and numeric widgets update as evaluation can keep up, retaining the latest
+pending value. Charts keep their zoom, pan and resized height. During a drag,
+intermediate results are marked as updating; only current results can be exported.
+The status timing includes scheduling, saving and output rendering; engine details
+show worker time separately. Source typing still waits briefly for you to settle.
+
 Drafts are saved in your browser. **Save** can write a local file, while
 **Download a copy** keeps a separate copy.
 

@@ -215,7 +215,7 @@ try {
   for (const slot of ['left','right']) {
     await show(slot);
     assert(visible(part(slot,'engine-status')), `${slot} engine details are hidden`);
-    assert.match(part(slot,'engine-status').textContent, /^worker \d+ ms · \d+ evaluated · \d+ reused · \d+ MiB$/);
+    assert.match(part(slot,'engine-status').textContent, /^worker \d+ ms · \d+ evaluated · \d+ reused(?: · output \d+ ms)? · \d+ MiB$/);
   }
   const memory = [L(), R()].map(n=>n.result.transportMetrics.memoryBytes);
   assert(memory.every(bytes=>bytes > 0 && bytes <= 256 * 1024 * 1024), `Worker memory out of bounds: ${memory}`);

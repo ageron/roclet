@@ -9,7 +9,8 @@
   const {editorFor}=await import('/web/cell-editor.mjs');
   const editors=()=>[...document.querySelectorAll('#notebook .cm-content')].map(editorFor);
   const chart=()=>editors().find(editor=>editor.source.includes('out_wave ='))?.dom.closest('.cell').querySelector('.value[data-stale="false"] .display-plotly');
-  const figure=()=>JSON.parse(new DOMParser().parseFromString(chart().srcdoc,'text/html').querySelector('#figure').textContent);
+  const {workbench}=await import('/web/edit.mjs');
+  const figure=()=>JSON.parse(workbench().active.notebook.result.evaluation.values.find(v=>v.root==='out_wave').display.content);
   await until(()=>chart() || $('package-dialog').open || /failed|attention|Stopped after/i.test($('status').textContent));
   if($('package-dialog').open) {
     assert(typeof globalThis.__rocletFilePicker==='function','Use --upload-plan with the pinned Plume release archive');

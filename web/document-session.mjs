@@ -45,7 +45,12 @@ export class DocumentDraft {
 
 export class DocumentSession {
   constructor(bytes, WorkerType = Worker) { this.bytes = bytes; this.WorkerType = WorkerType; }
+  clearQueued() {
+    this.queued?.reject(new DOMException("Superseded", "AbortError"));
+    this.queued = null; clearTimeout(this.budgetTimer);
+  }
   stop() {
+    this.clearQueued();
     this.worker?.terminate();
     this.worker = null;
     this.files = new Map();
@@ -54,8 +59,35 @@ export class DocumentSession {
     this.pending = null;
   }
   invalidate() { if (this.pending) this.stop(); }
-  request(request,{loadPackage,onPackageWaiting}={}) {
-    this.invalidate();
+  request(request, options={}) {
+    const snapshot=structuredClone(request);
+    if(!options.queue) this.invalidate();
+    if(!this.pending) return this.dispatch(snapshot,options);
+    this.clearQueued();
+    const result=new Promise((resolve,reject)=>{this.queued={snapshot,options,resolve,reject};});
+    this.armBudget();
+    return result;
+  }
+  armBudget() {
+    clearTimeout(this.budgetTimer);
+    if(!this.queued || !this.pending || this.waiting)return;
+    const budget=Math.min(250,Math.max(100,4*(this.lastDuration??250)));
+    const preempt=()=>{
+      if(!this.queued || !this.pending || this.waiting) return;
+      const next=this.queued;this.queued=null;
+      this.stop();
+      this.dispatch(next.snapshot,next.options).then(next.resolve,next.reject);
+    };
+    this.budgetTimer=setTimeout(preempt,Math.max(0,budget-(performance.now()-this.started)));
+  }
+  drain() {
+    clearTimeout(this.budgetTimer);
+    const next=this.queued;this.queued=null;
+    if(next) this.dispatch(next.snapshot,next.options).then(next.resolve,next.reject);
+  }
+  dispatch(request,{loadPackage,onPackageWaiting,onDispatch}={}) {
+    this.started=performance.now();this.waiting=false;
+    onDispatch?.();
     const fresh = !this.worker;
     const worker = this.worker ??= new this.WorkerType(new URL('./format-worker.mjs', import.meta.url), { type: 'module' });
     let workspace;
@@ -73,10 +105,12 @@ export class DocumentSession {
           if(!loadPackage) {
             this.pending=null;this.stop();controller.abort();reject(new Error(`Cannot download Roc package ${data.packageNeeded.url}: ${data.packageNeeded.error}`));return;
           }
+          this.waiting=true;clearTimeout(this.budgetTimer);
           onPackageWaiting?.(true);
           Promise.resolve().then(()=>loadPackage({...data.packageNeeded,signal:controller.signal})).then(bytes=>{
             if(this.worker!==worker || this.pending?.resolve!==resolve) return;
-            onPackageWaiting?.(false);
+            this.waiting=false;this.started=performance.now();
+            this.armBudget();onPackageWaiting?.(false);
             worker.postMessage({packageBundle:{bytes}},[bytes.buffer]);
           }).catch(error=>{
             if(this.worker!==worker || this.pending?.resolve!==resolve) return;
@@ -90,7 +124,9 @@ export class DocumentSession {
           this.stop();
           const error=new Error(data.error);error.name=data.errorName??'Error';reject(error);
         } else {
+          this.lastDuration=performance.now()-this.started;
           resolve({...data.result,workerMs:data.workerMs,...(data.transportMetrics?{transportMetrics:data.transportMetrics}:{})});
+          this.drain();
         }
       };
       worker.onerror = error => {

@@ -17,6 +17,13 @@ function observe(frame) {
     window.addEventListener('message',receive);
   });
   frame.srcdoc=frame.srcdoc.replace('</body>',`<script>
+    addEventListener('message',async event=>{
+      if(event.source!==parent || !event.data?.chartQuery)return;
+      const chart=document.getElementById('chart');
+      if(event.data.zoom)await Plotly.relayout(chart,{'xaxis.range':[0.25,0.75],'xaxis.autorange':false});
+      if(event.data.fail)Plotly.react=()=>Promise.reject(Error('test draw failure'));
+      parent.postMessage({chartQuery:event.data.chartQuery,y:chart.data?.[0]?.y,range:chart.layout?.xaxis?.range},'*');
+    });
     const check=setInterval(()=>{
       const chart=document.getElementById('chart'),status=document.getElementById('status');
       if(chart.dataset.ready!=='true' && !chart.hidden)return;
@@ -69,6 +76,23 @@ try {
   assert.equal(value.display.kind,'plotly');assert.equal(value.display.content,content);assert.equal(value.text,'Chart summary');
   const rendered=renderDisplay(value.display,value.text),ready=observe(rendered.querySelector('iframe'));document.body.append(rendered);
   assert.deepEqual((await ready).y,[0,1,0]);
+  const retained=rendered.querySelector('iframe');
+  const query=options=>new Promise(resolve=>{
+    const chartQuery=crypto.randomUUID();
+    const receive=event=>{if(event.source!==retained.contentWindow || event.data?.chartQuery!==chartQuery)return;window.removeEventListener('message',receive);resolve(event.data);};
+    window.addEventListener('message',receive);retained.contentWindow.postMessage({chartQuery,...options},'*');
+  });
+  await query({zoom:true});retained.style.height='530px';
+  const update=raw(JSON.stringify({data:[{type:'scatter',x:[0,1,2],y:[3,4,5]}],layout:{title:{text:'Updated'}}}));
+  assert(rendered.update(update,'Updated summary'));await rendered.rendered;
+  assert.equal(rendered.querySelector('iframe'),retained);assert.equal(retained.style.height,'530px');
+  assert.equal(retained.title,'Updated summary');assert.match(rendered.querySelector('pre').textContent,/Updated summary/);
+  assert.deepEqual((await query({})).y,[3,4,5]);assert.deepEqual((await query({})).range,[0.25,0.75]);
+  assert(rendered.update(raw(content),'first'));assert(rendered.update(update,'latest'));await rendered.rendered;
+  assert.deepEqual((await query({})).y,[3,4,5]);
+  await query({fail:true});assert(rendered.update(raw(content),'Failed summary'));await rendered.rendered;
+  assert.equal(rendered.update(update,'retry'),false);rendered.dispose();assert.equal(rendered.update(update,'disposed'),false);
+  pass('compatible charts retain frame, zoom, height and fallback; overlapping updates converge and failures/disposal settle');
   const oversized=await session.request({operation:'document',action:'evaluate',format:'roc',source:'import Display\ngrow = |s, n| if n == 0 { s } else { grow(Str.concat(s,s),n - 1) }\n# %%\nDisplay.plotly("Too big",grow("AAAA",16))'});
   assert.equal(oversized.status,'ok');assert.equal(oversized.evaluation.values[0].display.kind,'text');assert.match(oversized.evaluation.values[0].text,/JSON is limited to 128 KiB/);
   pass('WASM evaluates Display.plotly, preserves its JSON and text, and bounds oversized figures');

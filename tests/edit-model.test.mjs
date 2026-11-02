@@ -235,3 +235,73 @@ test('Stop and timeout release activity immediately and ignore late package noti
   const disposed=notebook.run();await waitFor(()=>requests.length===3);
   notebook.dispose();assert.equal(notebook.busy,false);await disposed;
 });
+
+test('automatic requests retain one worker and only the latest queued workspace',async()=>{
+  const workers=[];
+  class Worker {sent=[];constructor(){workers.push(this);}postMessage(value){this.sent.push(value);}terminate(){this.terminated=true;}}
+  const session=new DocumentSession(new ArrayBuffer(1),Worker);
+  const files=source=>[{path:'/workspace/Geometry.roc',source}];
+  const first=session.request({source:'first',files:files('one')},{queue:true});
+  const replaced=session.request({source:'replaced',files:files('two')},{queue:true});
+  const aborted=assert.rejects(replaced,{name:'AbortError'});
+  const last=session.request({source:'last',files:files('three')},{queue:true});
+  await aborted;assert.equal(workers.length,1);assert.equal(workers[0].sent.length,1);
+  workers[0].onmessage({data:{result:{status:'ok'}}});await first;
+  assert.equal(workers[0].sent.length,2);assert.equal(workers[0].sent[1].request.source,'last');
+  assert.deepEqual(workers[0].sent[1].workspace.put,files('three'));
+  workers[0].onmessage({data:{result:{status:'ok'}}});await last;
+  assert(!workers[0].terminated);session.stop();
+});
+
+test('Stop rejects active and queued requests; superseding a slow request restarts only the latest',async()=>{
+  const workers=[];
+  class Worker {constructor(){workers.push(this);}postMessage(){}terminate(){this.terminated=true;}}
+  const session=new DocumentSession(new ArrayBuffer(1),Worker);
+  const active=session.request({source:'slow'},{queue:true});
+  const activeRejected=assert.rejects(active,{name:'AbortError'});
+  session.started=performance.now()-1000;
+  const latest=session.request({source:'latest'},{queue:true});
+  await activeRejected;assert(workers[0].terminated);assert.equal(workers.length,2);
+  workers[1].onmessage({data:{result:{status:'ok'}}});await latest;
+  const a=session.request({source:'a'},{queue:true}),b=session.request({source:'b'},{queue:true});
+  const rejected=Promise.all([assert.rejects(a,{name:'AbortError'}),assert.rejects(b,{name:'AbortError'})]);
+  session.stop();await rejected;assert.equal(session.queued,null);
+});
+
+test('live previews are presentation-only and source edits revoke their eligibility',async t=>{
+  const {notebook,requests}=pendingNotebook(t,{deferScheduling:true});
+  const first=notebook.run(undefined,{automatic:true});await waitFor(()=>requests.length===1);
+  notebook.setInputValue('frequency',2);
+  const second=notebook.run(undefined,{automatic:true});await waitFor(()=>requests.length===2);
+  const old=documentResult();requests[0].resolve(old);await first;
+  assert.equal(notebook.result,null);assert.equal(notebook.presentation.result,old);
+  const current=documentResult();requests[1].resolve(current);await second;
+  assert.equal(notebook.result,current);assert.equal(notebook.presentation,null);
+  const third=notebook.run(undefined,{automatic:true});await waitFor(()=>requests.length===3);
+  notebook.editCell(0,'2 + 2');requests[2].resolve(old);await third;
+  assert.equal(notebook.result,null);assert.equal(notebook.presentation,null);
+});
+
+test('queued snapshots are owned immediately and dispatch notification waits for the active result',async()=>{
+  let worker,dispatched=0;
+  class Worker {constructor(){worker=this;}postMessage(value){this.sent=value;}terminate(){}}
+  const session=new DocumentSession(new ArrayBuffer(1),Worker);
+  const first=session.request({source:'first'},{queue:true});
+  const snapshot={source:'owned',files:[{path:'/workspace/New.roc',source:'original'}]};
+  const next=session.request(snapshot,{queue:true,onDispatch:()=>dispatched++});
+  snapshot.source='mutated';snapshot.files[0].source='mutated';assert.equal(dispatched,0);
+  worker.onmessage({data:{result:{status:'ok'}}});await first;
+  assert.equal(dispatched,1);assert.equal(worker.sent.request.source,'owned');
+  assert.equal(worker.sent.workspace.put[0].source,'original');
+  worker.onmessage({data:{result:{status:'ok'}}});await next;session.stop();
+});
+
+test('a late older automatic response cannot become a preview after a current response',async t=>{
+  const {notebook,requests}=pendingNotebook(t,{deferScheduling:true});
+  const older=notebook.run(undefined,{automatic:true});await waitFor(()=>requests.length===1);
+  notebook.setInputValue('frequency',2);
+  const newer=notebook.run(undefined,{automatic:true});await waitFor(()=>requests.length===2);
+  const current=documentResult();requests[1].resolve(current);await newer;
+  requests[0].resolve(documentResult());await older;
+  assert.equal(notebook.result,current);assert.equal(notebook.presentation,null);
+});

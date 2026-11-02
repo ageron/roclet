@@ -23,6 +23,10 @@ export const widgetBootstrap = `<script>
 
 export function connectWidget(root,frame,config,onInput) {
   let port, disposed=false, current=config.value;
+  let rendered;root.rendered=new Promise(resolve=>{rendered=resolve;});
+  const timer=setTimeout(()=>{
+    frame.hidden=true;root.querySelector('details')?.setAttribute('open','');rendered();
+  },20000);
   const send=()=>port?.postMessage({type:'value',value:current});
   frame.onload=()=>{
     port?.close();
@@ -31,7 +35,7 @@ export function connectWidget(root,frame,config,onInput) {
     port.onmessage=event=>{
       if(disposed || !root.isConnected || !frame.isConnected) return;
       const message=event.data;
-      if(message?.type==='ready') {send();return;}
+      if(message?.type==='ready') {clearTimeout(timer);send();rendered();return;}
       if(message?.type!=='value' || typeof message.value!=='number' || !Number.isFinite(message.value) || message.value<config.min || message.value>config.max) return;
       if(message.value===current) return;
       current=message.value;onInput(config.key,current);
@@ -41,5 +45,5 @@ export function connectWidget(root,frame,config,onInput) {
     frame.contentWindow.postMessage({type:'roclet-connect'},'*',[channel.port2]);
   };
   root.setWidgetValue=value=>{current=value;send();};
-  root.dispose=()=>{disposed=true;frame.onload=null;port?.close();};
+  root.dispose=()=>{clearTimeout(timer);rendered();disposed=true;frame.onload=null;port?.close();};
 }

@@ -102,7 +102,7 @@ try {
     });
   </script>`;
   const bridgeSource=`import Display\nimport Input\n# %%\ncontrol = Input.custom({key: "custom", label: "Custom", min: 1, max: 20, default: 5, html: ${JSON.stringify(bridgeHtml)}})\nout_control = control.display\n# %%\nout_area = control.value * 3`;
-  let bridgeValue;const bridgeMessage=event=>{if(event.source===bridgeFrame?.contentWindow && 'customValue' in (event.data??{}))bridgeValue=event.data.customValue;};
+  let bridgeValue;const bridgeMessage=event=>{if(event.source===(bridgeFrame??document.querySelector('#cells iframe'))?.contentWindow && 'customValue' in (event.data??{}))bridgeValue=event.data.customValue;};
   let bridgeFrame;window.addEventListener('message',bridgeMessage);
   try {
     await notebook.open(bridgeSource,'Custom input.roc');notebook.setAuto(false);await notebook.run();

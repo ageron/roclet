@@ -95,7 +95,7 @@ export class NotebookPanel {
         const richKey=JSON.stringify([content.display??null,content.text]);
         if(block.richKey!==richKey) {
           const existing=block.querySelector(':scope > .rich-output');
-          if(!existing?.updateInput?.(content.display,content.text)) {
+          if(!existing?.update?.(content.display,content.text)) {
             existing?.dispose?.();existing?.remove();
             const id=notebook.state.id;
             const rich=renderDisplay(content.display,content.text,{onInput:(key,value)=>{
@@ -114,6 +114,7 @@ export class NotebookPanel {
       block.title = stale ? `From an earlier run. ${updating ? 'Updating…' : 'Awaiting an update.'}` : '';
       if (block.parentNode !== view.results) view.results.append(block);
     }
+    notebook.presentationReady=()=>Promise.all([...root.querySelectorAll('.rich-output')].map(node=>node.rendered)).then(()=>{const drawnAt=performance.now();return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve({drawnAt,paintOpportunityAt:performance.now()}))));});
     const editable = () => notebook.state.cells.filter(c => c.kind !== 'generated');
     const cellIndex = key => notebook.state.cells.findIndex(c => c.key === key);
     function focusHeader() {
@@ -445,8 +446,9 @@ export class NotebookPanel {
       $('rename-dialog').showModal();$('rename-name').select();
     }
     function renderResults() {
-      const result = notebook.result;
-      const showDiagnostics = !notebook.diagnosticsDeferred;
+      const preview=!notebook.result && notebook.presentation;
+      const result = notebook.result ?? preview?.result;
+      const showDiagnostics = !notebook.diagnosticsDeferred && !preview;
       const diagnostics = part('document-diagnostics');
       diagnostics.replaceChildren();
       for (const view of cards.values()) {
@@ -491,7 +493,7 @@ export class NotebookPanel {
           const removedOutput = evaluated && !root;
           const type = value && result.evaluation.definitions?.find(d => d.name === root)?.type;
           const displayed = value ? { heading:`Result${type ? ` · ${type}` : ''}`, text:value.text, display:value.display } : removedOutput ? null : view.observations.value;
-          renderObservation(view, 'value', displayed, !value);
+          if(!preview || !['input','slider'].includes(value?.display?.kind)) renderObservation(view, 'value', displayed, !!preview || !value);
           if (!displayed && showDiagnostics) view.meta.textContent = result?.status === 'diagnostic' ? 'Blocked by document diagnostics' : '';
           const error = result?.evaluation?.root_errors?.find(e=>e.root===root);
           if (error && showDiagnostics) view.results.append(outputBlock('Output failed',error.failure ?? error.status,'diagnostic'));
@@ -507,7 +509,7 @@ export class NotebookPanel {
             heading:testFailures.length ? `Tests · ${testFailures.length} failed, ${tests.length-testFailures.length} passed` : `Tests · ${tests.length} passed`,
             text:tests.map(t=>{const at=testLocation(t);return `${t.passed?'PASS':'FAIL'}${at?` · line ${at.line}:${at.column}`:''}: ${t.message}`;}).join('\n'),
           } : evaluated ? null : view.observations.tests;
-          renderObservation(view, 'tests', testContent, !tests.length);
+          renderObservation(view, 'tests', testContent, !!preview || !tests.length);
           view.outputBlocks.tests?.classList.toggle('diagnostic', testFailures.length>0);
           if (tests.length && view.outputBlocks.tests) {
             const heading=view.outputBlocks.tests.querySelector('.result-heading');
@@ -517,7 +519,7 @@ export class NotebookPanel {
           const events = transcript.filter(e => e.cell === index);
           const debug = events.length ? { heading:!error && ['ok','partial'].includes(result.status) ? 'Debug · current result' : 'Debug · failed run', text:events.map(e => `${e.kind === 'dbg' ? 'dbg' : e.kind}: ${e.message}`).join('\n') }
             : value || removedOutput ? null : view.observations.debug;
-          renderObservation(view, 'debug', debug, !events.length);
+          renderObservation(view, 'debug', debug, !!preview || !events.length);
           const imported=notebook.state.savedResults?.snapshots?.filter(s=>s.cell===index)??[];
           if(!displayed) for(const saved of imported) view.results.append(outputBlock('Imported result · unverified',saved.text,'unverified',saved.display));
           const importedDebug=notebook.state.savedResults?.events?.filter(e=>e.cell===index)??[];
@@ -530,6 +532,11 @@ export class NotebookPanel {
       if (unassigned.length) diagnostics.append(outputBlock('Notebook debug', unassigned.map(e => e.message).join('\n'), 'debug'));
       if (notebook.state.mode === 'source' && result?.evaluation?.tests?.length) diagnostics.append(outputBlock('Tests',result.evaluation.tests.map(t=>`${t.passed?'PASS':'FAIL'}${t.location?` · source ${t.location.line}:${t.location.column}`:''}: ${t.message}`).join('\n'),result.evaluation.tests.some(t=>!t.passed)?'diagnostic':''));
       if (notebook.state.mode === 'source' && result?.status === 'ok' && result?.evaluation?.values?.length) diagnostics.append(outputBlock('Current results', result.evaluation.values.map(v => `${v.root}: ${v.text}`).join('\n')));
+    }
+    let resultsFrame;
+    function deferResults() {
+      if(resultsFrame)return;
+      resultsFrame=requestAnimationFrame(()=>{resultsFrame=null;renderResults();});
     }
     function reflect(reason) {
       if (!notebook?.state) return;
@@ -560,8 +567,18 @@ export class NotebookPanel {
       if (reason === 'edit' && s.mode === 'source') for (const view of cards.values()) clearObservations(view, renderObservation);
       if (reason === 'document') renderCells();
       renderSelection();
-      if (reason === 'result' || reason === 'edit' || reason === 'input' || reason === 'diagnostics') renderResults();
-      if (!notebook.result && reason === 'status') renderResults();
+      if(reason==='input') {
+        for(const view of cards.values())for(const block of Object.values(view.outputBlocks)){
+          block.dataset.stale='true';block.dataset.updating=String(s.autoRun);
+          block.setAttribute('aria-label','Result from an earlier run, updating');
+        }
+        deferResults();
+      } else if (reason === 'preview' || reason === 'result' || reason === 'edit' || reason === 'diagnostics') {
+        cancelAnimationFrame(resultsFrame);resultsFrame=null;renderResults();
+      }
+      if (!notebook.result && reason === 'status') {
+        if(notebook.automaticActive)deferResults();else renderResults();
+      }
       if(!part('find-bar').hidden && searchSnapshot!==searchIdentity()){searchMatches=[];searchStatus('Searching…');clearTimeout(searchRefresh);searchRefresh=setTimeout(()=>updateFind(),120);}
     }
     const sourceEditor=new CellEditor(part('source'),{highlighter,
@@ -715,7 +732,7 @@ export class NotebookPanel {
         if (schedule) notebook.resumeScheduling();
       }
     };
-    this.disposeEditors = () => { titleSize.disconnect(); searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++; sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) {view.editor.destroy();for(const rich of view.results.querySelectorAll('.rich-output'))rich.dispose?.();} };
+    this.disposeEditors = () => { cancelAnimationFrame(resultsFrame);titleSize.disconnect(); searchWorker?.terminate();clearTimeout(searchTimer);clearTimeout(searchRefresh);searchGeneration++; sourceEditor.destroy(); headerEditor.destroy(); for (const view of cards.values()) {view.editor.destroy();for(const rich of view.results.querySelectorAll('.rich-output'))rich.dispose?.();} };
   }
   get title() { return this.notebook.state?.title || 'Untitled'; }
   get loading() { return this.root.dataset.loading === 'true'; }

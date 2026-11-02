@@ -66,14 +66,14 @@ export class Notebook {
     this.state = null; this.result = null; this.history = []; this.future = []; this.views = new Map();
     this.diagnosticsDeferred = false; this.lastChecked = null; this.baselineId = null; this.resetBaseline = false;
     this.runId = 0; this.saveVersion = 0; this.status = 'Ready'; this.saveStatus = 'Not saved yet'; this.saveChain = Promise.resolve();
-    this.activeOperation = null;
+    this.activeOperation = null; this.interactionId=0; this.historySizes=new WeakMap(); this.contentEpoch=0; this.presentation=null;
   }
   setInputValue(key, value) {
     const values=inputValues({...this.state.inputValues,[key]:value});
     if(this.state.inputValues?.[key]===value) return;
     this.change(s=>{s.inputValues=values;}, {group:`input:${key}`,source:this.state.sourceCurrent,reason:'input'});
   }
-  get busy() { return this.activeOperation === this.runId; }
+  get busy() { return this.activeOperation === this.runId || !!this.session.pending || !!this.session.queued; }
   finishOperation(token) {
     if (this.activeOperation !== token) return;
     this.activeOperation = null;
@@ -103,6 +103,7 @@ export class Notebook {
     this.saveStatus = 'Saving in this browser…'; this.emit();
     const saved = this.saveChain.catch(() => {}).then(() => this.store.save(record));
     this.saveChain = saved;
+    this.lastPersist={id,revision,promise:saved.then(()=>true,()=>false)};
     try {
       await saved;
       if (this.state.id === id && this.state.revision === revision && saveVersion === this.saveVersion) { this.saveStatus = 'Saved in this browser'; this.emit('saved'); }
@@ -121,23 +122,34 @@ export class Notebook {
   }
   get downloadedCurrent() { return !!this.state && this.downloaded?.id === this.state.id && this.downloaded.revision === this.state.revision; }
   async keep() { return await this.persist() || this.downloadedCurrent; }
-  cancelPending() {
-    clearTimeout(this.timer); this.timer = null; this.runId++; this.activeOperation = null; this.session.invalidate();
+  cancelPending({soft=false}={}) {
+    clearTimeout(this.timer); this.timer = null; this.runId++; this.activeOperation = null;
+    if(soft) this.session.clearQueued?.();else this.session.invalidate();
   }
-  invalidate() {
-    this.cancelPending();
+  invalidate({soft=false}={}) {
+    if(!soft){this.contentEpoch++;this.presentation=null;}
+    this.cancelPending({soft});
     this.result = null; this.status = 'Changed · results need updating';
+  }
+  historySize() {
+    return this.history.reduce((size,record)=>{
+      let bytes=this.historySizes.get(record);
+      if(bytes==null){bytes=JSON.stringify(record).length;this.historySizes.set(record,bytes);}
+      return size+bytes+1;
+    },1);
   }
   change(update, { group = null, source = false, composing = false, reason = 'document' } = {}) {
     const now = Date.now();
     if (!group || this.group !== group || now - this.groupAt > 800) this.history.push(clone(this.state));
     // Bound browser-only undo history without writing IDs into the source.
-    while (this.history.length > 100 || (this.history.length > 1 && JSON.stringify(this.history).length > 4 * 1024 * 1024)) this.history.shift();
+    while (this.history.length > 100 || (this.history.length > 1 && this.historySize() > 4 * 1024 * 1024)) this.history.shift();
     this.group = group; this.groupAt = now; this.future = []; this.views.clear();
-    this.invalidate(); update(this.state); delete this.state.savedResults; this.state.revision++; this.state.sourceCurrent = source;
+    if(reason!=='input'){this.contentEpoch++;this.presentation=null;}
+    this.invalidate({soft:this.automaticActive}); update(this.state); delete this.state.savedResults; this.state.revision++; this.state.sourceCurrent = source;
+    this.interaction={id:++this.interactionId,revision:this.state.revision,receivedAt:performance.now()};
     trimAttachmentHistory(this.history,this.state);
     this.emit(reason); void this.persist();
-    if (!composing) this.schedule();
+    if (!composing) this.schedule({immediate:reason==='input'});
   }
   editCell(index, source, composing = false, positions = null) {
     this.diagnosticsDeferred = true;
@@ -171,14 +183,14 @@ export class Notebook {
   removeAttachment(path) {
     this.setAttachments((this.state.attachments ?? []).filter(file => file.path !== path));
   }
-  schedule() {
+  schedule({immediate=false}={}) {
     clearTimeout(this.timer);
     if (this.schedulingDeferred) { this.timer = null; return; }
     this.timer = setTimeout(async () => {
       this.timer = null;
       if (this.state.autoRun) void this.run(undefined, { automatic: true });
       else void this.check();
-    }, this.debounce);
+    }, immediate?0:this.debounce);
   }
   // A notebook without a document (a panel refused one) has nothing to check.
   resumeScheduling() { this.schedulingDeferred = false; if (this.state) this.schedule(); }
@@ -205,11 +217,12 @@ export class Notebook {
     return request;
   }
   publish(result) {
+    this.publishedRevision=this.state.revision;
     this.result = result;
     if (result.graph) this.lastChecked = result;
     return result;
   }
-  async request(request,{onPackageWaiting,localFile=this.state?.serverFile}={}) {
+  async request(request,{queue=false,onDispatch,onPackageWaiting,localFile=this.state?.serverFile}={}) {
     const runId=this.runId;
     const state=this.state;
     if(serverProject && localFile?.project===serverProject.config.root) {
@@ -222,44 +235,58 @@ export class Notebook {
     }
     if (request.reactivity) { this.baselineId = this.state.id; this.resetBaseline = false; }
     try {
-      return await this.session.request(request,{loadPackage:this.loadPackage,onPackageWaiting:waiting=>{
+      return await this.session.request(request,{queue,onDispatch,loadPackage:this.loadPackage,onPackageWaiting:waiting=>{
+        onPackageWaiting?.(waiting);
         if(runId!==this.runId) return;
-        this.status=waiting?'Waiting for package bundle…':'Running…';this.emit();onPackageWaiting?.(waiting);
+        this.status=waiting?'Waiting for package bundle…':'Running…';this.emit();
       }});
     } catch(error) {
       if(runId===this.runId && error.name==='AbortError') {this.status='Package loading cancelled · run to retry';this.emit();}
       throw error;
     }
   }
-  async check() {
-    try {
-      const result = await this.inspect('analyze'); this.publish(result);
-      this.status = result.status === 'ok' ? 'Ready · run to evaluate' : 'Needs attention'; this.emit('result'); return result;
-    } catch (error) { if (error.name !== 'AbortError') { this.status = error.message; this.emit(); } return null; }
-  }
-  async run(selectedCell, { automatic = false } = {}) {
+  async check() { return this.run(undefined,{automatic:true,checkOnly:true}); }
+  async run(selectedCell, { automatic = false, checkOnly = false } = {}) {
     if (!automatic) this.diagnosticsDeferred = false;
-    this.cancelPending(); const runId = this.runId, revision = this.state.revision, id = this.state.id;
+    this.cancelPending({soft:automatic && this.automaticActive}); this.automaticActive=automatic;
+    const epoch=this.contentEpoch;
+    const interaction=automatic && this.interaction?.revision===this.state.revision?this.interaction:{id:++this.interactionId,revision:this.state.revision,receivedAt:performance.now()};
+    const received=interaction.receivedAt;
+    const runId = this.runId, revision = this.state.revision, id = this.state.id;
     this.activeOperation = runId;
     let timeout;
-    const armTimeout=()=>{timeout=setTimeout(() => { if (runId === this.runId) this.stop('Stopped after 15 seconds · automatic execution paused'); }, this.timeout);};
+    const armTimeout=()=>{timeout=setTimeout(() => { if (runId === this.runId || (this.session instanceof DocumentSession && this.session.pending)) this.stop('Stopped after 15 seconds · automatic execution paused'); }, this.timeout);};
     try {
-      const request = this.reactiveRequest('evaluate', selectedCell, !automatic && selectedCell == null);
+      const request = this.reactiveRequest(checkOnly?'analyze':'evaluate', selectedCell, !automatic && selectedCell == null);
       this.status = 'Saving before evaluation…'; this.emit();
-      await this.persist();
+      await (this.lastPersist?.id===id && this.lastPersist.revision===revision?this.lastPersist.promise:this.persist());interaction.savedAt=performance.now();
       if (runId !== this.runId) return null;
       this.status = 'Running…'; this.emit();
       const started = performance.now();
-      armTimeout();
-      const result = await this.request(request,{onPackageWaiting:waiting=>{clearTimeout(timeout);if(!waiting)armTimeout();}});
-      if (runId !== this.runId || revision !== this.state.revision || id !== this.state.id) return null;
-      this.publish(result);
+      if(!(this.session instanceof DocumentSession))armTimeout();
+      const result = await this.request(request,{queue:automatic,onDispatch:()=>{interaction.dispatchedAt=performance.now();armTimeout();},onPackageWaiting:waiting=>{clearTimeout(timeout);if(!waiting)armTimeout();}});
+      if (runId !== this.runId || revision !== this.state.revision || id !== this.state.id) {
+        if(automatic && epoch===this.contentEpoch && id===this.state.id && revision>Math.max(this.publishedRevision??0,this.presentation?.revision??0)) {
+          this.presentation={result,revision};this.emit('preview');
+        }
+        return null;
+      }
+      this.presentation=null;interaction.workerCompletedAt=performance.now();
+      this.publish(result);interaction.publishedAt=performance.now();
       const count=this.result.evaluation?.values?.length ?? 0, results=`${count} ${count===1?'result':'results'}`;
       this.status = result.status === 'ok' ? `Current · ${results} · ${Math.round(performance.now() - started)} ms` : result.status === 'partial' ? `Current · ${results} · ${result.evaluation.root_errors.length} failed` : result.status === 'diagnostic' ? 'Needs attention · no current results' : 'Run failed · no current results';
       const tests=this.result.evaluation?.tests ?? [], failed=tests.filter(t=>!t.passed).length;
       if (failed) this.status=`Needs attention · ${failed} failed ${failed===1?'test':'tests'} · ${results}`;
       else if (tests.length && result.status==='ok') this.status+=` · ${tests.length} ${tests.length===1?'test':'tests'} passed`;
-      this.emit('result'); return result;
+      if(checkOnly)this.status=result.status==='ok'?'Ready · run to evaluate':'Needs attention';
+      const completedStatus=this.status;
+      this.status='Updating output…';this.emit('result');
+      const presentation=await this.presentationReady?.();
+      Object.assign(interaction,presentation??{drawnAt:performance.now()});result.interaction=interaction;
+      if(runId===this.runId && revision===this.state.revision && id===this.state.id){
+        this.status=completedStatus.replace(/ · \d+ ms/,` · ${Math.round(interaction.drawnAt-received)} ms`);this.emit();
+      }
+      return result;
     } catch (error) {
       if (runId === this.runId && error.name !== 'AbortError') { this.result = null; this.status = `Run failed: ${error.message}`; this.emit('result'); }
       return null;
@@ -286,10 +313,11 @@ export class Notebook {
     this.change(s=>{s.cells=candidate.cells;});
   }
   stop(message = 'Stopped · automatic execution paused') {
-    this.invalidate(); this.session.stop(); this.state.autoRun = false; this.status = message; this.emit(); void this.persist();
+    this.contentEpoch++;this.presentation=null;this.invalidate(); this.session.stop(); this.state.autoRun = false; this.status = message; this.emit(); void this.persist();
   }
   setAuto(value) { this.state.autoRun = value; void this.persist(); if (value) this.schedule(); else { clearTimeout(this.timer); this.timer = null; } this.emit(); }
   async inspect(action = 'parse', target = this.state.format, { draft = false, localFile = this.state?.serverFile } = {}) {
+    this.automaticActive=false;this.contentEpoch++;this.presentation=null;
     clearTimeout(this.timer); this.timer = null;
     const revision = this.state.revision, id = this.state.id, token = ++this.runId;
     this.activeOperation = token;
@@ -347,6 +375,7 @@ export class Notebook {
     const from = redo ? this.future : this.history, to = redo ? this.history : this.future;
     if (!from.length) return;
     if (editing) this.diagnosticsDeferred = true;
+    this.contentEpoch++;this.presentation=null;
     const revision = this.state.revision + 1, serverFile = this.state.serverFile; to.push(clone(this.state)); this.invalidate();
     // Saving to another path is not a document edit and must not be undone.
     this.state = { ...from.pop(), revision, serverFile }; this.group = null; this.views.clear();
@@ -354,14 +383,14 @@ export class Notebook {
   }
   async recoveryCopy() {
     this.diagnosticsDeferred = false;
-    this.invalidate();this.resetBaseline=true;this.state={...clone(this.state),id:key(),title:`${this.state.title.slice(0,100)} (recovery)`,revision:1};delete this.state._storageVersion;delete this.state.serverFile;this.history=[];this.future=[];this.views.clear();this.emit("document");await this.persist();
+    this.invalidate();this.resetBaseline=true;this.publishedRevision=0;this.state={...clone(this.state),id:key(),title:`${this.state.title.slice(0,100)} (recovery)`,revision:1};delete this.state._storageVersion;delete this.state.serverFile;this.history=[];this.future=[];this.views.clear();this.emit("document");await this.persist();
   }
   // Switching away from a draft that cannot be kept is refused with an
   // UnsavedError whose `discard` switches anyway, losing this tab's changes.
   async replace(record, { discard = false } = {}) {
     if (!discard && !await this.keep()) throw unsavedError(`The current draft could not be saved, so the other document was not opened. ${this.saveStatus}`, 'Switch without saving (discards unsaved changes in this tab)', () => this.replace(record, { discard: true }));
     this.diagnosticsDeferred = false;
-    this.invalidate(); this.resetBaseline = true; this.state = clone(record); this.history = []; this.future = []; this.views.clear(); this.group = null;
+    this.contentEpoch++;this.presentation=null;this.invalidate(); this.resetBaseline = true; this.publishedRevision=0; this.state = clone(record); this.history = []; this.future = []; this.views.clear(); this.group = null;
     this.emit('document'); await this.persist(); this.schedule();
   }
   async open(source, filename) {
@@ -372,5 +401,5 @@ export class Notebook {
     }
     await this.mode('notebook');
   }
-  dispose() { clearTimeout(this.timer); this.runId++; this.activeOperation = null; this.session.stop(); }
+  dispose() { this.contentEpoch++;this.presentation=null;clearTimeout(this.timer); this.runId++; this.activeOperation = null; this.session.stop(); }
 }
