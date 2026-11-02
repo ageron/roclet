@@ -76,6 +76,7 @@ pub fn main(init: std.process.Init) !void {
         "index.html",
         "web/home.mjs",
         "web/open-notebook.mjs",
+        "web/gist.mjs",
         "web/install.html",
         "web/notebook-search-worker.mjs",
         "web/home.css",

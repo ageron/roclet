@@ -271,3 +271,35 @@ test('switching away from a draft that cannot be saved offers to switch without 
   await error.discard();assert.equal(left.notebook.state.id,b.id);
   bench.dispose();
 });
+
+
+test('the curated Gist example loads the pinned API response without auto-running', async () => {
+  const {bench} = fakeWorkbench(new Map());
+  // Synthetic API contents; the real demo lives exclusively in the Gist.
+  const files = {
+    'notebook.md': {content:'# Test notebook'},
+    'library.roc': {content:'package [Library] {}'},
+    'Library.roc': {content:'Library := []'},
+    'notes.txt': {content:'Test attachment'},
+  };
+  let requests = 0;
+  bench.fetch = async url => {
+    requests++;
+    assert.match(url, /^https:\/\/api.github.com\/gists\/[a-f0-9]+\/[a-f0-9]{40}$/);
+    return new Response(JSON.stringify({files}));
+  };
+  try {
+    const panel = await bench.addPanel('left');
+    await bench.load(panel, {example:'gist-garden'});
+    const state = panel.notebook.state;
+    assert.equal(requests, 1);
+    assert.equal(state.title, 'A garden plan from a Gist');
+    assert.equal(state.autoRun, false);
+    assert.equal(state.mode, 'notebook');
+    assert.deepEqual(state.files.map(f=>f.path).sort(), ['Library.roc','library.roc']);
+    assert.equal(state.files.find(f=>f.path==='library.roc').source, 'package [Library] {}');
+    assert.equal(await state.attachments[0].blob.text(), 'Test attachment');
+    assert.deepEqual(parseSlot('example:gist-garden'), {example:'gist-garden'});
+    assert.equal(layoutUrl('https://roclet.test/web/edit.html?gist=abc123&gistFile=notes.roc', {left:'A',right:'B'}), '/web/edit.html?notebook=A&right=B');
+  } finally { bench.dispose(); }
+});
