@@ -98,14 +98,16 @@ jobs:
         run: |
           zig build local-server
           node --test tests/*.test.mjs
-      - name: Test Display package pin updates
-        run: python3 tests/test-package-pin.py
+      - name: Test package pin updates and installer
+        run: |
+          python3 tests/test-package-pin.py
+          python3 tests/test-installers.py
       - name: Package the verified site
         run: zig build package $ROCLET_BUILD_FLAGS -Dcached-engines=.engine-cache --summary all
       - name: Smoke-test the server distribution
         run: |
           python3 tools/release-server.py --site zig-out/roclet-pages.zip --binary zig-out/bin/roclet-serve --platform linux-x64 --version 0.0.0 --output zig-out/server-release
-          python3 tests/test-server-release.py zig-out/server-release/roclet-linux-x64.tar.gz
+          python3 tests/test-server-release.py zig-out/server-release/roclet-0.0.0-linux-x64.tar.gz
       - name: Run Chrome conformance tests
         run: |
           node tools/test-browser.mjs

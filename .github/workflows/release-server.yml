@@ -116,7 +116,13 @@ jobs:
           VERSION: ${{ needs.site.outputs.version }}
         run: |
           python tools/release-server.py --site verified-site/roclet-pages.zip --binary server-bin/${{ matrix.executable }} --platform ${{ matrix.platform }} --version "$VERSION" --output release
-          python tests/test-server-release.py release/roclet-${{ matrix.platform }}.*
+          python tests/test-server-release.py release/roclet-"$VERSION"-${{ matrix.platform }}.*
+      - name: Test Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.site.outputs.version }}
+        run: ./tests/test-installer.ps1 -Archive "release/roclet-$env:VERSION-windows-x64.zip" -Version $env:VERSION
       - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.platform }}
@@ -144,4 +150,4 @@ jobs:
           set -euo pipefail
           (cd release && sha256sum *.tar.gz *.zip > SHA256SUMS)
           printf 'Roclet server %s\n\nDownload the archive for your OS and architecture, extract it, and run roclet serve (roclet.exe serve on Windows). Keep the web assets beside the executable.\n\nInstallation: https://ageron.github.io/roclet/web/install.html\n\nBuilt from %s. The browser site passed Roclet CI; each server archive was smoke-tested on its platform.\n' "$VERSION" "$GITHUB_SHA" > notes.txt
-          gh release create "server-v$VERSION" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Roclet server $VERSION" --notes-file notes.txt --latest=false
+          gh release create "server-v$VERSION" release/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Roclet server $VERSION" --notes-file notes.txt --latest

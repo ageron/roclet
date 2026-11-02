@@ -33,7 +33,7 @@ def package(site, binary, platform, version, output):
             'Use --port 4174 to choose another port. No Zig or Roc installation is needed.\n'
             'This archive serves the browser app; it does not include the headless notebook runner.\n'
             'Installation: https://ageron.github.io/roclet/web/install.html\n', encoding='utf-8')
-        name = f'roclet-{platform}'
+        name = f'roclet-{version}-{platform}'
         if executable.endswith('.exe'):
             destination = output / f'{name}.zip'
             with zipfile.ZipFile(destination, 'w', zipfile.ZIP_DEFLATED) as archive:

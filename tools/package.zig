@@ -74,6 +74,8 @@ pub fn main(init: std.process.Init) !void {
     var paths: std.ArrayList([]const u8) = .empty;
     for ([_][]const u8{
         "index.html",
+        "install.sh",
+        "install.ps1",
         "web/home.mjs",
         "web/open-notebook.mjs",
         "web/gist.mjs",

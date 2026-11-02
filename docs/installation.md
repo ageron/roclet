@@ -158,14 +158,40 @@ has separate drafts. Browser storage can be cleared or evicted, so keep download
 copies of important work. When an update is prepared, close all Roclet tabs and
 reopen to activate it.
 
-## Run a downloaded release locally
+## Install the latest server
 
-See the [server installation page](https://ageron.github.io/roclet/web/install.html)
-for macOS, Windows, and Linux downloads and PATH setup. Extract the archive for
-your computer, keep its files together, and run `./roclet serve` (`.\roclet.exe serve` in
-PowerShell). Open the private token URL printed in the terminal; press Ctrl+C to stop the server.
-No Roc or Zig installation is needed. This server distribution is separate from
-the source-built headless runner described below.
+On macOS or Linux:
+
+```sh
+curl -fsSL https://ageron.github.io/roclet/install.sh -o /tmp/roclet-install.sh
+sh /tmp/roclet-install.sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+Invoke-WebRequest https://ageron.github.io/roclet/install.ps1 -OutFile "$env:TEMP/roclet-install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP/roclet-install.ps1"
+```
+
+The scripts select the latest server release, detect your platform, and verify
+SHA256SUMS before installing. You can inspect the script before running it.
+No administrator access, Roc, or Zig installation is needed. On macOS/Linux,
+follow the printed PATH instruction if needed; Windows updates your user PATH.
+Then run `roclet serve` in your project directory and open the private token URL.
+Press Ctrl+C to stop the server.
+
+Run the installer again to upgrade. To select a specific version, pass `0.2.0`
+to the shell script or `-Version 0.2.0` to the PowerShell script. Files live in
+`~/.local/share/roclet/versions` (macOS/Linux) or `%LOCALAPPDATA%/Roclet/versions`
+(Windows); older versions are retained. The launcher lives in `~/.local/bin`
+or `%LOCALAPPDATA%/Roclet/bin`, respectively.
+
+See the [installation page](https://ageron.github.io/roclet/web/install.html)
+for manual downloads. Archives are named `roclet-VERSION-PLATFORM.tar.gz`
+(or `.zip` on Windows); keep the extracted executable and web assets together.
+The server distribution is separate from the source-built headless runner below.
+New server releases are marked as GitHub's latest release for the installers.
 
 ## HTTPS with Caddy
 

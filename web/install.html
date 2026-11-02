@@ -18,26 +18,30 @@
 <h1>Install the Roclet server</h1>
 <p>You can <a href="../">use Roclet in your browser</a> without installing anything. Use the optional server when you want to open and save notebooks directly in a local project, alongside your modules and data files. It also downloads and caches GitHub release packages automatically, so you don’t have to download and upload bundles by hand.</p>
 <p>This is useful for projects you manage with Git or edit with other tools. You keep the same interactive notebook interface, and code still runs in your browser. No Roc or Zig installation is needed.</p>
-<h2>1. Download and extract</h2>
-<p>Open <a href="https://github.com/ageron/roclet/releases">GitHub releases</a> and choose a <strong>Roclet server</strong> release, then download the archive for your computer.</p>
-<table><thead><tr><th>Computer</th><th>Archive</th></tr></thead><tbody>
-<tr><td>Mac · Apple Silicon</td><td><code>roclet-macos-arm64.tar.gz</code></td></tr>
-<tr><td>Mac · Intel</td><td><code>roclet-macos-x64.tar.gz</code></td></tr>
-<tr><td>Windows · x64</td><td><code>roclet-windows-x64.zip</code></td></tr>
-<tr><td>Linux · x64</td><td><code>roclet-linux-x64.tar.gz</code></td></tr>
-<tr><td>Linux · ARM64</td><td><code>roclet-linux-arm64.tar.gz</code></td></tr>
-</tbody></table>
-<p>Extract the archive and keep the resulting <code>roclet</code> folder somewhere permanent. Keep the executable and its folders together.</p>
+<h2>1. Install</h2>
+<p>On macOS or Linux, run:</p>
+<pre><code>curl -fsSL https://ageron.github.io/roclet/install.sh -o /tmp/roclet-install.sh
+sh /tmp/roclet-install.sh</code></pre>
+<p>On Windows, run in PowerShell:</p>
+<pre><code>Invoke-WebRequest https://ageron.github.io/roclet/install.ps1 -OutFile "$env:TEMP/roclet-install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP/roclet-install.ps1"</code></pre>
+<p>The installer downloads the latest server release for your computer and verifies its checksum. No administrator access is needed. You can inspect the downloaded script before running it. Run it again to upgrade, or pass a version (<code>sh /tmp/roclet-install.sh 0.2.0</code>, or <code>-Version 0.2.0</code> in PowerShell).</p>
+<p>On macOS and Linux, follow the printed instruction to add <code>~/.local/bin</code> to your PATH if needed. Windows adds the command to your user PATH; open a new terminal if necessary. Previous versions remain installed.</p>
 <h2>2. Start Roclet</h2>
-<p>Open a terminal in the extracted folder. You can also pass a project directory or notebook filename after <code>serve</code>. On macOS or Linux:</p>
-<pre><code>./roclet serve</code></pre>
-<p>On Windows, in PowerShell:</p>
-<pre><code>.\roclet.exe serve</code></pre>
-<p>Open the private URL printed in your terminal (it starts with <code>http://127.0.0.1:4173/?token=</code>). Keep it private: it grants access to your project. Keep the terminal running; press Ctrl+C to stop the server. If the port is busy, use <code>--port 4174</code>. Run <code>roclet --help</code> for options and examples.</p>
-<h2>Optional: use the roclet command anywhere</h2>
-<p>Add the extracted folder to your PATH. On macOS or Linux, add this line to your shell configuration (such as <code>~/.zshrc</code> or <code>~/.bashrc</code>), replacing the path:</p>
-<pre><code>export PATH="/absolute/path/to/roclet:$PATH"</code></pre>
-<p>On Windows, search for <strong>Edit environment variables for your account</strong>, edit your user <strong>Path</strong>, and add the extracted folder. Open a new terminal, then run <code>roclet serve</code>.</p>
+<p>Open a terminal in your notebook project and run:</p>
+<pre><code>roclet serve</code></pre>
+<p>You can also pass a project directory or notebook filename after <code>serve</code>. Open the private URL printed in your terminal (it starts with <code>http://127.0.0.1:4173/?token=</code>). Keep it private: it grants access to your project. Keep the terminal running; press Ctrl+C to stop the server. If the port is busy, use <code>--port 4174</code>. Run <code>roclet --help</code> for options and examples.</p>
+<details><summary>Manual installation</summary>
+<p>Download an archive from the <a href="https://github.com/ageron/roclet/releases/latest">latest server release</a>. Replace <code>VERSION</code> below with the release version.</p>
+<table><thead><tr><th>Computer</th><th>Archive</th></tr></thead><tbody>
+<tr><td>Mac · Apple Silicon</td><td><code>roclet-VERSION-macos-arm64.tar.gz</code></td></tr>
+<tr><td>Mac · Intel</td><td><code>roclet-VERSION-macos-x64.tar.gz</code></td></tr>
+<tr><td>Windows · x64</td><td><code>roclet-VERSION-windows-x64.zip</code></td></tr>
+<tr><td>Linux · x64</td><td><code>roclet-VERSION-linux-x64.tar.gz</code></td></tr>
+<tr><td>Linux · ARM64</td><td><code>roclet-VERSION-linux-arm64.tar.gz</code></td></tr>
+</tbody></table>
+<p>Extract the archive and keep the resulting <code>roclet</code> folder somewhere permanent. Keep the executable and its folders together. From that folder, run <code>./roclet serve</code> on macOS/Linux or <code>.\roclet.exe serve</code> in PowerShell. Add the folder to your PATH to use <code>roclet</code> anywhere.</p>
+</details>
 <h2>Optional HTTPS with Caddy</h2>
 <p>For use on the same computer, ordinary local HTTP is enough. For HTTPS, <a href="https://caddyserver.com/docs/install">install Caddy</a> and run it alongside Roclet. Caddy handles encryption and certificates; Roclet still requires its private token URL.</p>
 <h3>On this computer</h3>
