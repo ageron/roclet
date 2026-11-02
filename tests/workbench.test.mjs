@@ -1,5 +1,4 @@
 import {test} from 'node:test';
-import {readFile} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {assignPanelIds,partId,engineDetails,engineStats,engineDetailsKey,readPreference,writePreference,parseLayout,parseSlot,layoutUrl,openDecision,documentTitle,statusDot,Workbench} from '../web/workbench.mjs';
 import {PackagePrompts} from '../web/package-dialog.mjs';
@@ -274,10 +273,15 @@ test('switching away from a draft that cannot be saved offers to switch without 
 });
 
 
-test('the curated Gist example loads a pinned relative package and attachments without auto-running', async () => {
+test('the curated Gist example loads the pinned API response without auto-running', async () => {
   const {bench} = fakeWorkbench(new Map());
-  const names = ['notebook.roc','garden.roc','Garden.roc','Spacing.roc','planting-notes.txt'];
-  const files = Object.fromEntries(await Promise.all(names.map(async name => [name, {content:await readFile(new URL(`../demos/gist-garden/${name}`, import.meta.url), 'utf8')}])));
+  // Synthetic API contents; the real demo lives exclusively in the Gist.
+  const files = {
+    'notebook.md': {content:'# Test notebook'},
+    'library.roc': {content:'package [Library] {}'},
+    'Library.roc': {content:'Library := []'},
+    'notes.txt': {content:'Test attachment'},
+  };
   let requests = 0;
   bench.fetch = async url => {
     requests++;
@@ -292,9 +296,9 @@ test('the curated Gist example loads a pinned relative package and attachments w
     assert.equal(state.title, 'A garden plan from a Gist');
     assert.equal(state.autoRun, false);
     assert.equal(state.mode, 'notebook');
-    assert.deepEqual(state.files.map(f=>f.path).sort(), ['Garden.roc','Spacing.roc','garden.roc']);
-    assert.equal(state.files.find(f=>f.path==='garden.roc').source, 'package [Garden] {}\n');
-    assert.match(await state.attachments[0].blob.text(), /Garden notes/);
+    assert.deepEqual(state.files.map(f=>f.path).sort(), ['Library.roc','library.roc']);
+    assert.equal(state.files.find(f=>f.path==='library.roc').source, 'package [Library] {}');
+    assert.equal(await state.attachments[0].blob.text(), 'Test attachment');
     assert.deepEqual(parseSlot('example:gist-garden'), {example:'gist-garden'});
     assert.equal(layoutUrl('https://roclet.test/web/edit.html?gist=abc123&gistFile=notes.roc', {left:'A',right:'B'}), '/web/edit.html?notebook=A&right=B');
   } finally { bench.dispose(); }

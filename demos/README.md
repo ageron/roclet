@@ -36,6 +36,7 @@ The **Gist garden** example opens a pinned revision of a public Gist and waits
 for **Run**. Its notebook declares `garden: "./garden.roc"` and imports
 `garden.Garden`. The package entry exposes `Garden`; its implementation uses
 `Spacing` internally. This keeps the notebook focused on inputs and results.
-The five [source files](gist-garden/) are also kept here for review and testing.
+The five [source files](https://gist.github.com/lukewilliamboswell/ab17cb796239be901ec0436f919d39bb/e18a658e1aab0e79a4467143ac714c5aedec3c55)
+are loaded directly from GitHub; no copy is bundled with Roclet.
 Gists have flat filenames, so the package entry is named `garden.roc` and its
 modules live beside it. No archive download or package registry is needed.

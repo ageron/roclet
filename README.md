@@ -83,7 +83,7 @@ enter the notebook filename in the dialog.
 [Try the Gist garden example](https://ageron.github.io/roclet/web/edit.html?example=gist-garden):
 a small notebook declares `garden: "./garden.roc"` in its app header and imports
 `garden.Garden`. The package entry, exposed module, internal helper, and planting
-notes all come from the same revision-pinned Gist. See the [demo sources](demos/gist-garden/).
+notes all come from the same revision-pinned Gist. See the [demo sources](https://gist.github.com/lukewilliamboswell/ab17cb796239be901ec0436f919d39bb/e18a658e1aab0e79a4467143ac714c5aedec3c55).
 
 Other `.roc` files become **Project files**, so `import Geometry` can load a
 `Geometry.roc` from the same Gist. Other text files become **Attachments** at their
