@@ -1,0 +1,48 @@
+<!doctype html><meta charset="utf-8"><title>Package loading checks</title>
+<h1>Package loading checks</h1><p id="status" role="status"></p><pre id="log">Running…</pre>
+<script type="module">
+import {Notebook,newDraft,makeCell} from './edit-model.mjs';
+import {DocumentSession} from './document-session.mjs';
+const log=document.querySelector('#log'),status=document.querySelector('#status');
+let notebook,blob;
+try {
+  const assert=(value,message)=>{if(!value)throw Error(message);};
+  const bytes=await fetch('../artifacts/roclet.wasm').then(r=>r.arrayBuffer());
+  const url='https://github.com/ageron/roc-ascii/releases/download/v0.5.1/3mkSijmaYYGXbT6EvDAXyV4Y9YzYncztbWNDfRSr3z3f.tar.zst';
+  const module=path=>JSON.stringify(new URL(path,location.href).href);
+  // Fault injection surrounds the real production worker. No external package
+  // requests are made; the compiler still verifies unchanged release bytes.
+  const code=`
+    import ${module('./format-worker.mjs')};
+    const original=globalThis.fetch;let attempts=0;
+    globalThis.fetch=(url,options)=>{
+      const address=String(url);
+      if(address.endsWith('/package-config.json'))return Promise.resolve(Response.json({endpoint:'https://packages.invalid/api/packages/'}));
+      if(address.endsWith('/roc-packages/manifest.json'))return Promise.resolve(Response.json({schema:1,packages:[]}));
+      if(address.startsWith('https://packages.invalid/')) {
+        if(++attempts<3)return Promise.resolve(new Response('busy',{status:503,headers:{'Retry-After':'1'}}));
+        return original(${module('./vendor/roc-packages/archives/3mkSijmaYYGXbT6EvDAXyV4Y9YzYncztbWNDfRSr3z3f.tar.zst')},options);
+      }
+      if(address.startsWith('https://github.com/'))throw Error('Unexpected direct package request');
+      return original(url,options);
+    };
+  `;
+  blob=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
+  class FaultWorker extends Worker {constructor(){super(blob,{type:'module'});}}
+  const history=[];
+  notebook=new Notebook(bytes,{save:async()=>{}},{session:new DocumentSession(bytes,FaultWorker),onChange:()=>{if(notebook){history.push(notebook.status);status.textContent=notebook.status;}}});
+  notebook.state=newDraft();notebook.state.autoRun=false;
+  notebook.state.preamble=`app [] { ascii: "${url}" }`;
+  notebook.state.cells=[makeCell('code','import ascii.Ascii\nout_ok = Ascii.from_str("hello").is_ok()')];
+  const result=await notebook.run();
+  assert(result.status==='ok' && result.evaluation.values[0]?.text==='True',JSON.stringify(result));
+  assert(history.some(text=>text.includes('Retrying roc-ascii v0.5.1') && text.includes('attempt 2 of 3')),'Second attempt was not reported');
+  assert(history.some(text=>text.includes('attempt 3 of 3')),'Third attempt was not reported');
+  assert(history.some(text=>text.includes('Downloading roc-ascii v0.5.1') && text.includes('received')),'Received bytes were not reported');
+  assert(history.includes('Verifying roc-ascii v0.5.1…'),'Verification was not reported');
+  assert(!history.includes('Waiting for package bundle…'),'Automatic loading was presented as a manual file wait');
+  assert(!notebook.busy,'The completed download left the notebook busy');
+  document.documentElement.dataset.result='pass';log.textContent='PASS real Worker retries busy responses, verifies the package, evaluates the notebook and reports progress';
+} catch(error) {document.documentElement.dataset.result='fail';log.textContent=error.stack;}
+finally {notebook?.dispose();if(blob)URL.revokeObjectURL(blob);}
+</script>

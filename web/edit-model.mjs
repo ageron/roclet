@@ -4,6 +4,7 @@ import { DocumentSession } from './document-session.mjs';
 import { renameEdits } from './compiler-tools.mjs';
 import { projectFiles, projectPath } from './project-files.mjs';
 import { attachments, shareAttachmentBlobs, trimAttachmentHistory } from './attachments.mjs';
+import {packageProgressText} from './package-progress.mjs';
 
 const clone = value => structuredClone(value);
 const key = () => crypto.randomUUID();
@@ -235,10 +236,13 @@ export class Notebook {
     }
     if (request.reactivity) { this.baselineId = this.state.id; this.resetBaseline = false; }
     try {
-      return await this.session.request(request,{queue,onDispatch,loadPackage:this.loadPackage,onPackageWaiting:waiting=>{
-        onPackageWaiting?.(waiting);
+      return await this.session.request(request,{queue,onDispatch,loadPackage:this.loadPackage,onPackageProgress:details=>{
+        if(runId!==this.runId)return;
+        this.status=packageProgressText(details);this.emit();
+      },onPackageWaiting:(waiting,details)=>{
+        onPackageWaiting?.(waiting,details);
         if(runId!==this.runId) return;
-        this.status=waiting?'Waiting for package bundle…':'Running…';this.emit();
+        this.status=waiting?(details?.kind==='download'?'Preparing package…':'Waiting for package bundle…'):'Running…';this.emit();
       }});
     } catch(error) {
       if(runId===this.runId && error.name==='AbortError') {this.status='Package loading cancelled · run to retry';this.emit();}

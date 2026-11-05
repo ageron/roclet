@@ -14,7 +14,7 @@ async function initialize({bytes,module,compilerDigest}) {
     cache=new BuildCache(namespace);
     // Load downloader configuration only if an uncached package is requested.
     let downloader;
-    packages=new BrowserPackages(new BuildCache(`${namespace}:packages`),{fetch:async(...args)=>(downloader??=await configuredPackageFetch())(...args),loadBundle,onDownload:waiting=>postMessage({packageDownloading:waiting})});
+    packages=new BrowserPackages(new BuildCache(`${namespace}:packages`),{fetch:async(...args)=>(downloader??=await configuredPackageFetch())(...args),loadBundle,onDownload:waiting=>postMessage({packageDownloading:waiting}),onProgress:details=>postMessage({packageProgress:details})});
     if(!instance.importCache(await cache.load())) await cache.clear();
   }
   return instance;

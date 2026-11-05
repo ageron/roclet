@@ -30,7 +30,7 @@ def references(source):
 
 def sources(path):
     names = subprocess.check_output(['tar', '-tf', str(path)], text=True).splitlines()
-    return '\n'.join(subprocess.check_output(['tar', '-xOf', str(path), name], text=True)
+    return '\n'.join(subprocess.check_output(['tar', '-xOf', str(path), '--', name], text=True)
                      for name in names if name.endswith('.roc'))
 
 

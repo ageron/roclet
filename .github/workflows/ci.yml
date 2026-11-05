@@ -118,6 +118,8 @@ jobs:
       - name: Test package pin updates and installer
         run: |
           python3 tests/test-package-pin.py
+          python3 tests/test-mirror-releases.py
+          python3 tests/test-mirror-packages.py
           python3 tests/test-installers.py
           python3 tools/mirror-packages.py --check
       - name: Package the verified site

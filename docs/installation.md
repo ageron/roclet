@@ -449,6 +449,11 @@ limits. Static mirror entries still take priority. On a public-service failure,
 Roclet tries the original host and then offers manual loading; a short cooldown
 avoids retrying the unavailable service for every dependency. Automatic package
 downloads pause the notebook execution timeout.
+The status bar identifies the package and version, reports received bytes and
+verification, and shows short retry waits. Temporary busy responses get bounded
+retries before manual loading. Browser workers and tabs coordinate downloads
+through Web Locks and verified browser storage when available; each compiler
+still verifies the archive independently. Stop remains available while waiting.
 
 The existing Zig server is an alternative deployment:
 The bundled server already exposes `/api/packages/`; for local use, set

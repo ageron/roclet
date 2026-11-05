@@ -1,0 +1,32 @@
+name: Check mirrored package releases
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-package-releases
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Report new stable releases without changing pins
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/check-mirror-releases.py > "$RUNNER_TEMP/package-releases.md"
+          cat "$RUNNER_TEMP/package-releases.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-release-report
+          path: ${{ runner.temp }}/package-releases.md
+          retention-days: 14

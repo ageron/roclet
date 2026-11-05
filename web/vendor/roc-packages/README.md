@@ -21,14 +21,14 @@ services requiring filesystem, network, or operating-system effects.
 | [Roclet Display](https://github.com/ageron/roclet-display) | 0.4.0 | All rich-output demos; also embedded in the notebook runtime |
 | [Plume](https://github.com/lukewilliamboswell/plume) | 0.5.0 | Interactive chart demo |
 | [roc-parser](https://github.com/lukewilliamboswell/roc-parser) | 2.0.0, 3.0.0, 4.0.0 | Official parser example, CSV demo, and current release; CSV, JSON, Markdown, YAML, XML and other text parsing |
-| [roc-time](https://github.com/lukewilliamboswell/roc-time) | 0.2.0 | Meeting scheduler demo; date and time calculations |
+| [roc-time](https://github.com/lukewilliamboswell/roc-time) | 0.2.0, 0.3.2 | Meeting scheduler demo and current release; date and time calculations |
 | [Unicode](https://github.com/roc-lang/unicode) | 4.2.0, 4.3.0, 4.3.1 | Official examples, parser's transitive dependencies, and current release |
 | [roc-random](https://github.com/kili-ilo/roc-random) | 0.9.2, 0.9.3 | Official example and current release; reproducible simulations |
 | [path](https://github.com/roc-lang/path) | 4.0.0 | Official example; pure path manipulation |
 | [roc-base64](https://github.com/niclas-ahden/roc-base64) | 1.0.2 | Byte and text conversions for attached data |
 | [roc-graph-layout](https://github.com/lukewilliamboswell/roc-graph-layout) | 0.2.0 | Pure layout algorithms for graph visualization |
 
-The collection contains 16 pinned archives. Exact sizes, SHA-256
+The collection contains 17 pinned archives (2,196,166 compressed bytes). Exact sizes, SHA-256
 checksums, upstream release URLs, transitive dependencies, and license filenames
 are recorded in `manifest.json`. Licenses are retained separately because some
 release bundles contain only Roc source. Each license comes from its release tag.
@@ -43,6 +43,14 @@ basic-cli and roc-ray are intentionally excluded: mirroring them would not make
 their native capabilities available to browser notebooks.
 
 ## Maintenance
+
+The **Check mirrored package releases** GitHub Actions workflow runs weekly and
+can also be started manually. It compares each mirrored repository's latest
+stable release with the existing pins and publishes a review report in the run
+summary and artifact. It never changes imports or installs new archives. Run
+`python3 tools/check-mirror-releases.py` for the same read-only report locally.
+The 0.3.2 roc-time release was added after this check while the meeting demo
+continues to use 0.2.0.
 
 From the repository root:
 

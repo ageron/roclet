@@ -142,6 +142,7 @@ pub fn main(init: std.process.Init) !void {
         "web/packages.mjs",
         "web/package-dialog.mjs",
         "web/package-download.mjs",
+        "web/package-progress.mjs",
         "web/package-config.json",
         "web/vendor/roc-packages/manifest.json",
         "web/vendor/roc-packages/README.md",

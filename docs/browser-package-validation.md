@@ -27,6 +27,15 @@ default public service without editing the checked-in configuration.
 
 ## Public automatic fetcher
 
+Package loading reports download bytes, verification and retry waits through the
+production document worker. Unit tests cover bounded retries, long quota waits,
+cancelled waits, corrupt owners, streamed size limits and stale UI progress.
+`tools/browser-package-sharing-scenario.mjs` opens two actual tabs and checks
+one shared verified download, fresh-worker reuse, owner termination and waiter
+termination. The standard Chrome suites run this check without external package
+requests. Package progress messages never claim a total dependency count before
+the compiler has discovered transitive dependencies.
+
 The default endpoint is
 `https://roclet-packages.roclet-package-fetcher.workers.dev/api/packages/`.
 `tools/browser-public-fetcher-probe.mjs` uses roc-crc32 2.0.0, deliberately absent

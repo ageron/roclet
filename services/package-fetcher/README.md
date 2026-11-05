@@ -37,12 +37,25 @@ requests toward the account's request allowance, including cache hits.
 
 Roclet tries its static mirror first, then the configured service. If the public
 service times out, has no remaining quota, or fails, Roclet tries the original
-host and retains its manual file-loading fallback. A one-minute cooldown avoids
-repeating a slow failed service request for every transitive dependency.
+host and retains its manual file-loading fallback. Short busy responses, selected
+temporary HTTP errors and network failures are retried up to twice with bounded
+backoff and jitter, within the existing timeout. Short Retry-After delays are
+honored; long quota waits fall through without repeated attempts. A one-minute
+cooldown avoids repeating a slow failed service request for every transitive
+dependency. A short busy response does not disable the service for the next
+package. Missing packages and hash/encoding errors are not blindly retried.
 Downloading packages pauses the notebook's execution timeout; stopping a run
 still terminates its worker. The browser bounds each archive transport at 45
 seconds, including fallback and response reading, so a stalled original host
 cannot wait indefinitely while execution time is paused.
+
+The editor reports the package name and version, bytes received, verification,
+and retry delays. When Web Locks and shared browser storage are available,
+workers in the same origin and compiler namespace coordinate downloads. A
+waiting worker re-reads the verified archive after the owner finishes, then its
+own compiler verifies and installs it. Closing/stopping an owner releases its
+lock; stopping a waiter leaves the owner running. Restricted storage or missing
+lock support retains ordinary verified downloads. No server storage is needed.
 
 ## Development and validation
 

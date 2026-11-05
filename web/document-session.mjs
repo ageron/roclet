@@ -85,7 +85,7 @@ export class DocumentSession {
     const next=this.queued;this.queued=null;
     if(next) this.dispatch(next.snapshot,next.options).then(next.resolve,next.reject);
   }
-  dispatch(request,{loadPackage,onPackageWaiting,onDispatch}={}) {
+  dispatch(request,{loadPackage,onPackageWaiting,onPackageProgress,onDispatch}={}) {
     this.started=performance.now();this.waiting=false;
     onDispatch?.();
     const fresh = !this.worker;
@@ -101,11 +101,12 @@ export class DocumentSession {
       this.pending = { resolve, reject, controller };
       worker.onmessage = ({ data }) => {
         if (this.worker !== worker || this.pending?.resolve !== resolve) return;
+        if(data.packageProgress) {onPackageProgress?.(data.packageProgress);return;}
         if(typeof data.packageDownloading==='boolean') {
           this.waiting=data.packageDownloading;
           if(this.waiting)clearTimeout(this.budgetTimer);
           else {this.started=performance.now();this.armBudget();}
-          onPackageWaiting?.(this.waiting);
+          onPackageWaiting?.(this.waiting,{kind:'download'});
           return;
         }
         if(data.packageNeeded) {

@@ -23,6 +23,8 @@ const suites=[
   ['Math','math-conformance'],
   ['Workspace and packages','workspace-conformance'],
   ['Static package mirror','package-mirror-conformance',null,null,300000],
+  ['Package sharing across tabs','edit?new=1','browser-package-sharing-scenario.mjs'],
+  ['Package retries and progress','package-loading-conformance'],
   ['Side-by-side notebooks','dual-conformance'],
   ['Side-by-side notebooks, medium width','dual-conformance?medium'],
   ['Side-by-side notebooks as tabs','dual-conformance?compact'],

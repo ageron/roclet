@@ -27,6 +27,7 @@ try {
     'ageron/roc-isodate':['Date','Date.from_ymd(2026, 11, 5).add_days(1).to_iso_str() == "2026-11-06"'],
     'kili-ilo/roc-random':['Random','Random.step(Random.seed(1234), Random.list(Random.bounded_u32(25, 75), 10)).value.len() == 10'],
     'lukewilliamboswell/roc-parser':['Utf8','Utf8.parse_str(Utf8.digits, "12345") == Ok(12345)'],
+    'lukewilliamboswell/roc-time':['PosixDelta','PosixDelta.from_microseconds(-42).to_microseconds() == -42'],
     'lukewilliamboswell/roc-graph-layout':['Geom','Geom.hypot(3, 4) == 5'],
     'niclas-ahden/roc-base64':['Base64','Base64.encode("hi".to_utf8()) == "aGk="'],
     'roc-lang/path':['Path','Str.inspect(Path.unix("abc")) == "<opaque>"'],

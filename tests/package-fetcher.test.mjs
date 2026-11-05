@@ -17,7 +17,7 @@ function configured(fetch,extra={}) {
 
 test('public quota exhaustion falls through to upstream and bypasses the service for subsequent dependencies',async()=>{
   const requests=[];
-  const download=await configured(async(url,options)=>{requests.push(url);assert.equal(options.credentials,'omit');return url.startsWith(endpoint)?new Response('quota',{status:429}):new Response('direct');});
+  const download=await configured(async(url,options)=>{requests.push(url);assert.equal(options.credentials,'omit');return url.startsWith(endpoint)?new Response('quota',{status:429,headers:{'Retry-After':'60'}}):new Response('direct');});
   assert.equal(await (await download(source,{})).text(),'direct');
   const next=source.replace('/ageron/roc-ascii/','/another/package/');
   assert.equal(await (await download(next,{})).text(),'direct');

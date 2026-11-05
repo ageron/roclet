@@ -118,6 +118,16 @@
       "dependencies": []
     },
     {
+      "package": "lukewilliamboswell/roc-time",
+      "version": "0.3.2",
+      "url": "https://github.com/lukewilliamboswell/roc-time/releases/download/0.3.2/roc-time-EXAwmterdosj35koAhDK795YhRxhCkNM5yS46QuEm1w8.tar.zst",
+      "file": "archives/roc-time-EXAwmterdosj35koAhDK795YhRxhCkNM5yS46QuEm1w8.tar.zst",
+      "bytes": 177352,
+      "sha256": "11ea88a1659b0490c5ccb63de402c91dbab5f3d1c9d1005e1e45b9b23acc446e",
+      "licenseFile": "licenses/lukewilliamboswell-roc-time-0.3.2.txt",
+      "dependencies": []
+    },
+    {
       "package": "niclas-ahden/roc-base64",
       "version": "1.0.2",
       "url": "https://github.com/niclas-ahden/roc-base64/releases/download/1.0.2/DQBxATK6BtaCWe56bCmkMgdKJR2Ym8NiZZLhYCAgtLac.tar.zst",

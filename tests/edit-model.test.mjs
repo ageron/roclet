@@ -183,6 +183,10 @@ test('Run remains busy through saving, package loading and evaluation, then beco
   saved.resolve();await waitFor(()=>requests.length===1);
   requests[0].callbacks.onPackageWaiting(true);
   assert.match(notebook.status,/Waiting for package/);assert.equal(notebook.busy,true);
+  requests[0].callbacks.onPackageProgress({phase:'downloading',url:'https://github.com/roc-lang/unicode/releases/download/4.3.1/hash.tar.zst',received:2048});
+  assert.equal(notebook.status,'Downloading unicode 4.3.1 · 2 KB received…');assert.equal(notebook.busy,true);
+  requests[0].callbacks.onPackageProgress({phase:'verifying',url:'https://github.com/roc-lang/unicode/releases/download/4.3.1/hash.tar.zst'});
+  assert.equal(notebook.status,'Verifying unicode 4.3.1…');
   requests[0].callbacks.onPackageWaiting(false);
   assert.equal(notebook.busy,true);
   requests[0].resolve(documentResult());await run;
@@ -193,6 +197,8 @@ test('an older completion cannot clear the activity of a newer Run',async t=>{
   const {notebook,requests}=pendingNotebook(t);
   const older=notebook.run();await waitFor(()=>requests.length===1);
   const newer=notebook.run();await waitFor(()=>requests.length===2);
+  const status=notebook.status;requests[0].callbacks.onPackageProgress({phase:'downloading',url:'https://old.example/package.tar.zst'});
+  assert.equal(notebook.status,status);
   requests[0].resolve(documentResult());
   assert.equal(await older,null);assert.equal(notebook.busy,true);
   requests[1].resolve(documentResult());await newer;
