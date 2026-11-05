@@ -138,7 +138,8 @@ verified packages locally; warm edits reuse them without downloading dependencie
 again. A [static package mirror](web/vendor/roc-packages/README.md) supplies every
 bundled demo dependency and a curated collection of common libraries automatically,
 without an external download service. For packages outside that collection,
-if a package host blocks browser downloads, Roclet offers a download link
+the default [public fetcher](services/package-fetcher/README.md) downloads GitHub
+release archives automatically. If automatic downloading fails, Roclet offers a download link
 and lets you load the bundle from your computer, verifying its hash before use.
 This works on a completely static host. Portable Roclet bundles include your
 attached project sources.

@@ -424,9 +424,11 @@ Archives load only when needed during normal use; **Prepare for offline use**
 also caches the complete mirrored collection.
 
 For packages outside the mirror, the default
-[`web/package-config.json`](../web/package-config.json) has `"endpoint": null`,
-so downloads go directly to their original URLs. Hosts that permit CORS
-work automatically. GitHub release downloads do not permit browser CORS requests;
+[`web/package-config.json`](../web/package-config.json) uses the public
+[Roclet package fetcher](https://roclet-packages.roclet-package-fetcher.workers.dev/health)
+for GitHub release archives. Set `"endpoint": null` to disable the public service,
+or configure your own endpoint. Other hosts are fetched directly; hosts that
+permit CORS work automatically. GitHub release downloads do not permit direct browser CORS requests;
 Roclet then offers a link to download the archive through the browser and a
 **Load bundle…** file picker. The file is read locally and verified by Roc against
 the hash in its original package URL before use or caching. A file picker is an
@@ -440,6 +442,15 @@ other completely static hosts, including when no proxy has been deployed.
 ### Optional automatic package proxy
 
 To download unmirrored GitHub release packages automatically, configure a proxy endpoint.
+The repository includes a [public Cloudflare Worker fetcher](../services/package-fetcher/README.md)
+that can be deployed independently of the static website. It verifies the Roc
+content hash, caches successful downloads, and imposes size, time and request
+limits. Static mirror entries still take priority. On a public-service failure,
+Roclet tries the original host and then offers manual loading; a short cooldown
+avoids retrying the unavailable service for every dependency. Automatic package
+downloads pause the notebook execution timeout.
+
+The existing Zig server is an alternative deployment:
 The bundled server already exposes `/api/packages/`; for local use, set
 `"endpoint": "../api/packages/"` in `web/package-config.json`. For an external
 service, run the same server behind HTTPS:
@@ -452,10 +463,10 @@ Put an HTTPS reverse proxy in front of that port and set `endpoint` to its publi
 URL, for example `"https://packages.example.org/api/packages/"`. Keep the trailing
 slash. Configure the endpoint **before** running `zig build package`; repackage
 after configuration changes so the offline manifest matches the published bytes.
-GitHub Pages cannot run the proxy itself. Deploying this optional service is
-outside this repository; manual bundle loading remains available if it fails.
+GitHub Pages cannot run either proxy itself. The Worker has its own deployment
+instructions; manual bundle loading remains available if a service fails.
 
-The service accepts only GitHub `.tar.zst` release archives with Roc content
+The Zig service accepts only GitHub `.tar.zst` release archives with Roc content
 hashes. It validates redirect destinations and archive hashes, limits archives
 to 32 MiB, allows four simultaneous requests, and applies a 30-second download
 deadline. Its memory cache holds at most eight archives and 64 MiB. Public CORS

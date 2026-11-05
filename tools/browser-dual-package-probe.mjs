@@ -1,4 +1,4 @@
-// Run with endpoint:null and browser-check's --without-package-mirror --upload-plan,
+// Run with --package-endpoint none --without-package-mirror --upload-plan,
 // against edit.html?example=meeting-windows&right=example:meeting-windows.
 // The plan selects one file: the roc-time 0.2.0 bundle. Both panels need it;
 // one dialog and one selection must serve both.

@@ -15,6 +15,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  package-fetcher:
+    name: Public package fetcher
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/package-fetcher
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: services/package-fetcher/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: npm run check
   verify:
     name: Build, test, and package
     runs-on: ubuntu-24.04

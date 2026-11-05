@@ -1,4 +1,4 @@
-// Run with endpoint:null and browser-check's --without-package-mirror --upload-plan.
+// Run with --package-endpoint none --without-package-mirror --upload-plan.
 // The plan selects: invalid archive, roc-time, roc-time (wrong package), parser, Unicode.
 (async()=>{
   const $=id=>document.getElementById(id),pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));

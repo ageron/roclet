@@ -22,6 +22,27 @@ their manually supplied test archives predate the production mirror.
 Use `--without-package-mirror` with `tools/browser-check.mjs` when specifically
 testing the proxy or manual-upload fallback; otherwise mirrored packages succeed
 before those transports are reached.
+For the manual fallback, also pass `--package-endpoint none` to disable the
+default public service without editing the checked-in configuration.
+
+## Public automatic fetcher
+
+The default endpoint is
+`https://roclet-packages.roclet-package-fetcher.workers.dev/api/packages/`.
+`tools/browser-public-fetcher-probe.mjs` uses roc-crc32 2.0.0, deliberately absent
+from the mirror, through the production document worker and downloader. On
+5 November 2026, the deployed HTTPS service passes the actual checksum, an edit,
+worker restart, offline reuse from verified package storage, and reading a
+validation error through CORS. No file upload is used. The downloader's progress
+messages pause the execution timeout and leave Stop available.
+
+```sh
+node tools/browser-check.mjs --page 'web/edit.html?new=1' \
+  --script tools/browser-public-fetcher-probe.mjs
+```
+
+This live-network check is intentionally separate from the network-free CI
+browser suites. The Worker has its own unit and deployment-bundle checks in CI.
 
 Tested on 2026-10-20 (Australia/Melbourne) with Chrome 153.0.8010.52. The Roc
 compiler pin is `7894793d1454103d47c4368c942b3fec1406e8fd`.

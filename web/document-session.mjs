@@ -101,6 +101,13 @@ export class DocumentSession {
       this.pending = { resolve, reject, controller };
       worker.onmessage = ({ data }) => {
         if (this.worker !== worker || this.pending?.resolve !== resolve) return;
+        if(typeof data.packageDownloading==='boolean') {
+          this.waiting=data.packageDownloading;
+          if(this.waiting)clearTimeout(this.budgetTimer);
+          else {this.started=performance.now();this.armBudget();}
+          onPackageWaiting?.(this.waiting);
+          return;
+        }
         if(data.packageNeeded) {
           if(!loadPackage) {
             this.pending=null;this.stop();controller.abort();reject(new Error(`Cannot download Roc package ${data.packageNeeded.url}: ${data.packageNeeded.error}`));return;

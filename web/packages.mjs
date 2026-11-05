@@ -4,7 +4,7 @@ const packageKey=async url=>'/cache/package/'+[...new Uint8Array(await crypto.su
 // URLs and extraction destinations come exclusively from Roc's resolver. The
 // compiler verifies Roc package hashes and unbundles archives; JS stores bytes.
 export class BrowserPackages {
-  constructor(cache,{fetch=globalThis.fetch.bind(globalThis),loadBundle}={}) {this.cache=cache;this.fetch=fetch;this.loadBundle=loadBundle;this.loaded=null;}
+  constructor(cache,{fetch=globalThis.fetch.bind(globalThis),loadBundle,onDownload=()=>{},downloadTimeout=45000}={}) {this.cache=cache;this.fetch=fetch;this.loadBundle=loadBundle;this.onDownload=onDownload;this.downloadTimeout=downloadTimeout;this.loaded=null;}
   async remember(transport,url,bytes) {
     if(bytes.length>LIMIT) throw new Error('Roc package exceeds the 32 MiB browser cache limit');
     if(!transport.installPackage(url,bytes)) throw new Error('Roc rejected this bundle: invalid archive or content hash. Choose the bundle from the download link.');
@@ -25,13 +25,15 @@ export class BrowserPackages {
     entries.delete(path);
     if(cached) await this.cache.remove(path);
     let failure;
+    this.onDownload(true);
     try {
-      const response=await this.fetch(url,{mode:'cors',credentials:'omit'});
+      const response=await this.fetch(url,{mode:'cors',credentials:'omit',signal:AbortSignal.timeout(this.downloadTimeout)});
       if(!response.ok) throw new Error(`HTTP ${response.status}`);
       if(Number(response.headers.get('content-length'))>LIMIT) throw new Error('Roc package exceeds the 32 MiB browser cache limit');
       await this.remember(transport,url,new Uint8Array(await response.arrayBuffer()));
       return 'downloaded';
     } catch(error) {failure=error;}
+    finally {this.onDownload(false);}
     if(!this.loadBundle) throw new Error(`Cannot download Roc package ${url}: ${failure.message}`);
     let retry=false;
     for(;;) {

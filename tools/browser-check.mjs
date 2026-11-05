@@ -21,7 +21,7 @@ const server=createServer(async(req,res)=>{
       res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({schema:1,packages:[]}));return;
     }
     if(packageEndpoint && new URL(req.url,'http://localhost').pathname==='/web/package-config.json') {
-      res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({endpoint:packageEndpoint}));return;
+      res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({endpoint:packageEndpoint==='none'?null:packageEndpoint}));return;
     }
     const pathname=new URL(req.url,'http://localhost').pathname;
     const path=resolve(root,pathname==='/'?'index.html':'.'+decodeURIComponent(pathname));

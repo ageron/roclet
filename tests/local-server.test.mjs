@@ -56,7 +56,7 @@ test('local project files, conflict protection, confinement, package cache and r
     await assert.rejects(client.call('write','new.md',{source:'overwrite',expected:null}),/changed outside/);
     await assert.rejects(client.call('write','../outside.roc',{source:'overwrite',expected:'secret'}));
     assert.equal(await readFile(join(temp,'outside.roc'),'utf8'),'secret');
-    assert.deepEqual(await (await fetch(base+'/web/package-config.json')).json(),{endpoint:null});
+    assert.deepEqual(await (await fetch(base+'/web/package-config.json')).json(),JSON.parse(await readFile(join(root,'web/package-config.json'),'utf8')));
     // Seed a verified archive in the persistent cache and request it with no download.
     const hash='FPCEjLpsoY5fJ6nDBCeJQ1s6aMTQjMWUYAVQu6QdNuzr';
     const alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';let n=0n;for(const c of hash)n=n*58n+BigInt(alphabet.indexOf(c));

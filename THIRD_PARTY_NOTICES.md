@@ -8,6 +8,7 @@ Roclet is licensed under UPL-1.0; see LICENSE. Dependencies retain their license
 - **KaTeX and its bundled fonts** — MIT. See `web/vendor/katex/LICENSE`; provenance is recorded in its lock file. Exported math styles include the notice.
 - **Plotly.js** — MIT. See `web/vendor/plotly/LICENSE`; the pinned full browser renderer and its provenance are in `web/vendor/plotly/`.
 - **Mirrored Roc packages** — unchanged upstream releases under their respective licenses. The package list, exact source URLs and checksums are in `web/vendor/roc-packages/manifest.json`; notices are in its `licenses/` directory. See that directory's `README.md` for selection and maintenance.
+- **Public fetcher hashing** — `@noble/hashes`, MIT. Used by the separately deployed Worker; see `services/package-fetcher/NOBLE-HASHES-LICENSE.txt` and its pinned npm lockfile.
 - **TigerBeetle tidy.zig** — Apache-2.0. `ci/tidy.zig` is adapted from TigerBeetle's `src/tidy.zig` by way of the Roc compiler's `ci/tidy.zig`; the file header carries the notice and license link.
 
 The Roc compiler has its own build dependencies. Its pinned source checkout is
