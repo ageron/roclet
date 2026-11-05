@@ -189,17 +189,23 @@ dialog { background:var(--page); }
   <a class="brand" href="../?home=1">Roclet</a>
   <nav class="header-menus" aria-label="Notebook menus">
   <details class="popover" id="document-menu"><summary aria-label="File menu">File</summary><div class="menu-panel"><p class="menu-target" hidden></p>
-    <button id="recovery-copy" hidden>Save a recovery copy</button><button id="new">New notebook</button><button id="rich-example">Rich Outputs and Widgets example</button>
-    <button id="open-gist">Open GitHub Gist…</button>
+    <button id="new">New notebook</button>
     <button id="open-local" hidden>Open file…</button>
     <label class="file-label">Import a copy…<input id="open" type="file" accept=".roc,.md,.roclet.zip,.zip,text/plain,text/markdown,application/zip" aria-label="Open Roclet notebook"></label>
+    <button id="recent">Open recent…</button>
+    <button id="open-gist">Open GitHub Gist…</button>
+    <button id="rich-example">Rich Outputs and Widgets example</button>
+    <div class="menu-divider" role="separator"></div>
     <button id="save">Save <kbd>⌘ / Ctrl S</kbd></button>
     <button id="save-as" hidden>Save as… <kbd>⇧ ⌘ / Ctrl S</kbd></button>
+    <button id="recovery-copy" hidden>Save a recovery copy</button>
     <button id="download">Download a copy</button>
-    <button id="attachments">Attachments…</button><button id="project-files">Project files…</button>
-    <button id="share">Export & share…</button><button id="offline">Offline & storage…</button>
-    <button id="recent">Open recent…</button>
-    <div class="menu-divider"></div><div class="menu-group"><span class="menu-label" id="format-label">File format</span><div id="format" class="menu-choices" role="group" aria-labelledby="format-label"><button data-format="roc" aria-pressed="true">Roc</button><button data-format="markdown" aria-pressed="false">Markdown</button></div></div>
+    <button id="share">Export & share…</button>
+    <div class="menu-group"><span class="menu-label" id="format-label">File format</span><div id="format" class="menu-choices" role="group" aria-labelledby="format-label"><button data-format="roc" aria-pressed="true">Roc</button><button data-format="markdown" aria-pressed="false">Markdown</button></div></div>
+    <div class="menu-divider" role="separator"></div>
+    <button id="attachments">Attachments…</button>
+    <button id="project-files">Project files…</button>
+    <button id="offline">Offline & storage…</button>
     <p>Drafts are saved in this browser. Save writes to your chosen file; downloads are separate copies.</p>
   </div></details>
   <details class="popover" id="edit-menu"><summary aria-label="Edit menu">Edit</summary><div class="menu-panel"><p class="menu-target" hidden></p>
