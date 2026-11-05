@@ -1,5 +1,4 @@
-// Browser checks use local fixtures, including unchanged release archives
-// fetched by CI for the CSV demo. Public-download probes remain separate.
+// Browser checks use local fixtures and the production static package mirror.
 // Each driver owns a fresh Chrome profile/server.
 import {spawn} from 'node:child_process';
 import {appendFile} from 'node:fs/promises';
@@ -23,6 +22,7 @@ const suites=[
   ['Responsive controls','edit?new=1','browser-responsive-scenario.mjs'],
   ['Math','math-conformance'],
   ['Workspace and packages','workspace-conformance'],
+  ['Static package mirror','package-mirror-conformance',null,null,300000],
   ['Side-by-side notebooks','dual-conformance'],
   ['Side-by-side notebooks, medium width','dual-conformance?medium'],
   ['Side-by-side notebooks as tabs','dual-conformance?compact'],
@@ -33,6 +33,8 @@ const suites=[
   ['Compact attachments','edit?new=1','browser-attachments-probe.mjs','390x960'],
   ['CSV demo startup','edit?example=csv-attachments&verify-demo-startup=1','browser-attachments-probe.mjs'],
   ['CSV demo evaluation','edit?new=1&parser-demo=1','browser-attachments-probe.mjs'],
+  ['Plume demo and offline reuse','edit?example=plume-charts','browser-plume-probe.mjs'],
+  ['Meeting scheduler and offline reuse','edit?example=meeting-windows','browser-time-probe.mjs'],
 ];
 // Each worker owns a complete driver process, including Chrome/profile/server.
 // Buffer its log so parallel suites still produce readable GitHub log groups.

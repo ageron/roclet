@@ -414,22 +414,32 @@ preserving relative paths. It contains the compiler, demos, and offline assets.
 
 ### Package downloads on a static host
 
-No application backend is required. The default
+No application backend is required. Roclet first checks its
+[static package mirror](../web/vendor/roc-packages/README.md), which includes all
+bundled demo dependencies and a curated collection of common libraries. The
+unchanged archives are served alongside the editor, using a manifest that maps
+exact upstream URLs to local files. No notebook imports need rewriting. Roc
+verifies the original content hash before installation and browser caching.
+Archives load only when needed during normal use; **Prepare for offline use**
+also caches the complete mirrored collection.
+
+For packages outside the mirror, the default
 [`web/package-config.json`](../web/package-config.json) has `"endpoint": null`,
-so package downloads go directly to their original URLs. Hosts that permit CORS
+so downloads go directly to their original URLs. Hosts that permit CORS
 work automatically. GitHub release downloads do not permit browser CORS requests;
 Roclet then offers a link to download the archive through the browser and a
 **Load bundle…** file picker. The file is read locally and verified by Roc against
 the hash in its original package URL before use or caching. A file picker is an
 explicit user permission to read a local file and does not require host CORS.
 
-Load each missing dependency when prompted. Later runs and worker restarts reuse
+For an unmirrored package that cannot download automatically, load each missing
+dependency when prompted. Later runs and worker restarts reuse
 verified archives from browser storage. This flow works on GitHub Pages and
 other completely static hosts, including when no proxy has been deployed.
 
 ### Optional automatic package proxy
 
-To download GitHub release packages automatically, configure a proxy endpoint.
+To download unmirrored GitHub release packages automatically, configure a proxy endpoint.
 The bundled server already exposes `/api/packages/`; for local use, set
 `"endpoint": "../api/packages/"` in `web/package-config.json`. For an external
 service, run the same server behind HTTPS:

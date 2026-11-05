@@ -1,0 +1,55 @@
+<!doctype html><meta charset="utf-8"><title>Static package mirror checks</title>
+<h1>Static package mirror checks</h1><pre id="log">Running…</pre><script type="module">
+const log=document.querySelector('#log');log.textContent='';
+try {
+  const manifest=await fetch('./vendor/roc-packages/manifest.json').then(r=>r.json());
+  const bytes=await fetch('../artifacts/roclet.wasm').then(r=>r.arrayBuffer());
+  const module=path=>JSON.stringify(new URL(path,location.href).href);
+  const workerSource=`
+    import {createWasmTransport} from ${module('../compiler-adapter/wasm.mjs')};
+    import {BrowserPackages} from ${module('./packages.mjs')};
+    import {BuildCache} from ${module('./build-cache.mjs')};
+    import {configuredPackageFetch} from ${module('./package-download.mjs')};
+    onmessage=async({data})=>{try {
+      const requests=[];
+      const download=await configuredPackageFetch({fetch:(url,options)=>{
+        if(new URL(url).origin!==data.origin)throw Error('External request: '+url);
+        requests.push(String(url));return fetch(url,options);
+      }});
+      const raw=await createWasmTransport(data.bytes);
+      const packages=new BrowserPackages(new BuildCache('mirror-conformance',{indexedDB:null}),{fetch:download});
+      const result=await packages.evaluate(raw,{operation:'document',action:'evaluate',format:'roc',source:data.source});
+      postMessage({result,requests});
+    } catch(error) {postMessage({error:error.stack});}};
+  `;
+  const cases={
+    'ageron/roc-ascii':['Ascii','Ascii.from_str("hello").map_ok(Ascii.to_str) == Ok("hello")'],
+    'ageron/roc-isodate':['Date','Date.from_ymd(2026, 11, 5).add_days(1).to_iso_str() == "2026-11-06"'],
+    'kili-ilo/roc-random':['Random','Random.step(Random.seed(1234), Random.list(Random.bounded_u32(25, 75), 10)).value.len() == 10'],
+    'lukewilliamboswell/roc-parser':['Utf8','Utf8.parse_str(Utf8.digits, "12345") == Ok(12345)'],
+    'lukewilliamboswell/roc-graph-layout':['Geom','Geom.hypot(3, 4) == 5'],
+    'niclas-ahden/roc-base64':['Base64','Base64.encode("hi".to_utf8()) == "aGk="'],
+    'roc-lang/path':['Path','Str.inspect(Path.unix("abc")) == "<opaque>"'],
+    'roc-lang/unicode':['Scalar','Scalar.from_u32(65).is_ok()'],
+  };
+  let failed=false;
+  for(const entry of manifest.packages) {
+    const sample=cases[entry.package];if(!sample)continue; // Other packages have full demo probes.
+    const [name,expression]=sample;
+    const source=`app [] { pkg: "${entry.url}" }\n\nimport pkg.${name}\nout_ok = ${expression}\n`;
+    const blob=URL.createObjectURL(new Blob([workerSource],{type:'text/javascript'}));
+    const worker=new Worker(blob,{type:'module'});
+    try {
+      const response=await new Promise((resolve,reject)=>{
+        worker.onmessage=({data})=>data.error?reject(Error(data.error)):resolve(data);
+        worker.onerror=reject;worker.postMessage({bytes,source,origin:location.origin});
+      });
+      if(response.result.status!=='ok' || response.result.evaluation.values[0]?.text!=='True')throw Error(entry.url+'\n'+JSON.stringify({status:response.result.status,diagnostics:response.result.diagnostics,evaluation:response.result.evaluation}));
+      if(!response.requests.some(url=>url.includes('/archives/')))throw Error('No static package download');
+      log.textContent+=`PASS ${entry.package} ${entry.version}\n`;
+    } catch(error) {failed=true;log.textContent+=error.stack+'\n';}
+    finally {worker.terminate();URL.revokeObjectURL(blob);}
+  }
+  document.documentElement.dataset.result=failed?'fail':'pass';
+} catch(error) {log.textContent+=error.stack;document.documentElement.dataset.result='fail';}
+</script>

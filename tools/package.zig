@@ -1,8 +1,31 @@
 //! Deterministic offline manifests and portable distributions; no package manager.
 const std = @import("std");
+const proxy = @import("package-proxy.zig");
 const cwd = std.Io.Dir.cwd();
 const Asset = struct { path: []const u8, bytes: usize, sha256: []const u8 };
 const File = struct { path: []const u8, data: []const u8 };
+const MirrorPackage = struct { url: []const u8, file: []const u8, bytes: usize, sha256: []const u8, licenseFile: []const u8 };
+fn mirrorFile(path: []const u8, prefix: []const u8) bool {
+    return std.mem.startsWith(u8, path, prefix) and
+        std.mem.eql(u8, std.fs.path.basename(path), path[prefix.len..]) and
+        std.mem.findScalar(u8, path, '\\') == null and
+        !std.mem.eql(u8, path[prefix.len..], ".") and !std.mem.eql(u8, path[prefix.len..], "..");
+}
+fn verifyMirror(gpa: std.mem.Allocator, io: std.Io, root: []const u8, entry: MirrorPackage) !void {
+    if (!mirrorFile(entry.file, "archives/") or !mirrorFile(entry.licenseFile, "licenses/")) return error.InvalidMirrorPath;
+    const data = try read(gpa, io, root, try std.mem.concat(gpa, u8, &.{ "web/vendor/roc-packages/", entry.file }));
+    if (data.len != entry.bytes or !std.mem.eql(u8, try hash(gpa, data), entry.sha256)) return error.ChangedMirrorArchive;
+    if (!std.mem.startsWith(u8, entry.url, "https://github.com/")) return error.InvalidMirrorUrl;
+    var parts = std.mem.splitScalar(u8, entry.url["https://github.com/".len..], '/');
+    const owner = parts.next() orelse return error.InvalidMirrorUrl;
+    const repo = parts.next() orelse return error.InvalidMirrorUrl;
+    if (!std.mem.eql(u8, parts.next() orelse "", "releases") or !std.mem.eql(u8, parts.next() orelse "", "download")) return error.InvalidMirrorUrl;
+    const version = parts.next() orelse return error.InvalidMirrorUrl;
+    const name = parts.next() orelse return error.InvalidMirrorUrl;
+    if (parts.next() != null or !std.mem.eql(u8, name, std.fs.path.basename(entry.file))) return error.InvalidMirrorUrl;
+    const package = try proxy.parse(gpa, try std.fmt.allocPrint(gpa, proxy.prefix ++ "{s}/{s}/{s}/{s}", .{ owner, repo, version, name }));
+    try proxy.verify(data, package.hash);
+}
 fn hash(gpa: std.mem.Allocator, data: []const u8) ![]const u8 {
     var bytes: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(data, &bytes, .{});
@@ -120,6 +143,8 @@ pub fn main(init: std.process.Init) !void {
         "web/package-dialog.mjs",
         "web/package-download.mjs",
         "web/package-config.json",
+        "web/vendor/roc-packages/manifest.json",
+        "web/vendor/roc-packages/README.md",
         "demos/06-meeting-windows.roc",
         "demos/04-plume-charts.roc",
         "demos/05-csv-attachments.roc",
@@ -163,6 +188,16 @@ pub fn main(init: std.process.Init) !void {
     const lock = try std.json.parseFromSliceLeaky(std.json.Value, a, try read(a, io, root, "web/vendor/editor/lock.json"), .{});
     for (lock.object.get("packages").?.array.items) |package| {
         for ([_][]const u8{ "file", "licenseFile" }) |field| try paths.append(a, try std.fmt.allocPrint(a, "web/vendor/editor/{s}", .{package.object.get(field).?.string}));
+    }
+    const mirror = try std.json.parseFromSliceLeaky(struct { schema: u32, packages: []const MirrorPackage }, a, try read(a, io, root, "web/vendor/roc-packages/manifest.json"), .{ .ignore_unknown_fields = true });
+    if (mirror.schema != 1) return error.UnsupportedMirrorSchema;
+    var mirror_paths: std.StringHashMap(void) = .init(a);
+    for (mirror.packages) |entry| {
+        try verifyMirror(a, io, root, entry);
+        for ([_][]const u8{ entry.file, entry.licenseFile }) |relative| {
+            const path = try std.mem.concat(a, u8, &.{ "web/vendor/roc-packages/", relative });
+            if (!(try mirror_paths.getOrPut(path)).found_existing) try paths.append(a, path);
+        }
     }
     var assets: std.ArrayList(Asset) = .empty;
     var files: std.ArrayList(File) = .empty;

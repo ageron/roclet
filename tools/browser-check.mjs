@@ -11,11 +11,15 @@ const root=resolve(import.meta.dirname,'..'),page=option('--page','web/workspace
 const timeout=Number(option('--timeout','120000')),startupTimeout=Number(option('--startup-timeout','60000')),profile=await mkdtemp(resolve(tmpdir(),'roclet-browser-'));
 const networkLog=option('--network-log',null),requests=new Map(),networkFailures=[];
 const packageEndpoint=option('--package-endpoint',null);
+const withoutPackageMirror=args.includes('--without-package-mirror');
 const uploadPlanFile=option('--upload-plan',null),uploads=uploadPlanFile?JSON.parse(await readFile(uploadPlanFile,'utf8')):[];
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const types={'.mjs':'text/javascript','.js':'text/javascript','.wasm':'application/wasm','.html':'text/html; charset=utf-8','.json':'application/json','.css':'text/css','.svg':'image/svg+xml'};
 const server=createServer(async(req,res)=>{
   try {
+    if(withoutPackageMirror && new URL(req.url,'http://localhost').pathname==='/web/vendor/roc-packages/manifest.json') {
+      res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({schema:1,packages:[]}));return;
+    }
     if(packageEndpoint && new URL(req.url,'http://localhost').pathname==='/web/package-config.json') {
       res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({endpoint:packageEndpoint}));return;
     }

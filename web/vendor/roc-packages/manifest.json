@@ -1,0 +1,171 @@
+{
+  "schema": 1,
+  "packages": [
+    {
+      "package": "ageron/roc-ascii",
+      "version": "v0.5.1",
+      "url": "https://github.com/ageron/roc-ascii/releases/download/v0.5.1/3mkSijmaYYGXbT6EvDAXyV4Y9YzYncztbWNDfRSr3z3f.tar.zst",
+      "file": "archives/3mkSijmaYYGXbT6EvDAXyV4Y9YzYncztbWNDfRSr3z3f.tar.zst",
+      "bytes": 4854,
+      "sha256": "49efdcb075058053f9782319877e4ca9c3d036c784218ad40fa349c9f70c6621",
+      "licenseFile": "licenses/ageron-roc-ascii-v0.5.1.txt",
+      "dependencies": []
+    },
+    {
+      "package": "ageron/roc-isodate",
+      "version": "v0.8.4",
+      "url": "https://github.com/ageron/roc-isodate/releases/download/v0.8.4/8nYCkCKi8sCi2poruWpkdqTp7W4jnEpKHRK84xKUrmJo.tar.zst",
+      "file": "archives/8nYCkCKi8sCi2poruWpkdqTp7W4jnEpKHRK84xKUrmJo.tar.zst",
+      "bytes": 17953,
+      "sha256": "02157434d8e2577af1835fba6faf462a8a6f0b70effc62e75c5529d16c32a07f",
+      "licenseFile": "licenses/ageron-roc-isodate-v0.8.4.txt",
+      "dependencies": []
+    },
+    {
+      "package": "ageron/roclet-display",
+      "version": "0.4.0",
+      "url": "https://github.com/ageron/roclet-display/releases/download/0.4.0/Gv78dUSQfYRU2yvV9HuS5oHYdMfik84S4sgsej6mbjLd.tar.zst",
+      "file": "archives/Gv78dUSQfYRU2yvV9HuS5oHYdMfik84S4sgsej6mbjLd.tar.zst",
+      "bytes": 2005,
+      "sha256": "243b4762025eb02911b7de90953885aed7b222552d1ba2e5168b6dbb0e53d264",
+      "licenseFile": "licenses/ageron-roclet-display-0.4.0.txt",
+      "dependencies": []
+    },
+    {
+      "package": "kili-ilo/roc-random",
+      "version": "0.9.2",
+      "url": "https://github.com/kili-ilo/roc-random/releases/download/0.9.2/2ZXLX8WRqrosGu1V3VL5aXqgtfTRvJmjFPx8a26ecVmc.tar.zst",
+      "file": "archives/2ZXLX8WRqrosGu1V3VL5aXqgtfTRvJmjFPx8a26ecVmc.tar.zst",
+      "bytes": 13079,
+      "sha256": "225c84a63952bce6984f535a0612b892564bfda302073a970cdd2b163acc72ca",
+      "licenseFile": "licenses/kili-ilo-roc-random-0.9.2.txt",
+      "dependencies": []
+    },
+    {
+      "package": "kili-ilo/roc-random",
+      "version": "0.9.3",
+      "url": "https://github.com/kili-ilo/roc-random/releases/download/0.9.3/HoULZB8QzktiNPYSe9myzy9JQzm1nMbjDPVWoA63QpVf.tar.zst",
+      "file": "archives/HoULZB8QzktiNPYSe9myzy9JQzm1nMbjDPVWoA63QpVf.tar.zst",
+      "bytes": 13082,
+      "sha256": "a799f0a7f0535c2edf115c3284e9398a22b2d763d48334f2727dbd003356a92c",
+      "licenseFile": "licenses/kili-ilo-roc-random-0.9.3.txt",
+      "dependencies": []
+    },
+    {
+      "package": "lukewilliamboswell/plume",
+      "version": "0.5.0",
+      "url": "https://github.com/lukewilliamboswell/plume/releases/download/0.5.0/UstpTQVssohnU8U6Q5WpwfGxKuYZF8uWzjddwKMbTcp.tar.zst",
+      "file": "archives/UstpTQVssohnU8U6Q5WpwfGxKuYZF8uWzjddwKMbTcp.tar.zst",
+      "bytes": 23455,
+      "sha256": "fa5fd52adbed8848a54a7df701f1dcc430bce7e679cff09c3189ac5ecab92475",
+      "licenseFile": "licenses/lukewilliamboswell-plume-0.5.0.txt",
+      "dependencies": []
+    },
+    {
+      "package": "lukewilliamboswell/roc-graph-layout",
+      "version": "0.2.0",
+      "url": "https://github.com/lukewilliamboswell/roc-graph-layout/releases/download/0.2.0/7xtfva8cSwNKfzonPwh2nLurdwkcYLwbTD6iAKkMhjNs.tar.zst",
+      "file": "archives/7xtfva8cSwNKfzonPwh2nLurdwkcYLwbTD6iAKkMhjNs.tar.zst",
+      "bytes": 176851,
+      "sha256": "ab29fe7fe32e666fe9c4c4f118e246f1f8693148520ba53db487733de602c8c3",
+      "licenseFile": "licenses/lukewilliamboswell-roc-graph-layout-0.2.0.txt",
+      "dependencies": []
+    },
+    {
+      "package": "lukewilliamboswell/roc-parser",
+      "version": "2.0.0",
+      "url": "https://github.com/lukewilliamboswell/roc-parser/releases/download/2.0.0/7CLzCK6qUz7zmj6nvBxMEFu11HPwQTnCovKiyWzDSLTW.tar.zst",
+      "file": "archives/7CLzCK6qUz7zmj6nvBxMEFu11HPwQTnCovKiyWzDSLTW.tar.zst",
+      "bytes": 137079,
+      "sha256": "97062170c16e8dc86a2d26dd53382740637c42682405850e9b514f19f491c846",
+      "licenseFile": "licenses/lukewilliamboswell-roc-parser-2.0.0.txt",
+      "dependencies": [
+        "https://github.com/roc-lang/unicode/releases/download/4.2.0/4W8SHzvwet9hH9qZewJ1J1CVQoH7YKA6zyijWFTB3y1w.tar.zst"
+      ]
+    },
+    {
+      "package": "lukewilliamboswell/roc-parser",
+      "version": "3.0.0",
+      "url": "https://github.com/lukewilliamboswell/roc-parser/releases/download/3.0.0/6xsRdRqenJrAb4wG7HaST4Xh349vD5sHAJDsKTK6E3dr.tar.zst",
+      "file": "archives/6xsRdRqenJrAb4wG7HaST4Xh349vD5sHAJDsKTK6E3dr.tar.zst",
+      "bytes": 381752,
+      "sha256": "fe2e3431e67e5fa35fbae0c16010c27ddb28dd4cdbcc0f42d7ca1f7e855b568e",
+      "licenseFile": "licenses/lukewilliamboswell-roc-parser-3.0.0.txt",
+      "dependencies": [
+        "https://github.com/roc-lang/unicode/releases/download/4.3.0/7HGaK8HUHMs5judroSmUoS4TjPGZ1kAjPTyPDSCWiSKM.tar.zst"
+      ]
+    },
+    {
+      "package": "lukewilliamboswell/roc-parser",
+      "version": "4.0.0",
+      "url": "https://github.com/lukewilliamboswell/roc-parser/releases/download/4.0.0/FZVf39nPJLaMEmchcwTU5rWtMrcipBGbGsTk3nHzvjzk.tar.zst",
+      "file": "archives/FZVf39nPJLaMEmchcwTU5rWtMrcipBGbGsTk3nHzvjzk.tar.zst",
+      "bytes": 385932,
+      "sha256": "2b6878916bf98da19dd9e1e1108f31c43e2599044634faaa246d164a8cf870ea",
+      "licenseFile": "licenses/lukewilliamboswell-roc-parser-4.0.0.txt",
+      "dependencies": [
+        "https://github.com/roc-lang/unicode/releases/download/4.3.0/7HGaK8HUHMs5judroSmUoS4TjPGZ1kAjPTyPDSCWiSKM.tar.zst"
+      ]
+    },
+    {
+      "package": "lukewilliamboswell/roc-time",
+      "version": "0.2.0",
+      "url": "https://github.com/lukewilliamboswell/roc-time/releases/download/0.2.0/roc-time-7QH5VBiCwDLu3UkizpgB3FESJitahxR82Vgg2bWkJvHL.tar.zst",
+      "file": "archives/roc-time-7QH5VBiCwDLu3UkizpgB3FESJitahxR82Vgg2bWkJvHL.tar.zst",
+      "bytes": 172096,
+      "sha256": "a4ac07c63f05024f92b232c8d63a618b7f6218259d8cb85827a6f2a6fef2f6b9",
+      "licenseFile": "licenses/lukewilliamboswell-roc-time-0.2.0.txt",
+      "dependencies": []
+    },
+    {
+      "package": "niclas-ahden/roc-base64",
+      "version": "1.0.2",
+      "url": "https://github.com/niclas-ahden/roc-base64/releases/download/1.0.2/DQBxATK6BtaCWe56bCmkMgdKJR2Ym8NiZZLhYCAgtLac.tar.zst",
+      "file": "archives/DQBxATK6BtaCWe56bCmkMgdKJR2Ym8NiZZLhYCAgtLac.tar.zst",
+      "bytes": 3187,
+      "sha256": "0dcb407045ff43903a8c14b7da01f962d664461515f77a8aa59f628e1528b670",
+      "licenseFile": "licenses/niclas-ahden-roc-base64-1.0.2.txt",
+      "dependencies": []
+    },
+    {
+      "package": "roc-lang/path",
+      "version": "4.0.0",
+      "url": "https://github.com/roc-lang/path/releases/download/4.0.0/7YfABZPwJAXtLBY2vm8FqMyGAtNxncCJ65HdNKHFGNnE.tar.zst",
+      "file": "archives/7YfABZPwJAXtLBY2vm8FqMyGAtNxncCJ65HdNKHFGNnE.tar.zst",
+      "bytes": 3789,
+      "sha256": "435499c7ffb4f357d2956e3bb2802a81264f6f2f50c896c9913fb86f7bc752bb",
+      "licenseFile": "licenses/roc-lang-path-4.0.0.txt",
+      "dependencies": []
+    },
+    {
+      "package": "roc-lang/unicode",
+      "version": "4.2.0",
+      "url": "https://github.com/roc-lang/unicode/releases/download/4.2.0/4W8SHzvwet9hH9qZewJ1J1CVQoH7YKA6zyijWFTB3y1w.tar.zst",
+      "file": "archives/4W8SHzvwet9hH9qZewJ1J1CVQoH7YKA6zyijWFTB3y1w.tar.zst",
+      "bytes": 228019,
+      "sha256": "dfd0524fb84363d18fd5c77acb68fa1eb7ac185bd781db9c2b1eda813cae3a29",
+      "licenseFile": "licenses/roc-lang-unicode-4.2.0.txt",
+      "dependencies": []
+    },
+    {
+      "package": "roc-lang/unicode",
+      "version": "4.3.0",
+      "url": "https://github.com/roc-lang/unicode/releases/download/4.3.0/7HGaK8HUHMs5judroSmUoS4TjPGZ1kAjPTyPDSCWiSKM.tar.zst",
+      "file": "archives/7HGaK8HUHMs5judroSmUoS4TjPGZ1kAjPTyPDSCWiSKM.tar.zst",
+      "bytes": 227850,
+      "sha256": "d33a566c0c5b6bfb2c294500580b27d3a29e9015c013ce59e3c7828727160b81",
+      "licenseFile": "licenses/roc-lang-unicode-4.3.0.txt",
+      "dependencies": []
+    },
+    {
+      "package": "roc-lang/unicode",
+      "version": "4.3.1",
+      "url": "https://github.com/roc-lang/unicode/releases/download/4.3.1/BNmth7q83JT3Pc2neutkWibVwFwNNNBLhhKfZhmDREeL.tar.zst",
+      "file": "archives/BNmth7q83JT3Pc2neutkWibVwFwNNNBLhhKfZhmDREeL.tar.zst",
+      "bytes": 227831,
+      "sha256": "119846d77be7e87cff22396219a8d060833c4ee2c3b7e54ba94dc2fb7a37d168",
+      "licenseFile": "licenses/roc-lang-unicode-4.3.1.txt",
+      "dependencies": []
+    }
+  ]
+}

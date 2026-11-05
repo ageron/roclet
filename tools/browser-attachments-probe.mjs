@@ -1,6 +1,6 @@
 // Real editor integration. Run with browser-check.mjs on web/edit.html?new=1.
-// ?parser-demo=1 additionally uses unchanged release archives mirrored under
-// artifacts/browser-packages to verify the published roc-parser CSV example.
+// ?parser-demo=1 additionally verifies the published roc-parser CSV example
+// through the production static package mirror.
 (async()=>{
   const $=id=>document.getElementById(id),pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const assert=(value,message)=>{if(!value)throw Error(message);};
@@ -139,7 +139,8 @@
     const [{createWasmTransport},{BuildCache,compilerNamespace},{BrowserPackages}]=await Promise.all([import('/compiler-adapter/wasm.mjs'),import('/web/build-cache.mjs'),import('/web/packages.mjs')]);
     const bytes=await fetch('/artifacts/roclet.wasm').then(response=>response.arrayBuffer()),raw=await createWasmTransport(bytes);
     const ns=await compilerNamespace(bytes,raw.cacheIdentity());
-    const packages=new BrowserPackages(new BuildCache(ns+':packages'),{fetch:url=>fetch('/artifacts/browser-packages/'+new URL(url).pathname.split('/').at(-1))});
+    const {configuredPackageFetch}=await import('/web/package-download.mjs');
+    const packages=new BrowserPackages(new BuildCache(ns+':packages'),{fetch:await configuredPackageFetch()});
     const packageSource=await fetch('/fixtures/documents/roc-parser-package.roc').then(response=>response.text());
     const primed=await packages.evaluate(raw,{operation:'document',action:'evaluate',format:'roc',source:packageSource});
     assert(primed.status==='ok',JSON.stringify(primed));

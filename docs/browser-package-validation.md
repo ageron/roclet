@@ -1,5 +1,28 @@
 # Real browser package validation
 
+## Static production mirror
+
+The current website includes `web/vendor/roc-packages/manifest.json`, pinned
+unchanged archives, and their licenses. The production downloader tries exact
+mirror matches before the configured proxy or original host; a failed mirror
+request falls through to the existing transport and manual-loading fallback.
+All bundled demos and their transitive dependencies are mirrored. See the
+[collection and maintenance instructions](../web/vendor/roc-packages/README.md).
+
+`python3 tools/mirror-packages.py --check` verifies archive checksums, dependency
+closure, and demo coverage without network access. Packaging additionally checks
+the original Roc BLAKE3 hashes and includes the files in both the site ZIP and
+verified offline manifest. `web/package-mirror-conformance.html` exercises the
+additional libraries in fresh WASM workers through the production downloader,
+rejecting external package requests. The standard Chrome suites also exercise
+the CSV, Plume and meeting-scheduler demos without a proxy or manual uploads.
+
+The following sections record the earlier direct-download and proxy validation;
+their manually supplied test archives predate the production mirror.
+Use `--without-package-mirror` with `tools/browser-check.mjs` when specifically
+testing the proxy or manual-upload fallback; otherwise mirrored packages succeed
+before those transports are reached.
+
 Tested on 2026-10-20 (Australia/Melbourne) with Chrome 153.0.8010.52. The Roc
 compiler pin is `7894793d1454103d47c4368c942b3fec1406e8fd`.
 
