@@ -2,6 +2,7 @@ import {loadGist} from './gist.mjs';
 import {serverProject,serverProjectReady} from './server-project.mjs';
 import { localFiles } from './local-files.mjs';
 import { AttachmentDialog } from './attachment-dialog.mjs';
+import { SnippetDialog } from './snippet-dialog.mjs';
 import { bundleLimit } from './attachments.mjs';
 import { prepareOffline, offlineStatus, storageStatus } from './offline.mjs';
 import { captureExport, exportBundle, importBundle, exportReport, exportSite, download, downloadName } from './sharing.mjs';
@@ -175,6 +176,14 @@ function closePanel(slot) {
   void target.perform(() => bench.close(slot));
 }
 function bind() {
+  const snippetDialog=new SnippetDialog();
+  $('insert-code').onclick=()=>active().insertCell('code');
+  $('insert-markdown').onclick=()=>active().insertCell('markdown');
+  for(const button of document.querySelectorAll('[data-insert-category]'))button.onclick=()=>{const target=active();void target.perform(()=>snippetDialog.open(target,button.dataset.insertCategory));};
+  $('workbench').addEventListener('insert-snippet',event=>{
+    const target=bench.panels.find(panel=>panel.root===event.target);
+    if(target)void target.perform(()=>snippetDialog.open(target,'all',event.detail.position));
+  });
   const attachmentDialog=new AttachmentDialog();
   $('attachments').onclick=()=>{closeMenus();void active().perform(()=>attachmentDialog.open(active()));};
   const perform = work => active().perform(work);

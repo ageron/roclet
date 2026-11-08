@@ -118,6 +118,8 @@ pub fn main(init: std.process.Init) !void {
 
         "web/attachments.mjs",
         "web/attachment-dialog.mjs",
+        "web/snippets.mjs",
+        "web/snippet-dialog.mjs",
         "web/notebook-panel.mjs",
         "web/workbench.mjs",
         "web/edit-model.mjs",

@@ -179,6 +179,24 @@ dialog { background:var(--page); }
 #attachment-status[data-error=true] { color:var(--error); }
 .attachment-footnote { font-size:.8rem; border-top:1px solid var(--line); padding-top:1rem; margin-bottom:0; }
 @media(max-width:680px) { .attachment-layout { grid-template-columns:minmax(0,1fr); gap:1rem; } #attachment-list { max-height:140px; } .attachment-path-row { flex-wrap:wrap; } .attachment-path-row input,.attachment-path-row textarea { flex-basis:65%; } .attachment-code .attachment-path-row { display:block; } #attachment-import { min-height:5em; } #attachment-copy { margin-top:.4rem; } }
+#snippet-dialog { width:min(840px,calc(100vw - 2rem)); max-width:840px; }
+#snippet-dialog[open] { display:flex; flex-direction:column; overflow:hidden; }
+#snippet-dialog h2 { margin:0; font-size:1.3rem; } #snippet-dialog > p { flex-shrink:0; }
+.snippet-filters { display:flex; gap:.6rem; margin:1rem 0; }
+.snippet-filters input { flex:1; min-width:0; } .snippet-filters input,.snippet-filters select { padding:.6rem; border:1px solid var(--line); border-radius:6px; background:var(--surface); color:var(--text); font:inherit; }
+.snippet-layout { display:grid; grid-template-columns:180px minmax(0,1fr); gap:1.2rem; min-height:0; overflow:auto; }
+.snippet-list { max-height:440px; overflow:auto; display:flex; flex-direction:column; gap:.25rem; }
+.snippet-list button { display:flex; flex-direction:column; gap:.2rem; text-align:left; padding:.65rem; border:1px solid transparent; }
+.snippet-list button[aria-pressed=true] { background:var(--selected); border-color:var(--selection-border); }
+.snippet-list strong { font-size:.85rem; font-weight:550; } .snippet-list small { color:var(--muted); font-size:.75rem; }
+.snippet-detail { min-width:0; } .snippet-detail h3 { margin-top:0; } .snippet-detail p { line-height:1.5; }
+.snippet-preview { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:.75rem; min-height:100px; }
+.snippet-preview .rich-output { margin:0; } .snippet-preview .display-html { height:130px!important; } .snippet-preview .display-plotly { height:220px!important; }
+.snippet-detail pre { font:12px/1.6 ui-monospace,monospace; white-space:pre-wrap; overflow-wrap:anywhere; max-height:220px; overflow:auto; }
+.snippet-detail details { margin-top:1rem; } .snippet-detail summary { cursor:pointer; }
+.snippet-muted { color:var(--muted); font-size:.8rem; } .snippet-actions { display:flex; gap:.6rem; justify-content:flex-end; margin-top:1rem; flex-shrink:0; }
+[data-snippet=status] { color:var(--error); font-size:.85rem; } [data-snippet=insert] { background:var(--accent); color:white; }
+@media(max-width:600px) { .snippet-layout { grid-template-columns:minmax(0,1fr); } .snippet-list { max-height:155px; } .snippet-filters { flex-wrap:wrap; } .snippet-filters input { flex-basis:100%; } }
 </style>
 </head>
 <body>
@@ -212,6 +230,12 @@ dialog { background:var(--page); }
     <button id="undo" disabled>Undo <kbd>⌘ / Ctrl Z</kbd></button><button id="redo" disabled>Redo <kbd>⇧ ⌘ / Ctrl Z</kbd></button>
     <div class="menu-divider"></div><button id="find">Find &amp; replace <kbd>⌘ / Ctrl F</kbd></button>
   </div></details>
+  <details class="popover" id="insert-menu"><summary aria-label="Insert menu">Insert</summary><div class="menu-panel"><p class="menu-target" hidden></p>
+    <button id="insert-code">Code cell</button><button id="insert-markdown">Markdown cell</button>
+    <div class="menu-divider" role="separator"></div>
+    <button data-insert-category="widgets">Widget…</button><button data-insert-category="charts">Chart…</button>
+    <button data-insert-category="outputs">Rich output…</button><button data-insert-category="code">Code snippet…</button>
+  </div></details>
   <details class="popover" id="view-menu"><summary aria-label="View menu">View</summary><div class="menu-panel"><p class="menu-target" hidden></p>
     <button id="notebook-view" aria-pressed="true">Notebook view</button><button id="source-view" aria-pressed="false">Source view</button>
     <button id="preview">View runnable Roc</button>
@@ -228,6 +252,16 @@ dialog { background:var(--page); }
 <div class="panel-tabs" id="panel-tabs" role="tablist" aria-label="Open notebooks" hidden></div>
 <main class="workbench" id="workbench" data-panels="1" data-layout="single"></main>
 </div>
+<dialog id="snippet-dialog" aria-labelledby="snippet-dialog-title">
+  <h2 id="snippet-dialog-title">Insert</h2><p class="snippet-muted" data-snippet="target"></p>
+  <div class="snippet-filters"><input data-snippet="search" type="search" aria-label="Search snippets" placeholder="Search widgets, charts, snippets…"><select data-snippet="category" aria-label="Snippet category"></select></div>
+  <div class="snippet-layout"><div><div class="snippet-list" data-snippet="list" role="group" aria-label="Snippets"></div><p data-snippet="empty" hidden>No matches. Try another search or category.</p></div>
+    <section class="snippet-detail" data-snippet="detail" aria-label="Snippet preview"><h3 data-snippet="title"></h3><p data-snippet="description"></p><div class="snippet-preview" data-snippet="preview"></div>
+      <details><summary>Roc code</summary><pre data-snippet="code"></pre></details><p class="snippet-muted" data-snippet="dependencies"></p>
+    </section>
+  </div><p data-snippet="status" role="status"></p>
+  <div class="snippet-actions"><button data-close>Cancel</button><button data-snippet="insert">Insert</button></div>
+</dialog>
 <template id="notebook-panel-template"><section class="notebook-panel" data-panel="left" aria-label="Notebook" data-loading="true" inert><div class="panel-loading" data-part="panel-loading" role="status"><span class="startup-spinner" aria-hidden="true"></span><span>Opening notebook…</span></div><div class="panel-scroll" data-part="panel-scroll">
   <div class="panel-title" data-part="title-bar">
   <label class="sr-only" data-part="title-label" data-for="title">Document title</label><input data-part="title" class="title-input" maxlength="120">

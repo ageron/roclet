@@ -20,6 +20,8 @@ const suites=[
   ['Rich outputs','m5-conformance'],
   ['Plotly charts','plotly-conformance'],
   ['Responsive controls','edit?new=1','browser-responsive-scenario.mjs'],
+  ['Insert picker','edit?new=1','browser-snippets-scenario.mjs'],
+  ['Insert picker, mobile','edit?new=1','browser-snippets-scenario.mjs','390x960'],
   ['Math','math-conformance'],
   ['Workspace and packages','workspace-conformance'],
   ['Static package mirror','package-mirror-conformance',null,null,300000],

@@ -48,6 +48,12 @@ package downloads start only then. **File → Open recent…** lists the drafts 
 this browser; **Help → Keyboard shortcuts** (or **?** with a cell selected)
 lists the keys.
 
+Choose **Insert → Widget, Chart, Rich output, or Code snippet** for searchable,
+ready-to-edit examples with output previews. **+ Insert…** between cells opens
+the same picker at that position. Inserting an example adds its packages and
+imports automatically; one Undo removes the whole insertion. Random examples
+use an explicit seed so results stay repeatable as the notebook recomputes.
+
 To work with two notebooks at once, choose **View → Open side by side…**. Each
 notebook gets its own column and its own compiler, so running or stopping one
 never disturbs the other; menu commands act on the notebook you last clicked,

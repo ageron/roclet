@@ -5,6 +5,7 @@ import { symbolAt, completionOptions, isVisibleDiagnostic } from './compiler-too
 import { renderMarkdown } from './markdown-view.mjs';
 import { settleMathStyles } from './math-view.mjs';
 import { renderDisplay } from './display-view.mjs';
+import { prepareSnippet } from './snippets.mjs';
 import { engineDetails, engineStats } from './workbench.mjs';
 import { CellSelection, insertionIndex, commentFinalExpression, cellMime, encodeCells, decodeCells, checkInsertion } from './edit-cells.mjs';
 
@@ -312,6 +313,7 @@ export class NotebookPanel {
     function insertion(position) {
       const rail = document.createElement('div'); rail.className = 'insertion';
       for (const [kind, label] of [['code','+ Code'],['markdown','+ Markdown']]) rail.append(button(label, () => insertCells(position, [makeCell(kind)], true), `Insert ${kind} cell ${position ? `after cell ${position}` : 'at start'}`));
+      rail.append(button('+ Insert…', () => root.dispatchEvent(new CustomEvent('insert-snippet', {bubbles:true,detail:{position}})), `Insert widget, chart or snippet ${position ? `after cell ${position}` : 'at start'}`));
       return rail;
     }
     async function runCell(key, advance = false, insert = false) {
@@ -698,6 +700,20 @@ export class NotebookPanel {
     this.render = reflect;
     this.focusSelection = () => { if (notebook.state.mode === 'notebook') focusCell(selection.focus); else sourceEditor.focus(); };
     this.editSelection = () => editCell(selection.focus);
+    this.prepareInsertion = async () => {
+      notebook.finishEditing();
+      await notebook.mode('notebook');
+      if (notebook.state.mode !== 'notebook') throw Error('Resolve the source errors before inserting a cell.');
+    };
+    this.insertionPosition = () => Math.max(0,selection.keys.indexOf(selection.selected.at(-1)) + 1);
+    this.insertCell = kind => perform(async () => { await this.prepareInsertion(); closeMenus(); insertAtSelection(true,kind); });
+    this.insertSnippet = (snippet,urls,position) => {
+      const recipe=prepareSnippet(notebook.state,snippet,urls), cell=makeCell('code',recipe.source);
+      checkInsertion(notebook.state.cells,[cell]);
+      notebook.change(s=>{ s.preamble=recipe.preamble;s.cells.splice(insertionIndex(s.cells,position),0,cell); });
+      selectionActive=true;editCell(cell.key);
+      if(recipe.selection)cards.get(cell.key)?.editor.selectMatch(recipe.selection.anchor,recipe.selection.head);
+    };
     this.find = findNotebook;
     this.undo = redo => { notebook.undo(redo); this.focusSelection(); };
     this.setMode = mode => perform(async () => {
